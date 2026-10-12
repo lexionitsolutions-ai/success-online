@@ -116,3 +116,25 @@ test('cloud upload transfers file bytes directly and retries only finalization',
   assert.equal(run('authorizations'),1);
   assert.equal(run('finalizations'),2);
 });
+
+test('admin overview skips unrelated analytics requests and loads them on the requested tab', async () => {
+  const {run}=client();
+  run("me={role:'admin'}; const requested=[];api=async path=>{requested.push(path);return {};};view='dashboard';");
+  await run('loadViewData()');
+  assert.equal(run('requested.length'),0);
+  run("view='employees'");await run('loadViewData()');
+  assert.equal(run('requested.length'),1);
+  assert.ok(run('requested[0]').startsWith('/api/admin/employees?'));
+  run("view='admin'");await run('loadViewData()');
+  assert.equal(run('requested.length'),4);
+});
+
+test('sign-out clears admin caches and returns to the overview', async () => {
+  const {run}=client();
+  run("me={role:'admin'};view='admin';adminAnalytics={private:'cached'};employeeData={private:'cached'};api=async()=>({});renderLogin=()=>{};");
+  await run('logout()');
+  assert.equal(run('me'),null);
+  assert.equal(run('view'),'dashboard');
+  assert.equal(run('adminAnalytics'),null);
+  assert.equal(run('employeeData'),null);
+});

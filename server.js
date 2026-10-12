@@ -296,7 +296,7 @@ async function syncCaseToGoogle(caseId) {
 let sheetsSyncChain = Promise.resolve();
 async function queueSheetsSync(caseId) {
   (await run(`INSERT INTO sync_jobs VALUES ($id,'sheets',$entity,'pending',0,NULL,$n,$n) ON CONFLICT(type, entity_id) DO UPDATE SET status='pending', updated_at=$n`, { $id: id('sync'), $entity: caseId, $n: now() }));
-  if(process.env.GOOGLE_RECONNECT_REQUIRED==='1') {
+  if(process.env.GOOGLE_RECONNECT_REQUIRED==='1' && storageEnabled()) {
     await run("UPDATE sync_jobs SET status='failed',attempts=attempts+1,last_error='GOOGLE_RECONNECT_REQUIRED',updated_at=$n WHERE type='sheets' AND entity_id=$entity",{$entity:caseId,$n:now()});
     return;
   }
@@ -743,7 +743,7 @@ async function routeApi(req, res, url) {
       let googleSyncError;
       if (process.env.DRIVE_MODE === 'live') {
         try {
-          if(process.env.GOOGLE_RECONNECT_REQUIRED==='1') throw Object.assign(new Error('Google reconnection is required'),{code:'GOOGLE_RECONNECT_REQUIRED'});
+          if(process.env.GOOGLE_RECONNECT_REQUIRED==='1' && storageEnabled()) throw Object.assign(new Error('Google reconnection is required'),{status:409,code:'GOOGLE_RECONNECT_REQUIRED'});
           const folders = await driveFoldersForCase(c, customer, service);
           const uploaded = await uploadDriveFile(safeName, b.mimeType, folders.caseFolderId, content);
           storage = `gdrive://${uploaded.id}`;
