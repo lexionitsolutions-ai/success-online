@@ -1,0 +1,161 @@
+# Supabase + Vercel setup
+
+The website and API run on Vercel. Supabase PostgreSQL stores employee accounts,
+customers, cases, payments, audit records, upload authorizations and settings.
+Supabase Storage holds private documents and temporary download ZIPs. Google Drive
+can remain enabled as a document mirror; Google Sheets remains a reporting mirror.
+Staff sign in through the application's existing accounts, not Supabase Auth.
+
+## 1. Create the Supabase project
+
+Create a project in your Supabase dashboard, choose a region close to your users,
+and save its database password privately. Wait for provisioning to finish.
+
+From **Connect**, copy the **Transaction pooler** PostgreSQL URI, using port 6543.
+Replace its password placeholder with your database password. URL-encode special
+characters in that password. Do not use the public project URL as DATABASE_URL.
+
+From project settings, copy the project URL and a **server secret API key**
+(`sb_secret_...`, or a legacy `service_role` key). Never place this key in browser
+code, a NEXT_PUBLIC variable, a screenshot or a Git commit.
+
+Official reference: https://supabase.com/docs/guides/database/connecting-to-postgres
+
+## 2. Configure private local environment variables
+
+Copy `.env.example` to `.env`. Keep the existing Google settings if you need them.
+Set:
+
+```dotenv
+DATABASE_URL=postgresql://postgres.PROJECT_REF:URL_ENCODED_PASSWORD@YOUR_POOLER_HOST:6543/postgres
+SUPABASE_URL=https://PROJECT_REF.supabase.co
+SUPABASE_SECRET_KEY=YOUR_SERVER_SECRET_KEY
+SUPABASE_STORAGE_BUCKET=case-documents
+SUPABASE_DOWNLOAD_BUCKET=case-downloads
+INITIAL_ADMIN_USERNAME=owner
+INITIAL_ADMIN_PASSWORD=YOUR_UNIQUE_PASSWORD_AT_LEAST_12_CHARACTERS
+INITIAL_ADMIN_NAME=Administrator
+SESSION_SECRET=YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
+PAYMENT_MODE=demo
+DRIVE_MODE=demo
+SHEETS_MODE=demo
+```
+
+The app verifies TLS for PostgreSQL connections. Use the pooler hostname exactly
+as shown in Supabase's Connect dialog. Do not disable SSL in production.
+
+## 3. Initialize a fresh database
+
+From the project folder, run:
+
+```powershell
+npm.cmd ci
+npm.cmd run setup:supabase
+```
+
+The command creates the schema, indexes, 15-service catalog, your initial
+administrator, and two private Storage buckets. It can be rerun without deleting
+application records. If users already exist, it does not reset their passwords.
+The initial password must be at least 12 characters. Create sales and back-office
+accounts from the admin Employees tab after deployment.
+
+Row Level Security is enabled on every application table. Browser `anon` and
+Supabase `authenticated` roles have no table access. The backend connects with
+the privileged PostgreSQL pooler connection, validates the staff session and
+applies the application's role checks. Do not add public RLS policies.
+
+The document bucket is limited to 10 MB PDF/JPG/PNG files. The separate download
+bucket supports generated ZIPs. Uploads use short-lived signed authorizations;
+the backend validates the stored bytes before completing a document record.
+Downloads pass the application's access checks and redirect to a signed URL
+valid for two minutes. The server key never goes to the browser.
+
+## 4. Optional: preserve the existing SQLite data
+
+Skip this section if you want to start with an empty customer/case database.
+
+Use a new Supabase project with empty application tables. Before importing, create
+the two **private** Storage buckets in the Supabase dashboard with the names and
+limits above. Set `SQLITE_IMPORT_PATH` to the SQLite file to preserve. Keep the
+local documents in their existing paths. Set the initial administrator variables.
+Then run:
+
+```powershell
+npm.cmd run import:supabase
+npm.cmd run setup:supabase
+```
+
+The importer creates the SQL schema, copies records, uploads local document bytes
+to private Storage, preserves Drive document references, and initializes case
+number counters. It refuses to overwrite nonempty application tables. Record
+imports are transactional; if an import fails after files were uploaded, those
+unreferenced Storage objects may need cleanup before retrying.
+
+Accounts still using the published demo password are disabled. The configured
+administrator is created or updated with your chosen password. Google secrets
+are not copied from the old settings table; configure them through environment
+variables and reconnect Google after hosting. Back up SQLite and local documents
+before starting, and keep that backup until hosted verification is complete.
+
+## 5. Deploy the GitHub repository on Vercel
+
+1. Import `lexionitsolutions-ai/success-online` into Vercel.
+2. Use **Other** as the framework, **Node.js 24**, build command `npm run build`,
+   and output directory `public`. The committed `vercel.json` routes `/api/*` to
+   the Node API. Do not run the legacy `configure-vercel.js` proxy generator for
+   this setup.
+3. In Vercel **Settings → Environment Variables**, add DATABASE_URL, SUPABASE_URL,
+   SUPABASE_SECRET_KEY, both bucket names, SESSION_SECRET, PAYMENT_MODE,
+   DRIVE_MODE and SHEETS_MODE. Put them in the Production environment. Do not
+   expose database credentials to the frontend.
+4. Set `APP_ORIGIN` to the exact production website URL, including `https://` and
+   no trailing slash. If needed, deploy once to get the URL, add APP_ORIGIN, then
+   redeploy. Do not point Preview deployments at production data; use a separate
+   test Supabase project for previews.
+5. Deploy/redeploy. Initial admin credentials are only needed for the local setup
+   command and do not need to be added to Vercel.
+6. Open `/api/health`, then sign in with your configured administrator.
+
+The build runs isolated SQLite and PostgreSQL tests; it does not connect to or
+initialize the production database. Runtime initialization reads existing settings
+and does not seed demo accounts or rewrite the production service catalog.
+
+## 6. Connect Google services if required
+
+On Vercel configure GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET,
+GOOGLE_ROOT_FOLDER_ID and GOOGLE_OPERATIONS_SPREADSHEET_ID privately. Add
+`https://YOUR_SITE/api/google/oauth/callback` as an authorized redirect URI in
+Google Cloud. Use Business analytics to connect Drive, then the existing Sheets
+activation endpoint/setup flow to activate Sheets. The backend saves refreshed
+OAuth settings in PostgreSQL and reloads them on subsequent requests.
+
+Copy `google-apps-script/Code.gs` into Apps Script and run
+`setupSuccessOnlineWorkbook` if setting up the report workbook manually.
+Supabase works without Google integration: documents remain private in Storage.
+
+## 7. Hosted acceptance checks
+
+- Create one sales and one back-office employee and test each login.
+- Create a synthetic case, upload all required documents, and check the loaders.
+- Test a file larger than 4.5 MB: file bytes go directly to Storage, not through
+  a Vercel Function request body.
+- Test a failed upload and retry; required documents and pending uploads gate
+  payment/progression. Finalization retries do not duplicate documents.
+- Check that another sales employee cannot read or download the case.
+- Download an individual file and all files as a ZIP to a chosen save location.
+- Complete the back-office flow, upload the received document, and submit it.
+- Review employee performance over preset and custom periods.
+- Redeploy Vercel and verify that employee accounts, cases and documents persist.
+
+Payments remain simulated until a real payment gateway adapter is implemented.
+
+## Maintenance
+
+Run `npm.cmd run cleanup:storage` from a trusted environment with the server-only
+variables to remove expired staging uploads and download bundles older than a
+day. Schedule this command daily using a trusted external runner; normal case
+documents are never deleted by this cleanup. Keep database and document backups
+appropriate to your business retention policy.
+
+No real Supabase project credentials are included in the repository. Hosted
+connection and Google OAuth verification must be completed with your project.

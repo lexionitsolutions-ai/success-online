@@ -1,0 +1,207 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { createZip } from '../archive.js';
+
+test('real API: access, document gates, uploads, bundle and completion', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'success-online-test-'));
+  const port = 32000 + Math.floor(Math.random() * 10000), origin = `http://localhost:${port}`;
+  const child = spawn(process.execPath, ['server.js'], { env: { ...process.env, NODE_ENV:'test', VERCEL:'', DATABASE_URL:'', SUPABASE_URL:'', SUPABASE_SECRET_KEY:'', PORT: String(port), DATABASE_PATH: join(root, 'test.sqlite'), STORAGE_PATH: join(root, 'docs'), DRIVE_MODE:'demo', SHEETS_MODE:'demo', PAYMENT_MODE:'demo', SESSION_SECRET:'integration-test-secret-with-32-characters', APP_ORIGIN:origin }, stdio: ['ignore','pipe','pipe'] });
+  let output = '';
+  child.stderr.on('data', d => output += d);
+  try {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Server startup timed out: ' + output)), 15000);
+      child.stdout.on('data', d => { if (String(d).includes('running')) { clearTimeout(timeout); resolve(); } });
+      child.on('exit', code => { clearTimeout(timeout); reject(new Error(`Server exited ${code}: ${output}`)); });
+    });
+    async function request(path, { cookie, body, method = body ? 'POST' : 'GET' } = {}) {
+      const response = await fetch(origin + path, { method, headers: { ...(cookie ? {cookie} : {}), 'content-type':'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      return { response, status:response.status, data: await response.json().catch(() => ({})) };
+    }
+    async function login(username) {
+      const r = await request('/api/login', { body: { username, password:'Demo@12345' } });
+      assert.equal(r.status, 200); return r.response.headers.get('set-cookie').split(';')[0];
+    }
+    assert.equal((await request('/api/health')).status, 200);
+    assert.equal((await request('/api/cases')).status, 401);
+    const sales = await login('sales01'), otherSales = await login('sales02'), admin = await login('admin01'), office = await login('backoffice01');
+    assert.equal((await request('/api/admin/dashboard', { cookie:sales })).status, 403);
+    const employeeBody = { name:'New Employee', username:'new.sales', role:'sales', password:'StaffPassword123' };
+    assert.equal((await request('/api/admin/employees', { cookie:sales })).status, 403);
+    assert.equal((await request('/api/admin/employees', { cookie:office, body:employeeBody })).status, 403);
+    assert.equal((await request('/api/admin/employees', { cookie:admin, body:{...employeeBody, role:'admin'} })).status, 400);
+    assert.equal((await request('/api/admin/employees', { cookie:admin, body:{...employeeBody, password:'short'} })).status, 400);
+    for (const role of ['sales','backoffice']) {
+      const employee = await request('/api/admin/employees', { cookie:admin, body:{...employeeBody, username:`new.${role}`, role} });
+      assert.equal(employee.status, 201);
+      assert.equal(employee.data.employee.password_hash, undefined);
+      const signedIn = await request('/api/login', { body:{username:`new.${role}`, password:employeeBody.password} });
+      assert.equal(signedIn.status, 200);
+      assert.equal(signedIn.data.user.role, role);
+    }
+    assert.equal((await request('/api/admin/employees', { cookie:admin, body:{...employeeBody, username:'NEW.SALES'} })).status, 409);
+    for (const dates of ['from=2026-02-30&to=2026-03-01','from=2026-10-12&to=2026-10-01','from=&to=']) assert.equal((await request('/api/admin/employees?period=custom&' + dates, {cookie:admin})).status, 400);
+    for (const path of ['/api/me','/api/google/status','/api/google/sheets/status','/api/admin/dashboard?period=week','/api/customers?q=test','/api/cases']) assert.equal((await request(path, { cookie:admin })).status, 200, path);
+    const services = (await request('/api/services', { cookie:sales })).data.services;
+    assert.equal(services.length, 15);
+    // Exercise checklist enforcement for every service using its conditional selectors.
+    for (const service of services) {
+      const v = service.variants[0];
+      const details = Object.fromEntries(v.fields.filter(f => f.type === 'select').map(f => [f.label, f.options[0]]));
+      const r = await request('/api/cases', { cookie:sales, body:{ variantId:v.id, customer:{ name:'Checklist Trial', mobile:'9876543210' }, details, consent:true } });
+      assert.equal(r.status, 201, service.name);
+      assert.equal((await request(`/api/cases/${r.data.case.id}/payment-order`, {cookie:sales,method:'POST'})).status, 409, service.name);
+    }
+    const variant = services.find(s => s.slug === 'income-certificate').variants[0];
+    const payload = { variantId:variant.id, customer:{ name:'Trial Customer', mobile:'9876543210' }, details:{ 'Certificate duration':'1 year', 'Ration card colour':'Other', 'Ration card area rural?':'No' }, consent:true };
+    assert.equal((await request('/api/cases', { cookie:sales, body:{ ...payload, consent:false } })).status, 400);
+    assert.equal((await request('/api/cases', { cookie:sales, body:{ ...payload, details:{} } })).status, 400);
+    const created = await request('/api/cases', { cookie:sales, body:payload });
+    assert.equal(created.status, 201);
+    const caseId = created.data.case.id, path = `/api/cases/${caseId}`;
+    assert.equal((await request(path, { cookie:otherSales })).status, 403);
+    const forged = 'so_session=' + Buffer.from(`${created.data.case.sales.id}|invalid`).toString('base64url');
+    assert.equal((await request('/api/me', { cookie:forged })).status, 401);
+    assert.equal((await request(path + '/progress', { cookie:admin, body:{status:'Awaiting Payment'} })).status, 409);
+    assert.equal((await request(path + '/payment-order', { cookie:sales, method:'POST' })).status, 409);
+    const pdf = Buffer.from('%PDF-1.4\ntrial-document\n%%EOF');
+    const upload = type => ({ docType:type, fileName:'test.pdf', mimeType:'application/pdf', size:pdf.length, content:pdf.toString('base64') });
+    assert.equal((await request(path + '/documents', { cookie:sales, body:{...upload('Photo'), content:Buffer.from('fake').toString('base64')} })).status, 400);
+    for (const type of ['Aadhaar Card','Photo','Ration Card']) assert.equal((await request(path + '/documents', { cookie:sales, body:upload(type) })).status, 201);
+    let item = (await request(path, { cookie:sales })).data;
+    assert.equal(item.case.document_state, 'complete');
+    assert.equal(item.case.status, 'Awaiting Payment');
+    assert.equal((await request(path + '/progress', { cookie:admin, body:{status:'Ready for Assignment'} })).status, 409);
+    const firstDoc = item.documents[0];
+    const download = await fetch(origin + firstDoc.download_url, { headers:{cookie:office} });
+    assert.equal(download.status, 200); assert.deepEqual(Buffer.from(await download.arrayBuffer()), pdf);
+    assert.equal((await request(firstDoc.download_url, { cookie:otherSales })).status, 403);
+    assert.equal((await request(path + '/download-all', { cookie:sales })).status, 403);
+    const zip = await fetch(origin + path + '/download-all?folder=Trial%20Work', { headers:{cookie:office} });
+    assert.equal(zip.status, 200);
+    const bytes = Buffer.from(await zip.arrayBuffer());
+    assert.equal(bytes.readUInt32LE(), 0x04034b50); assert.ok(bytes.includes(Buffer.from('Trial Work/Aadhaar Card/')));
+    assert.equal(bytes.readUInt16LE(bytes.length - 12), 3);
+    const order = (await request(path + '/payment-order', { cookie:sales, method:'POST' })).data;
+    assert.equal((await request(path + '/verify-payment', { cookie:sales, body:{orderId:order.orderId} })).status, 200);
+    assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 200);
+    assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 409);
+    for (const status of ['Ready to Submit','Submitted to Official Portal','Document Received']) assert.equal((await request(path + '/progress', { cookie:office, body:{status} })).status, 200, status);
+    assert.equal((await request(path + '/submit-received-document', { cookie:office, method:'POST' })).status, 400);
+    assert.equal((await request(path + '/documents', { cookie:office, body:upload('Received Document') })).status, 201);
+    item = (await request(path, { cookie:office })).data;
+    const received = item.documents.find(d => d.doc_type === 'Received Document');
+    assert.equal((await request(received.download_url, { cookie:sales })).status, 403);
+    assert.equal((await request(path + '/submit-received-document', { cookie:office, method:'POST' })).status, 200);
+    assert.equal((await request(received.download_url, { cookie:sales })).status, 200);
+    assert.equal((await request(path + '/documents', { cookie:office, body:upload('Photo') })).status, 409);
+    assert.equal((await request('/api/not-found', { cookie:admin })).status, 404);
+    const mirror = JSON.parse(readFileSync(join(root, 'docs', 'Success Online Operations.json')));
+    assert.equal(mirror.allCases[created.data.case.ref].status, 'Closed');
+    assert.deepEqual(mirror.allCases[created.data.case.ref].missingDocuments, []);
+    assert.equal(mirror.documents[created.data.case.ref].length, 4);
+    // Force an incomplete already-assigned legacy record: API must still prevent progression.
+    const db = new DatabaseSync(join(root, 'test.sqlite'));
+    // Completion/collection events count even when the case was opened earlier.
+    db.prepare("UPDATE cases SET created_at='2026-01-01T00:00:00.000Z',completed_at='2026-09-30T18:30:00.000Z' WHERE id=?").run(caseId);
+    db.prepare("UPDATE payments SET verified_at='2026-10-01T18:29:59.000Z' WHERE case_id=?").run(caseId);
+    const review = await request('/api/admin/employees?period=custom&from=2026-10-01&to=2026-10-01', {cookie:admin});
+    assert.equal(review.status, 200);
+    assert.equal(review.data.period.start, '2026-09-30T18:30:00.000Z');
+    assert.equal(review.data.period.end, '2026-10-01T18:30:00.000Z');
+    const salesReview = review.data.employees.find(e => e.username === 'sales01');
+    assert.equal(salesReview.cases, 0);
+    assert.equal(salesReview.completed, 1);
+    assert.equal(salesReview.collected, created.data.case.amounts.total);
+    assert.equal(review.data.employees.find(e => e.username === 'backoffice01').completed, 1);
+    db.prepare("UPDATE payments SET verified_at='2026-10-01T18:30:00.000Z' WHERE case_id=?").run(caseId);
+    const afterEnd = await request('/api/admin/employees?period=custom&from=2026-10-01&to=2026-10-01', {cookie:admin});
+    assert.equal(afterEnd.data.employees.find(e => e.username === 'sales01').collected, 0);
+    db.prepare("UPDATE cases SET status='Assigned' WHERE id=?").run(caseId);
+    db.prepare("UPDATE documents SET state='replaced' WHERE id=?").run(firstDoc.id);
+    db.close();
+    assert.equal((await request(path + '/progress', { cookie:office, body:{status:'Ready to Submit'} })).status, 409);
+  } finally { child.kill(); }
+});
+
+test('ZIP preserves Unicode names and valid central-directory count', () => {
+  const zip = createZip([{ name:'काम/Photo/test.png', data:Buffer.from('bytes') }]);
+  assert.ok(zip.includes(Buffer.from('काम/Photo/test.png')));
+  assert.equal(zip.readUInt32LE(zip.length - 22), 0x06054b50);
+  assert.equal(zip.readUInt16LE(zip.length - 12), 1);
+});
+
+test('live Google adapter: workbook sync, Drive upload and private downloads (mock Google)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'success-google-test-'));
+  const port = 42000 + Math.floor(Math.random() * 10000), origin = `http://localhost:${port}`;
+  const child = spawn(process.execPath, ['--import','./tests/google-mock.mjs','server.js'], { env:{ ...process.env, NODE_ENV:'test', VERCEL:'', DATABASE_URL:'', SUPABASE_URL:'', SUPABASE_SECRET_KEY:'', PORT:String(port), APP_ORIGIN:origin, DATABASE_PATH:join(root,'test.sqlite'), STORAGE_PATH:join(root,'files'), DRIVE_MODE:'live', SHEETS_MODE:'live', PAYMENT_MODE:'demo', SESSION_SECRET:'google-test-secret-with-at-least-32-characters', GOOGLE_OAUTH_CLIENT_ID:'mock', GOOGLE_OAUTH_CLIENT_SECRET:'mock', GOOGLE_OAUTH_REFRESH_TOKEN:'mock', GOOGLE_ROOT_FOLDER_ID:'root', GOOGLE_OPERATIONS_SPREADSHEET_ID:'workbook', GOOGLE_MOCK_FAILURE_FILE:join(root,'revoked') }, stdio:['ignore','pipe','pipe'] });
+  try {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Google test server timeout')), 15000);
+      child.stdout.on('data', d => { if (String(d).includes('running')) { clearTimeout(timeout); resolve(); } });
+      child.on('exit', code => { clearTimeout(timeout); reject(new Error('Google test server exited ' + code)); });
+    });
+    const login = await fetch(origin + '/api/login', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'admin01',password:'Demo@12345'})});
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    async function api(path, body, method = body ? 'POST' : 'GET') {
+      const r = await fetch(origin + path, {method,headers:{cookie,'content-type':'application/json'},body:body ? JSON.stringify(body) : undefined});
+      assert.ok(r.ok, path + ' returned ' + r.status); return r.json();
+    }
+    const oauth = await api('/api/google/oauth/start');
+    assert.ok(new URL(oauth.authorizationUrl).searchParams.get('scope').includes('auth/spreadsheets'));
+    const services = (await api('/api/services')).services;
+    const variant = services.find(s => s.slug === 'pf-assistance').variants[0];
+    const c = (await api('/api/cases',{variantId:variant.id,customer:{name:'Drive Trial',mobile:'9876543210'},consent:true})).case;
+    const pdf = Buffer.from('%PDF-1.4\nmock-drive-file\n%%EOF');
+    await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
+    const documents = (await api(`/api/cases/${c.id}`)).documents;
+    assert.equal(documents[0].storage_path, undefined);
+    const download = await fetch(origin + documents[0].download_url,{headers:{cookie}});
+    assert.equal(download.status,200); assert.deepEqual(Buffer.from(await download.arrayBuffer()),pdf);
+    const zip = await fetch(origin + `/api/cases/${c.id}/download-all`,{headers:{cookie}});
+    assert.equal(zip.status,200); assert.equal(Buffer.from(await zip.arrayBuffer()).readUInt32LE(),0x04034b50);
+    const sync = await api('/api/google/sheets/activate', undefined, 'POST');
+    assert.equal(sync.syncedCases,1); assert.equal(sync.workbook.tabs.length,21);
+    assert.ok(sync.workbook.tabs.includes('Documents'));
+    assert.ok(sync.workbook.tabs.includes('Income Certificate'));
+    writeFileSync(join(root,'revoked'), 'mock revoked token');
+    const failedCase = await fetch(origin + '/api/cases', {method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({variantId:variant.id,customer:{name:'Retry Trial',mobile:'9876543210'},consent:true})});
+    assert.equal(failedCase.status,409);
+    assert.equal((await failedCase.json()).code,'GOOGLE_RECONNECT_REQUIRED');
+    assert.equal((await api('/api/cases')).cases.length,1, 'Expired authorization must not save another case');
+    const state = await api('/api/google/status');
+    assert.equal(state.reconnectRequired,true); assert.equal(state.connected,false);
+    const failedUpload = await fetch(origin + `/api/cases/${c.id}/documents`, {method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')})});
+    assert.equal(failedUpload.status,409);
+    assert.equal((await api(`/api/cases/${c.id}`)).documents.length,1, 'Failed replacement must preserve existing document');
+    unlinkSync(join(root,'revoked')); // Simulate successful Google reconnection.
+    await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
+    assert.equal((await api('/api/google/status')).reconnectRequired,false);
+    assert.equal((await api('/api/cases')).cases.length,1);
+    writeFileSync(join(root,'revoked'),'missing-root');
+    const missingRoot = await fetch(origin + '/api/cases',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({variantId:variant.id,customer:{name:'Root Trial',mobile:'9876543210'},consent:true})});
+    assert.equal(missingRoot.status,409);
+    assert.equal((await missingRoot.json()).code,'GOOGLE_ROOT_FOLDER_INVALID');
+    assert.equal((await api('/api/cases')).cases.length,1,'Missing root must not save a new case');
+    assert.equal((await api('/api/google/status')).folderInvalid,true);
+    for (const folder of ['missing-folder','read-only-folder']) {
+      const invalid = await fetch(origin + '/api/google/root-folder',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({folder})});
+      assert.equal(invalid.status,409);
+      assert.equal((await api('/api/google/status')).rootFolderId,'root','Invalid root must not replace configured root');
+    }
+    const saved = await api('/api/google/root-folder',{folder:'https://drive.google.com/drive/u/0/folders/new-root'});
+    assert.equal(saved.folder.id,'new-root');
+    assert.equal((await api('/api/google/status')).folderInvalid,false);
+    assert.equal((await api('/api/google/status')).rootFolderId,'new-root');
+    await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
+    const salesLogin = await fetch(origin + '/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'sales01',password:'Demo@12345'})});
+    const salesCookie = salesLogin.headers.get('set-cookie').split(';')[0];
+    assert.equal((await fetch(origin + '/api/google/root-folder',{method:'POST',headers:{cookie:salesCookie,'content-type':'application/json'},body:JSON.stringify({folder:'new-root'})})).status,403);
+    unlinkSync(join(root,'revoked'));
+  } finally { child.kill(); }
+});

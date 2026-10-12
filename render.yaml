@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: success-online-api
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: success-online-storage
+      mountPath: /app/storage
+      sizeGB: 1
+    envVars:
+      - key: APP_ORIGIN
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: INITIAL_ADMIN_USERNAME
+        sync: false
+      - key: INITIAL_ADMIN_PASSWORD
+        sync: false
+      - key: DRIVE_MODE
+        value: demo
+      - key: SHEETS_MODE
+        value: demo
+      - key: PAYMENT_MODE
+        value: demo

@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.sqlite*
+*.db
+credentials*.json
+data/
+demo-integrations/
+node_modules/
+*.log
+.vercel/
+storage/
+deliverables/

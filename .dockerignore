@@ -1,0 +1,7 @@
+.env
+data
+demo-integrations
+node_modules
+.git
+.vercel
+tests
