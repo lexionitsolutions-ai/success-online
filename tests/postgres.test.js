@@ -8,6 +8,18 @@ import {rootCertificates} from 'node:tls';
 import {X509Certificate} from 'node:crypto';
 import pg from 'pg';
 import {postgresQuery,postgresConnectionOptions} from '../database.js';
+import {downloadFileLimit,writeStorage} from '../storage.js';
+
+test('cloud ZIP size limit defaults to 50 MB and rejects oversized output before uploading', async () => {
+  const previous=process.env.SUPABASE_DOWNLOAD_MAX_BYTES;
+  try {
+    delete process.env.SUPABASE_DOWNLOAD_MAX_BYTES;
+    assert.equal(downloadFileLimit(),50000000);
+    await assert.rejects(writeStorage('downloads/test/case.zip',{length:50000001},'application/zip'),error=>error.status===413);
+    process.env.SUPABASE_DOWNLOAD_MAX_BYTES='invalid';
+    assert.throws(downloadFileLimit,/integer/);
+  } finally {if(previous===undefined) delete process.env.SUPABASE_DOWNLOAD_MAX_BYTES;else process.env.SUPABASE_DOWNLOAD_MAX_BYTES=previous;}
+});
 
 test('PostgreSQL retains the trusted CA and verification despite URL SSL parameters', () => {
   const ca = rootCertificates[0];

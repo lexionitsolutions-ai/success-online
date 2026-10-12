@@ -32,6 +32,7 @@ SUPABASE_URL=https://PROJECT_REF.supabase.co
 SUPABASE_SECRET_KEY=YOUR_SERVER_SECRET_KEY
 SUPABASE_STORAGE_BUCKET=case-documents
 SUPABASE_DOWNLOAD_BUCKET=case-downloads
+SUPABASE_DOWNLOAD_MAX_BYTES=50000000
 INITIAL_ADMIN_USERNAME=owner
 INITIAL_ADMIN_PASSWORD=YOUR_UNIQUE_PASSWORD_AT_LEAST_10_CHARACTERS
 INITIAL_ADMIN_NAME=Administrator
@@ -77,7 +78,11 @@ the privileged PostgreSQL pooler connection, validates the staff session and
 applies the application's role checks. Do not add public RLS policies.
 
 The document bucket is limited to 10 MB PDF/JPG/PNG files. The separate download
-bucket supports generated ZIPs. Uploads use short-lived signed authorizations;
+bucket supports generated ZIPs up to 50 MB by default, compatible with Supabase's
+Free plan limit. Larger bundles return a message to download documents individually.
+If your project's global Storage limit differs, set SUPABASE_DOWNLOAD_MAX_BYTES
+to a supported limit in both local setup and Vercel, then rerun setup. Bucket
+limits cannot exceed the project's global limit. Uploads use short-lived signed authorizations;
 the backend validates the stored bytes before completing a document record.
 Downloads pass the application's access checks and redirect to a signed URL
 valid for two minutes. The server key never goes to the browser.

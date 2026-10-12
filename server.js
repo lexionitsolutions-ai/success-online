@@ -7,7 +7,7 @@ import { loadEnvFile } from 'node:process';
 import { createDatabase } from './database.js';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
-import { storage, storageEnabled, signedDownload, readStorage, writeStorage } from './storage.js';
+import { storage, storageEnabled, signedDownload, readStorage, writeStorage, downloadFileLimit } from './storage.js';
 import { serviceCatalog } from './service-catalog.js';
 import { sheetHeaders, serviceTabs } from './operations-schema.js';
 
@@ -650,7 +650,8 @@ async function routeApi(req, res, url) {
       if (!['backoffice','admin'].includes(user.role)) return send(res, 403, { error: 'Only back office or admin can download a case bundle' });
       const documents = (await all("SELECT * FROM documents WHERE case_id=$id AND state='uploaded' ORDER BY doc_type", { $id: c.id }));
       if (!documents.length) return send(res, 409, { error: 'No files have been uploaded for this case' });
-      if (documents.reduce((total, d) => total + d.size, 0) > 200_000_000) return send(res, 413, { error: 'Case bundle exceeds 200 MB; download files individually' });
+      const bundleLimit = storageEnabled() ? downloadFileLimit() : 200_000_000;
+      if (documents.reduce((total, d) => total + d.size, 0) > bundleLimit) return send(res, 413, { error: `Case bundle exceeds ${bundleLimit / 1000000} MB; download files individually` });
       const item = (await caseRow(c));
       const folder = safeFileName(url.searchParams.get('folder') || `${c.ref} - ${item.customer.name} - ${item.service.name}`);
       const entries = [];
