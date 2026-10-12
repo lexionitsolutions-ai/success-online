@@ -19,7 +19,7 @@ Set these environment variables on the backend:
 
 - `APP_ORIGIN=https://your-trial.vercel.app` (the frontend URL, no trailing slash)
 - `SESSION_SECRET` to a long random private value
-- `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD` (at least 12 characters) for a fresh production database
+- `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD` (at least 10 characters) for a fresh production database
 - `DATABASE_PATH=/app/storage/success-online.sqlite`
 - `STORAGE_PATH=/app/storage/documents`
 - `PAYMENT_MODE=demo`, `DRIVE_MODE=demo`, `SHEETS_MODE=demo` for trial mode

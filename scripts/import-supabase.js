@@ -9,7 +9,7 @@ let source;
 try {
   if (!db.cloud || !storageEnabled()) throw new Error('Configure DATABASE_URL, SUPABASE_URL and SUPABASE_SECRET_KEY first.');
   const username = process.env.INITIAL_ADMIN_USERNAME?.toLowerCase(), password = process.env.INITIAL_ADMIN_PASSWORD;
-  if (!username || !password || password.length < 12) throw new Error('Set INITIAL_ADMIN_USERNAME and INITIAL_ADMIN_PASSWORD (12+ characters) for the migrated administrator.');
+  if (!username || !password || password.length < 10) throw new Error('Set INITIAL_ADMIN_USERNAME and INITIAL_ADMIN_PASSWORD (10+ characters) for the migrated administrator.');
   const sourcePath = resolve(process.env.SQLITE_IMPORT_PATH || './data/success-online.sqlite');
   if (!existsSync(sourcePath)) throw new Error('SQLite source file not found. Set SQLITE_IMPORT_PATH to the database you want to import.');
   source = new DatabaseSync(sourcePath,{readOnly:true});

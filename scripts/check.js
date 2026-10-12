@@ -9,9 +9,9 @@ if (missing.length) {
   process.exit(1);
 }
 writeFileSync('public/script.js', readFileSync('public/app.js'));
-for (const file of ['server.js','database.js','storage.js','api/index.js','public/script.js','archive.js','operations-schema.js']) {
+for (const file of ['server.js','database.js','storage.js','initial-accounts.js','api/index.js','public/script.js','archive.js','operations-schema.js']) {
   const check = spawnSync(process.execPath, ['--check', file], { stdio: 'inherit' });
   if (check.status) process.exit(check.status);
 }
-const test = spawnSync(process.execPath, ['--test', 'tests/business.test.js', 'tests/api.test.js', 'tests/ui.test.js', 'tests/postgres.test.js'], { stdio: 'inherit' });
+const test = spawnSync(process.execPath, ['--test', 'tests/business.test.js', 'tests/api.test.js', 'tests/ui.test.js', 'tests/postgres.test.js', 'tests/initial-accounts.test.js'], { stdio: 'inherit' });
 process.exit(test.status);

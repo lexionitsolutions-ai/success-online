@@ -33,8 +33,12 @@ SUPABASE_SECRET_KEY=YOUR_SERVER_SECRET_KEY
 SUPABASE_STORAGE_BUCKET=case-documents
 SUPABASE_DOWNLOAD_BUCKET=case-downloads
 INITIAL_ADMIN_USERNAME=owner
-INITIAL_ADMIN_PASSWORD=YOUR_UNIQUE_PASSWORD_AT_LEAST_12_CHARACTERS
+INITIAL_ADMIN_PASSWORD=YOUR_UNIQUE_PASSWORD_AT_LEAST_10_CHARACTERS
 INITIAL_ADMIN_NAME=Administrator
+INITIAL_SALES_USERNAME=
+INITIAL_SALES_PASSWORD=
+INITIAL_BACKOFFICE_USERNAME=
+INITIAL_BACKOFFICE_PASSWORD=
 SESSION_SECRET=YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
 PAYMENT_MODE=demo
 DRIVE_MODE=demo
@@ -55,9 +59,11 @@ npm.cmd run setup:supabase
 
 The command creates the schema, indexes, 15-service catalog, your initial
 administrator, and two private Storage buckets. It can be rerun without deleting
-application records. If users already exist, it does not reset their passwords.
-The initial password must be at least 12 characters. Create sales and back-office
-accounts from the admin Employees tab after deployment.
+application records. Explicit setup creates or updates the credentials for the
+accounts configured in INITIAL_ADMIN_*, INITIAL_SALES_* and INITIAL_BACKOFFICE_*.
+Passwords must be at least 10 characters. A phone number can be used as a username.
+Leave the optional staff pairs empty if you want to create staff accounts from
+the admin Employees tab instead. Ordinary app startup never resets passwords.
 
 Row Level Security is enabled on every application table. Browser `anon` and
 Supabase `authenticated` roles have no table access. The backend connects with

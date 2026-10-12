@@ -80,7 +80,7 @@ async function seed() {
   if (db.cloud || process.env.NODE_ENV === 'production') {
     const username = process.env.INITIAL_ADMIN_USERNAME;
     const password = process.env.INITIAL_ADMIN_PASSWORD;
-    if (!username || !password || password.length < 12) throw new Error('Set INITIAL_ADMIN_USERNAME and INITIAL_ADMIN_PASSWORD (at least 12 characters) before database setup.');
+    if (!username || !password || password.length < 10) throw new Error('Set INITIAL_ADMIN_USERNAME and INITIAL_ADMIN_PASSWORD (at least 10 characters) before database setup.');
     await run('INSERT INTO users VALUES ($id,$username,$name,$role,$password_hash,1,$created_at)', { $id: id('usr'), $username: username.toLowerCase(), $name: process.env.INITIAL_ADMIN_NAME || 'Administrator', $role:'admin', $password_hash:hashPassword(password), $created_at:now() });
     return;
   }
