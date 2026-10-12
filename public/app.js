@@ -85,19 +85,19 @@ async function boot() {
 
 async function load() {
   const requests = [api('/api/services'), api('/api/cases')];
-  if (me.role === 'admin') {
-    requests.push(api('/api/google/status'), api('/api/google/sheets/status'), api(`/api/admin/dashboard?period=${analyticsPeriod}`), api(employeeUrl()));
-  }
-  const [serviceData, caseData, driveData, sheetData, analyticsData, employees] = await Promise.all(requests);
+  const [serviceData, caseData] = await Promise.all(requests);
   services = serviceData.services;
   demoPayments = serviceData.demoPayments === true;
   cloudUploads = serviceData.cloudUploads === true;
   cases = caseData.cases;
-  googleStatus = driveData || null;
-  sheetsStatus = sheetData || null;
-  adminAnalytics = analyticsData || null;
-  employeeData = employees || null;
+  if(me.role==='admin') await loadViewData();
+  else googleStatus=sheetsStatus=adminAnalytics=employeeData=null;
   render();
+}
+
+async function loadViewData() {
+  if(view==='admin') [googleStatus,sheetsStatus,adminAnalytics] = await Promise.all([api('/api/google/status'),api('/api/google/sheets/status'),api(`/api/admin/dashboard?period=${analyticsPeriod}`)]);
+  if(view==='employees') employeeData=await api(employeeUrl());
 }
 
 function renderLogin() {
@@ -257,6 +257,7 @@ function trendChart(rows) {
 }
 
 function renderAdmin() {
+  if(me.role!=='admin') return empty('Admin access required.');
   if (!adminAnalytics) return empty('Loading business analytics...');
   const data = adminAnalytics;
   const m = data.metrics;
@@ -293,6 +294,7 @@ function renderAdmin() {
 
 function renderEmployees() {
   if (me.role !== 'admin') return empty('Admin access required.');
+  if (!employeeData) return empty('Loading employee performance...');
   const rows = employeeData?.employees || [];
   const table = role => {
     const staff = rows.filter(item => item.role === role);
@@ -641,8 +643,14 @@ async function saveDriveRootFolder(button) {
 }
 async function activateGoogleSheets() { try { toast('Verifying workbook and syncing cases'); const result = await api('/api/google/sheets/activate', { method:'POST' }); await load(); toast(`Google Sheets live: ${result.syncedCases} cases synced`); } catch (error) { toast(error.message); } }
 async function setAnalyticsPeriod(period) { analyticsPeriod = period; adminAnalytics = await api(`/api/admin/dashboard?period=${period}`); render(); }
-async function logout() { if (drawerBusy) return; closeDrawer(); await api('/api/logout', { method:'POST' }); me = null; renderLogin(); }
-function setView(next) { if (drawerBusy) return; closeDrawer(); view = next; render(); }
+async function logout() { if (drawerBusy) return; closeDrawer(); await api('/api/logout', { method:'POST' }); me = null;view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;renderLogin(); }
+async function setView(next) {
+  if(drawerBusy) return;
+  closeDrawer();view=next;render();
+  if(me.role==='admin' && ['admin','employees'].includes(next)) {
+    try {await loadViewData();if(view===next) render();} catch(error) {toast(error.message);}
+  }
+}
 
 Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, uploadCaseDocument, submitCase, openCase, pay, claim, submitReceivedDocument, progress, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
 Object.assign(window, { downloadCaseFiles, wizardBack });

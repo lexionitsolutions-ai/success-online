@@ -296,6 +296,10 @@ async function syncCaseToGoogle(caseId) {
 let sheetsSyncChain = Promise.resolve();
 async function queueSheetsSync(caseId) {
   (await run(`INSERT INTO sync_jobs VALUES ($id,'sheets',$entity,'pending',0,NULL,$n,$n) ON CONFLICT(type, entity_id) DO UPDATE SET status='pending', updated_at=$n`, { $id: id('sync'), $entity: caseId, $n: now() }));
+  if(process.env.GOOGLE_RECONNECT_REQUIRED==='1') {
+    await run("UPDATE sync_jobs SET status='failed',attempts=attempts+1,last_error='GOOGLE_RECONNECT_REQUIRED',updated_at=$n WHERE type='sheets' AND entity_id=$entity",{$entity:caseId,$n:now()});
+    return;
+  }
   sheetsSyncChain = sheetsSyncChain.then(async () => {
     try {
       await syncCaseToGoogle(caseId);
@@ -385,10 +389,33 @@ async function requireUser(req, res, roles) {
 }
 function maskPhone(mobile) { return mobile ? mobile.replace(/\d(?=\d{4})/g, 'x') : ''; }
 async function caseRow(c) {
-  c = { ...c, document_state: (await missingDocuments(c)).length ? 'missing' : 'complete' };
-  const variant = (await one('SELECT * FROM variants WHERE id=$id', { $id: c.variant_id }));
-  const variantView = { ...variant, fields: json(variant, 'fields_json', []), documents: json(variant, 'documents_json', []) };
-  return { ...c, customer: (await one('SELECT id,name,mobile,email FROM customers WHERE id=$id', { $id: c.customer_id })), service: (await one('SELECT id,name FROM services WHERE id=$id', { $id: c.service_id })), variant: variantView, details: json(c, 'details_json', {}), amounts: amounts(variant), sales: publicUser((await one('SELECT * FROM users WHERE id=$id', { $id: c.sales_user_id }))), backoffice: publicUser((await one('SELECT * FROM users WHERE id=$id', { $id: c.backoffice_user_id }))) };
+  return (await caseRows([c]))[0];
+}
+async function caseRows(rows) {
+  if (!rows.length) return [];
+  const related = async (table, column, values, fields='*', condition='') => {
+    const ids = [...new Set(values.filter(Boolean))];
+    if (!ids.length) return [];
+    const params = Object.fromEntries(ids.map((value,index)=>['$v'+index,value]));
+    return all(`SELECT ${fields} FROM ${table} WHERE ${column} IN (${ids.map((_,index)=>'$v'+index).join(',')})${condition}`,params);
+  };
+  const [variants,customers,serviceRows,users,documents] = await Promise.all([
+    related('variants','id',rows.map(c=>c.variant_id)),
+    related('customers','id',rows.map(c=>c.customer_id),'id,name,mobile,email'),
+    related('services','id',rows.map(c=>c.service_id),'id,name'),
+    related('users','id',rows.flatMap(c=>[c.sales_user_id,c.backoffice_user_id]),'id,username,name,role'),
+    related('documents','case_id',rows.map(c=>c.id),'case_id,doc_type'," AND state='uploaded'")
+  ]);
+  const byId = items => new Map(items.map(item=>[item.id,item]));
+  const variantMap=byId(variants),customerMap=byId(customers),serviceMap=byId(serviceRows),userMap=byId(users);
+  const have=new Map();
+  for(const document of documents) {if(!have.has(document.case_id)) have.set(document.case_id,new Set());have.get(document.case_id).add(document.doc_type);}
+  return rows.map(c=>{
+    const variant=variantMap.get(c.variant_id),details=json(c,'details_json',{});
+    const requirements=json(variant,'documents_json',[]);
+    const missing=requirements.some(d=>d.required && (!d.when || !String(details[d.when.field]||'').trim() || String(details[d.when.field])===String(d.when.equals)) && !have.get(c.id)?.has(d.label));
+    return {...c,document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,amounts:amounts(variant),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
+  });
 }
 function amounts(v) {
   const serviceCharge = v.service_charge || 0, officialFee = v.official_fee || 0, tax = Math.round(serviceCharge * (v.tax_rate || 0) / 100);
@@ -604,7 +631,10 @@ async function routeApi(req, res, url) {
       redirect(res, '/?google=connected');
     })();
   }
-  if (req.method === 'GET' && url.pathname === '/api/services') return send(res, 200, { demoPayments: process.env.PAYMENT_MODE === 'demo', cloudUploads: storageEnabled(), services: await Promise.all((await all('SELECT * FROM services WHERE active=1')).map(async s => ({ ...s, variants: (await all('SELECT * FROM variants WHERE service_id=$id AND active=1', { $id: s.id })).map(v => ({ ...v, fields: json(v, 'fields_json', []), documents: json(v, 'documents_json', []), amounts: amounts(v) })) }))) });
+  if (req.method === 'GET' && url.pathname === '/api/services') {
+    const [serviceRows,variants]=await Promise.all([all('SELECT * FROM services WHERE active=1'),all('SELECT * FROM variants WHERE active=1')]);
+    return send(res,200,{demoPayments:process.env.PAYMENT_MODE==='demo',cloudUploads:storageEnabled(),services:serviceRows.map(service=>({...service,variants:variants.filter(v=>v.service_id===service.id).map(v=>({...v,fields:json(v,'fields_json',[]),documents:json(v,'documents_json',[]),amounts:amounts(v)}))}))});
+  }
   if (req.method === 'GET' && url.pathname === '/api/customers') {
     const q = `%${url.searchParams.get('q') || ''}%`;
     return send(res, 200, { customers: (await all('SELECT id,name,mobile,email FROM customers WHERE (mobile LIKE $q OR name LIKE $q) AND ($sales=0 OR created_by=$user) LIMIT 20', { $q: q, $sales: user.role === 'sales' ? 1 : 0, $user: user.id })) });
@@ -612,7 +642,7 @@ async function routeApi(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/cases') {
     const where = user.role === 'sales' ? 'WHERE sales_user_id=$uid' : user.role === 'backoffice' ? "WHERE status!='Draft' AND (backoffice_user_id=$uid OR backoffice_user_id IS NULL OR status IN ('Awaiting Documents','Awaiting Payment'))" : '';
     const params = user.role === 'admin' ? {} : { $uid: user.id };
-    return send(res, 200, { cases: await Promise.all((await all(`SELECT * FROM cases ${where} ORDER BY updated_at DESC`, params)).map(caseRow)) });
+    return send(res, 200, { cases: await caseRows(await all(`SELECT * FROM cases ${where} ORDER BY updated_at DESC`, params)) });
   }
   if (req.method === 'POST' && url.pathname === '/api/cases') return body(req).then(async b => {
     if (user.role !== 'sales' && user.role !== 'admin') return send(res, 403, { error: 'Only sales or admin can create cases' });
@@ -713,6 +743,7 @@ async function routeApi(req, res, url) {
       let googleSyncError;
       if (process.env.DRIVE_MODE === 'live') {
         try {
+          if(process.env.GOOGLE_RECONNECT_REQUIRED==='1') throw Object.assign(new Error('Google reconnection is required'),{code:'GOOGLE_RECONNECT_REQUIRED'});
           const folders = await driveFoldersForCase(c, customer, service);
           const uploaded = await uploadDriveFile(safeName, b.mimeType, folders.caseFolderId, content);
           storage = `gdrive://${uploaded.id}`;

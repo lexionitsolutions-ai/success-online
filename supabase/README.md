@@ -117,6 +117,8 @@ before starting, and keep that backup until hosted verification is complete.
 ## 5. Deploy the GitHub repository on Vercel
 
 The production deployment is available at https://success-online.vercel.app.
+API functions are pinned to Sydney (`syd1`), matching the current Supabase
+project's Sydney (`ap-southeast-2`) region to reduce database round-trip latency.
 The Vercel project is connected to the GitHub repository. For CLI maintenance,
 link the folder with `vercel link`, then use
 `node scripts/configure-vercel-env.js https://success-online.vercel.app` to
