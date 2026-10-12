@@ -1,7 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {postgresQuery} from '../database.js';
+import {mkdtempSync,writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {rootCertificates} from 'node:tls';
+import {X509Certificate} from 'node:crypto';
+import pg from 'pg';
+import {postgresQuery,postgresConnectionOptions} from '../database.js';
+
+test('PostgreSQL retains the trusted CA and verification despite URL SSL parameters', () => {
+  const ca = rootCertificates[0];
+  const options = postgresConnectionOptions({DATABASE_URL:'postgresql://test:test@db.example.com/postgres?sslmode=require',DATABASE_CA_CERT:ca.replace(/\n/g,'\\n')});
+  const parsed = new pg.Client(options).connectionParameters;
+  assert.equal(parsed.ssl.rejectUnauthorized,true);
+  assert.equal(parsed.ssl.ca,ca);
+  assert.ok(!options.connectionString.includes('sslmode'));
+  assert.throws(()=>postgresConnectionOptions({DATABASE_URL:'postgresql://test:test@db.example.com/postgres',DATABASE_SSL:'disable'}),/local PostgreSQL/);
+});
+
+test('PostgreSQL accepts downloaded PEM or DER CA files and reports missing certificates clearly', () => {
+  const root = mkdtempSync(join(tmpdir(),'success-online-ca-'));
+  const ca = new X509Certificate(rootCertificates[0]);
+  for (const [name,content] of [['root.crt',ca.toString()],['root.cer',ca.raw]]) {
+    const path = join(root,name);writeFileSync(path,content);
+    const options = postgresConnectionOptions({DATABASE_URL:'postgresql://test:test@db.example.com/postgres',DATABASE_CA_CERT_PATH:path});
+    assert.equal(new X509Certificate(options.ssl.ca).fingerprint256,ca.fingerprint256);
+  }
+  assert.throws(()=>postgresConnectionOptions({DATABASE_URL:'postgresql://test:test@db.example.com/postgres',DATABASE_CA_CERT_PATH:join(root,'missing.crt')}),/file not found/);
+});
 
 test('PostgreSQL bindings preserve literals and reuse named parameter positions', () => {
   const compiled = postgresQuery("SELECT '$value',username FROM users WHERE username=$value OR name=$value",{$value:'test'});

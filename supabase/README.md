@@ -46,7 +46,13 @@ SHEETS_MODE=demo
 ```
 
 The app verifies TLS for PostgreSQL connections. Use the pooler hostname exactly
-as shown in Supabase's Connect dialog. Do not disable SSL in production.
+as shown in Supabase's Connect dialog. If Node reports a self-signed certificate
+chain, open Supabase **Database → Settings** and download the **SSL root
+certificate**. Save it as `supabase-ca.crt` in your project folder and add
+`DATABASE_CA_CERT_PATH=./supabase-ca.crt` to `.env`. The app accepts PEM and DER
+certificate downloads. On Vercel, set `DATABASE_CA_CERT` to the certificate's PEM
+contents, including the BEGIN/END lines, instead of using a local file path.
+Certificate files are excluded from Git. Verification remains enabled.
 
 ## 3. Initialize a fresh database
 
