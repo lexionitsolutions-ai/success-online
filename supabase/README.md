@@ -116,6 +116,17 @@ before starting, and keep that backup until hosted verification is complete.
 
 ## 5. Deploy the GitHub repository on Vercel
 
+The production deployment is available at https://success-online.vercel.app.
+The Vercel project is connected to the GitHub repository. For CLI maintenance,
+link the folder with `vercel link`, then use
+`node scripts/configure-vercel-env.js https://success-online.vercel.app` to
+transfer the private local server settings to Production. Secret values are sent
+through stdin and not printed. The local certificate is converted to PEM for
+the Vercel environment. The script does not transfer initial login passwords.
+Use `node scripts/verify-hosted.js https://success-online.vercel.app` to check
+the hosted API and configured staff logins without displaying credentials.
+The `.vercelignore` file excludes local credentials, certificates and client data.
+
 1. Import `lexionitsolutions-ai/success-online` into Vercel.
 2. Use **Other** as the framework, **Node.js 24**, build command `npm run build`,
    and output directory `public`. The committed `vercel.json` routes `/api/*` to
