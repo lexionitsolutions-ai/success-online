@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 function client() {
   const context = vm.createContext({
-    document: { querySelector: selector => selector === '#consent' ? { checked: true } : null },
+    document: { querySelector: selector => selector === '#consent' ? { checked: true } : null,addEventListener() {} },
     window: {}, URL, URLSearchParams, console, setTimeout, clearTimeout
   });
   vm.runInContext(readFileSync('public/app.js', 'utf8').replace(/boot\(\);\s*$/, ''), context);

@@ -4,6 +4,15 @@ Internal web app for Success Online, a private Indian e-Seva assistance business
 
 For Vercel hosting with Supabase, follow [supabase/README.md](supabase/README.md).
 
+The mobile workspace uses a fixed header with a profile menu, bottom navigation,
+case cards, larger form controls and labeled employee metrics. The profile menu
+supports account details, switching accounts and sign-out. Phone and tablet layouts
+are used through 900 px; wider screens retain the desktop sidebar and tables.
+Run `npm.cmd run test:mobile` to check synthetic fixtures at 320, 390, 430, 768 and
+1280 px for all three roles. Screenshots are saved in the ignored
+`deliverables/mobile-preview/` folder. The browser test uses installed Windows
+Chrome/Edge, `BROWSER_EXECUTABLE`, or Playwright's installed Chromium.
+
 ## Stack
 
 Node 24, an asynchronous Node API, static HTML/CSS/JS, PostgreSQL through Supabase's transaction pooler, and private Supabase Storage. Local development can use built-in SQLite when DATABASE_URL is unset. The cloud deployment uses the committed Vercel API entry point and configuration.

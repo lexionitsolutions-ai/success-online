@@ -49,6 +49,23 @@ const money = value => `\u20B9${((value || 0) / 100).toLocaleString('en-IN', { m
 const number = value => Number(value || 0).toLocaleString('en-IN');
 const h = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[char]);
 const dateTime = value => value ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '-';
+const roleName = role => ({admin:'Administrator',sales:'Sales employee',backoffice:'Back office'}[role] || role);
+function icon(name) {
+  const paths={dashboard:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',cases:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',completed:'<rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>',queue:'<path d="M4 5h16v14H4zM4 13h5l2 3h2l2-3h5M8 9h8"/>',payments:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',admin:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',employees:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',plus:'<path d="M12 5v14M5 12h14"/>',more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',logout:'<path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h12"/>',switch:'<path d="M4 7h15l-3-3M20 17H5l3 3M20 7v4M4 17v-4"/>'};
+  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]||paths.profile}</svg>`;
+}
+function labelTables() {
+  document.querySelectorAll('.table').forEach(table=>{
+    const labels=[...table.querySelectorAll('thead th')].map(th=>th.textContent.trim());
+    table.querySelectorAll('tbody tr').forEach(row=>[...row.children].forEach((cell,index)=>{cell.dataset.label=labels[index]||'';}));
+  });
+  document.querySelectorAll('.mini-table').forEach(table=>{
+    const labels=[...table.querySelector('.mini-head').children].map(cell=>cell.textContent.trim());
+    table.querySelectorAll('.mini-row:not(.mini-head)').forEach(row=>[...row.children].forEach((cell,index)=>{cell.dataset.label=labels[index]||'';}));
+  });
+}
+function focusSignIn() {document.querySelector('#login [name="username"]')?.focus();}
+async function switchAccount() {await logout();if(!me) focusSignIn();}
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -102,10 +119,11 @@ async function loadViewData() {
 
 function renderLogin() {
   app.innerHTML = `<section class="login">
+    <button class="login-profile" onclick="focusSignIn()">${icon('profile')}<span>Sign in</span></button>
     <div class="login-brand"><div class="mark">SO</div><div><strong>Success Online</strong><span>Operations workspace</span></div></div>
     <form id="login" class="login-form">
       <div><p class="eyebrow">Secure staff access</p><h1>Welcome back</h1><p class="muted">Manage customer cases, documents, payments, and delivery from one workspace.</p></div>
-      <label>Username<input name="username" required autocomplete="username"></label>
+      <label>Phone number or username<input name="username" required autocomplete="username" placeholder="Enter your staff login"></label>
       <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
       <button class="primary full">Sign in</button>
     </form>
@@ -113,10 +131,14 @@ function renderLogin() {
   </section>`;
   document.querySelector('#login').onsubmit = async event => {
     event.preventDefault();
+    const button=event.target.querySelector('button.primary');
+    if(button.disabled) return;
+    button.disabled=true;button.textContent='Signing in…';
     try {
       me = (await api('/api/login', { method: 'POST', body: Object.fromEntries(new FormData(event.target)) })).user;
       await load();
     } catch (error) { toast(error.message); }
+    finally {button.disabled=false;button.textContent='Sign in';}
   };
 }
 
@@ -128,18 +150,23 @@ function shell(content) {
     .filter(item => item !== 'payments' || me.role === 'admin')
     .filter(item => !['admin','employees'].includes(item) || me.role === 'admin');
   const canCreate = ['sales','admin'].includes(me.role);
+  const primaryLinks=links.filter(item=>['dashboard','cases','completed','queue'].includes(item));
+  const moreLinks=links.filter(item=>!primaryLinks.includes(item));
+  const navButton=(item,mobile=false)=>`<button class="${view===item?'active':''}" ${view===item?'aria-current="page"':''} onclick="setView('${item}')">${icon(item)}<span>${mobile?({dashboard:'Overview',cases:'Active',completed:'Completed',queue:'Operations'}[item]||navLabels[item]):navLabels[item]}</span></button>`;
+  const initials=(me.name||me.username).trim().split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase();
   return `<div class="shell">
     <aside class="side">
       <div class="side-brand"><div class="mark">SO</div><div><strong>Success Online</strong><span>e-Seva operations</span></div></div>
-      <nav class="nav">${links.map(item => `<button class="${view === item ? 'active' : ''}" onclick="setView('${item}')"><span>${navLabels[item]}</span></button>`).join('')}</nav>
+      <nav class="nav" aria-label="Main navigation">${links.map(item=>navButton(item)).join('')}</nav>
       <div class="side-foot"><span class="live-dot"></span><div><strong>Workspace online</strong><small>Private assistance service</small></div></div>
     </aside>
     <div class="workspace">
       <header class="top">
-        <div><span class="mobile-brand">Success Online</span><p>${h(me.name)} <span class="role">${h(me.role)}</span></p></div>
-        <div class="top-actions">${canCreate ? '<button class="primary" onclick="startCase()">New case</button>' : ''}<button class="quiet" onclick="logout()">Sign out</button></div>
+        <div class="top-identity"><div class="mobile-brand"><span class="mark">SO</span><div><strong>Success Online</strong><small>${h(roleName(me.role))}</small></div></div><p class="desktop-identity">${h(me.name)} <span class="role">${h(roleName(me.role))}</span></p></div>
+        <div class="top-actions">${canCreate?`<button class="primary new-case-button" onclick="startCase()">${icon('plus')}<span>New case</span></button>`:''}<details class="profile"><summary class="profile-button" aria-label="Open profile menu"><span class="avatar">${h(initials)}</span></summary><div class="profile-menu"><p class="eyebrow">Your account</p><strong>${h(me.name)}</strong><small>${h(roleName(me.role))}</small><div class="profile-login"><span>Staff login</span><strong>${h(me.username)}</strong></div><button onclick="setView('dashboard')">${icon('dashboard')}Overview</button><button onclick="switchAccount()">${icon('switch')}Switch account</button><button class="profile-signout" onclick="logout()">${icon('logout')}Sign out</button></div></details></div>
       </header>
       <main class="content">${content}</main>
+      <nav class="mobile-nav" aria-label="Mobile navigation">${primaryLinks.map(item=>navButton(item,true)).join('')}${moreLinks.length?`<details class="mobile-more"><summary class="${moreLinks.includes(view)?'active':''}">${icon('more')}<span>More</span></summary><div class="more-menu"><p class="eyebrow">Admin workspace</p>${moreLinks.map(item=>navButton(item)).join('')}</div></details>`:''}</nav>
     </div>
   </div>`;
 }
@@ -148,6 +175,7 @@ function render() {
   if (!me) return renderLogin();
   const content = view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPendingPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : renderDashboard();
   app.innerHTML = shell(content);
+  labelTables();
 }
 
 function pageHead(title, description, action = '') {
@@ -155,12 +183,13 @@ function pageHead(title, description, action = '') {
 }
 
 function statusClass(status) {
+  if(/unpaid|missing/i.test(status)) return 'warning';
   if (/Ready|Received|Approved|Delivered|Closed|paid/i.test(status)) return 'success';
   if (/Awaiting|Correction|Action|unpaid/i.test(status)) return 'warning';
   if (/Rejected|Cancelled|failed/i.test(status)) return 'danger';
   return 'neutral';
 }
-function statusBadge(status) { return `<span class="badge ${statusClass(status)}">${h(status)}</span>`; }
+function statusBadge(status) { const label=({paid:'Paid',unpaid:'Unpaid',missing:'Missing',complete:'Complete'})[status]||status;return `<span class="badge ${statusClass(status)}">${h(label)}</span>`; }
 
 function metricCard(label, value, detail, tone = '') {
   return `<article class="metric-card ${tone}"><span>${h(label)}</span><strong>${value}</strong><small>${h(detail)}</small></article>`;
@@ -186,8 +215,7 @@ function renderDashboard() {
 
 function renderCases() {
   const activeCases = cases.filter(item => !isCompletedCase(item));
-  const action = ['sales','admin'].includes(me.role) ? '<button class="primary" onclick="startCase()">New case</button>' : '';
-  return `${pageHead('Active Cases', 'Search and manage customer applications still in progress.', action)}
+  return `${pageHead('Active Cases', 'Search and manage customer applications still in progress.')}
     ${caseToolbar(activeCases, false)}
     <div id="caseList" class="table-shell">${activeCases.length ? caseTable(activeCases) : empty('No active cases.')}</div>`;
 }
@@ -224,8 +252,8 @@ function pendingPaymentTable(rows) {
 }
 
 function caseTable(rows) {
-  return `<table class="table"><thead><tr><th>Case</th><th>Customer</th><th>Service</th><th>Status</th><th>Payment</th><th>Owner</th><th>Updated</th></tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
-    <td><strong>${h(item.ref)}</strong><small>${h(item.priority)}</small></td>
+  return `<table class="table case-table"><thead><tr><th>Case</th><th>Customer</th><th>Service</th><th>Status</th><th>Payment</th><th>Owner</th><th>Updated</th></tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
+    <td><strong><button class="case-link" onclick="event.stopPropagation();openCase('${item.id}')" aria-label="Open case ${h(item.ref)}">${h(item.ref)}</button></strong><small>${h(item.priority)}</small></td>
     <td><strong>${h(item.customer.name)}</strong><small>${h(item.customer.mobile.replace(/\d(?=\d{4})/g, 'x'))}</small></td>
     <td>${h(item.service.name)}<small>${h(item.variant.name)}</small></td>
     <td>${statusBadge(item.status)}</td><td>${statusBadge(item.payment_state)}</td>
@@ -302,7 +330,7 @@ function renderEmployees() {
   };
   return `${pageHead('Employees', 'Review sales and back-office performance and create staff accounts.')}
     <form class="employee-filters" onsubmit="applyEmployeePeriod(event)"><label>Review period<select id="employeePeriod" onchange="toggleEmployeeDates(this.value)">${[['week','Last 7 days'],['month','This month'],['quarter','This quarter'],['year','This year'],['all','All time'],['custom','Custom dates']].map(([key,label]) => `<option value="${key}" ${key === employeePeriod ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="employee-date" ${employeePeriod !== 'custom' ? 'hidden' : ''}>From<input id="employeeFrom" type="date" value="${h(employeeFrom)}" ${employeePeriod === 'custom' ? 'required' : ''}></label><label class="employee-date" ${employeePeriod !== 'custom' ? 'hidden' : ''}>Through<input id="employeeTo" type="date" value="${h(employeeTo)}" ${employeePeriod === 'custom' ? 'required' : ''}></label><button class="primary">Review performance</button></form>
-    <p class="muted">New cases, collections, handled cases and completions use the selected period. Active and overdue counts show current workload. Turnaround is measured from case creation to completion. Custom dates include the whole end date in India time.</p>
+    <details class="metric-help"><summary>How performance is measured</summary><p class="muted">New cases, collections, handled cases and completions use the selected period. Active and overdue counts show current workload. Turnaround is measured from case creation to completion. Custom dates include the whole end date in India time.</p></details>
     <section class="section-head"><h2>Sales employees</h2></section>${table('sales')}
     <section class="section-head"><h2>Back-office employees</h2></section>${table('backoffice')}
     <section class="analytics-panel employee-create"><h2>Create employee</h2><p>Set credentials for a new sales or back-office employee.</p><form onsubmit="createEmployee(event)"><div class="formgrid"><label>Full name<input name="name" required maxlength="100" autocomplete="off"></label><label>Role<select name="role"><option value="sales">Sales</option><option value="backoffice">Back office</option></select></label><label>Username<input name="username" required pattern="[A-Za-z0-9._-]{3,50}" minlength="3" maxlength="50" autocomplete="off"></label><label>Password<input name="password" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></label></div><div class="form-actions"><button class="primary">Create employee</button></div><p class="muted" role="status" id="employeeResult"></p></form></section>`;
@@ -367,6 +395,7 @@ function filterCases(completed = null) {
     .filter(item => !serviceId || item.service.id === serviceId)
     .filter(item => [item.ref,item.customer.name,item.customer.mobile,item.service.name,item.status].join(' ').toLowerCase().includes(value));
   document.querySelector('#caseList').innerHTML = filtered.length ? caseTable(filtered) : empty('No cases match this search.');
+  labelTables();
   const count = document.querySelector('#caseListCount');
   if (count) count.textContent = `${number(filtered.length)} ${completed ? 'completed' : 'active'} cases`;
 }
@@ -380,7 +409,7 @@ function drawWizard() {
 }
 
 function wizardBody(service, variant) {
-  if (draft.step === 1) return `<div class="formgrid"><label>Mobile<input id="mobile" value="${h(draft.customer.mobile || '')}"></label><label>Full name<input id="name" value="${h(draft.customer.name || '')}"></label><label>Email<input id="email" value="${h(draft.customer.email || '')}"></label><label>Address<input id="address" value="${h(draft.customer.address || '')}"></label></div><div class="form-actions"><button class="primary" onclick="saveStep1()">Continue</button></div>`;
+  if (draft.step === 1) return `<div class="formgrid"><label>Mobile number<input id="mobile" type="tel" inputmode="numeric" maxlength="10" autocomplete="tel-national" placeholder="10-digit mobile number" value="${h(draft.customer.mobile || '')}"></label><label>Full name<input id="name" autocomplete="name" value="${h(draft.customer.name || '')}"></label><label>Email<input id="email" type="email" autocomplete="email" value="${h(draft.customer.email || '')}"></label><label>Address<input id="address" autocomplete="street-address" value="${h(draft.customer.address || '')}"></label></div><div class="form-actions"><button class="primary" onclick="saveStep1()">Continue</button></div>`;
   if (draft.step === 2) return `<div class="formgrid"><label>Service<select id="service">${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label><label>Request type<select id="variant"></select></label></div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="primary" onclick="saveStep2()">Continue</button></div>`;
   if (draft.step === 3) {
     const docs = applicableDocuments(variant?.documents || [], draft.details);
@@ -388,7 +417,7 @@ function wizardBody(service, variant) {
     return `<p class="muted">${docs.filter(item => item.required).length - missing.length} of ${docs.filter(item => item.required).length} required documents selected. Upload every required document to continue.</p><div class="upload-list">${docs.map(item => `<div class="doc"><span><strong>${h(item.label)}</strong><small>${h(item.note || (item.required ? 'Required document' : 'Optional supporting document'))}</small><em>${h(draft.docs[item.label]?.fileName || 'Not selected')}</em></span>${uploadControls(encodeURIComponent(item.label))}</div>`).join('')}</div><div class="form-actions"><button class="quiet" onclick="wizardBack(2)">Back</button><button class="primary" onclick="saveStep3()" ${missing.length ? 'disabled' : ''}>Continue</button></div>`;
   }
   const amount = variant?.amounts || { serviceCharge:0, officialFee:0, tax:0, total:0 };
-  const pricing = amount.total ? `<div class="price-row"><span>Service charge ${money(amount.serviceCharge)}</span><span>Official fee ${money(amount.officialFee)}</span><span>Tax ${money(amount.tax)}</span></div><div class="review-total"><span>Total payable</span><strong>${money(amount.total)}</strong></div>` : `<div class="review-total"><span>Price</span><strong>To be confirmed</strong><small>The source PDF does not list fees. Confirm the service and official fees before collecting payment.</small></div>`;
+  const pricing = amount.total ? `<div class="price-row"><span>Service charge ${money(amount.serviceCharge)}</span><span>Official fee ${money(amount.officialFee)}</span><span>Tax ${money(amount.tax)}</span></div><div class="review-total"><span>Total payable</span><strong>${money(amount.total)}</strong></div>` : `<div class="review-total"><span>Price</span><strong>To be confirmed</strong><small>Confirm the service and official fees before collecting payment.</small></div>`;
   return `<div class="review"><div><span>Customer</span><strong>${h(draft.customer.name)}</strong></div><div><span>Service</span><strong>${h(service.name)} · ${h(variant.name)}</strong></div>${pricing}<label class="check"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></div><div class="form-actions"><button class="primary" onclick="submitCase()">Create case</button></div>`;
 }
 
@@ -423,7 +452,7 @@ function applicableDocuments(documents, details) {
   return documents.filter(item => !item.when || !Object.hasOwn(details || {}, item.when.field) || !String(details[item.when.field] || '').trim() || String(details[item.when.field]) === String(item.when.equals));
 }
 
-function rerenderWizard() { closeDrawer(); drawWizard(); }
+function rerenderWizard({keepScroll=false}={}) {const scroll=keepScroll?(document.querySelector('#drawer .panel')?.scrollTop||0):0;closeDrawer();drawWizard();if(keepScroll) document.querySelector('#drawer .panel').scrollTop=scroll;}
 function saveStep1() {
   draft.customer = { mobile: document.querySelector('#mobile').value, name: document.querySelector('#name').value, email: document.querySelector('#email').value, address: document.querySelector('#address').value };
   if (!draft.customer.mobile || !draft.customer.name) return toast('Name and mobile are required');
@@ -468,7 +497,7 @@ async function pickDoc(encodedType, file) {
     draft.docs[type] = { fileName:file.name, mimeType:file.type, size:file.size, ...(cloudUploads ? {file} : {content:await fileAsBase64(file)}) };
     toast(`${type} ready`);
   } catch (error) { toast(error.message); }
-  finally { setDrawerBusy(); rerenderWizard(); }
+  finally { setDrawerBusy(); rerenderWizard({keepScroll:true}); }
 }
 async function submitCase() {
   if (drawerBusy || draft.submitting) return;
@@ -656,4 +685,7 @@ Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3,
 Object.assign(window, { downloadCaseFiles, wizardBack });
 Object.assign(window, { saveDriveRootFolder });
 Object.assign(window, { toggleEmployeeDates, applyEmployeePeriod, createEmployee });
+Object.assign(window,{focusSignIn,switchAccount});
+document.addEventListener('click',event=>{document.querySelectorAll('.profile[open],.mobile-more[open]').forEach(menu=>{if(!menu.contains(event.target)) menu.open=false;});});
+document.addEventListener('keydown',event=>{if(event.key==='Escape') document.querySelectorAll('.profile[open],.mobile-more[open]').forEach(menu=>{menu.open=false;menu.querySelector('summary')?.focus();});});
 boot();
