@@ -50,7 +50,7 @@ test('PostgreSQL bindings preserve literals and reuse named parameter positions'
 
 test('PostgreSQL API and signed cloud uploads: access, large files, retries, analytics and completion', {timeout:60000}, async () => {
   const port = 22000 + Math.floor(Math.random()*5000)*2, origin = `http://localhost:${port}`;
-  const child = spawn(process.execPath,['tests/postgres-server.mjs'],{env:{...process.env,NODE_ENV:'test',PORT:String(port),APP_ORIGIN:origin,VERCEL:'1',DATABASE_URL:'postgresql://test:test@localhost/test',INITIAL_ADMIN_USERNAME:'admin',INITIAL_ADMIN_PASSWORD:'AdminPassword123',SESSION_SECRET:'cloud-test-private-session-secret-12345',DRIVE_MODE:'demo',SHEETS_MODE:'demo',PAYMENT_MODE:'demo'},stdio:['ignore','pipe','pipe']});
+  const child = spawn(process.execPath,['tests/postgres-server.mjs'],{env:{...process.env,NODE_ENV:'test',PORT:String(port),APP_ORIGIN:origin,VERCEL:'1',DATABASE_URL:'postgresql://test:test@localhost/test',INITIAL_ADMIN_USERNAME:'admin',INITIAL_ADMIN_PASSWORD:'AdminPassword123',SESSION_SECRET:'cloud-test-private-session-secret-12345',DRIVE_MODE:'live',SHEETS_MODE:'demo',PAYMENT_MODE:'demo',TEST_GOOGLE_REVOKED:'1',GOOGLE_OAUTH_CLIENT_ID:'mock',GOOGLE_OAUTH_CLIENT_SECRET:'mock',GOOGLE_OAUTH_REFRESH_TOKEN:'mock',GOOGLE_ROOT_FOLDER_ID:'root'},stdio:['ignore','pipe','pipe']});
   let output = '';
   child.stderr.on('data',chunk => output += chunk);
   try {
@@ -92,6 +92,8 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
       return {result,uploadId:authorization.data.uploadId};
     }
     const first = await upload('Aadhaar Card');assert.equal(first.result.status,201,JSON.stringify(first.result.data));
+    assert.equal(first.result.data.googleSyncPending,true,'An expired optional Google mirror must not fail the Supabase upload');
+    assert.equal((await request('/api/google/status',{cookie:admin})).data.reconnectRequired,true);
     const retry = await request(path+'/documents',{cookie:accounts.sales,body:{uploadId:first.uploadId}});assert.equal(retry.status,200);
     const bad = await upload('Photo',Buffer.from('not a pdf'));
     assert.equal(bad.result.status,400);

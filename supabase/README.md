@@ -150,6 +150,19 @@ and does not seed demo accounts or rewrite the production service catalog.
 
 ## 6. Connect Google services if required
 
+If Google reports `redirect_uri_mismatch`, open the OAuth client used by this app
+in Google Cloud and add this exact Authorized redirect URI (no trailing slash):
+
+`https://success-online.vercel.app/api/google/oauth/callback`
+
+Save, then return to Business analytics and click Connect/Reconnect Google Drive.
+The admin page displays the callback URL and a link to the configured OAuth
+client. `node scripts/check-google-connection.js https://success-online.vercel.app`
+can inspect the requested callback without printing secrets or authorization state.
+When Supabase Storage is enabled, expired Google authorization does not block
+case intake or document uploads. Google copy failures are recorded as sync failures;
+the primary document remains stored privately in Supabase.
+
 On Vercel configure GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET,
 GOOGLE_ROOT_FOLDER_ID and GOOGLE_OPERATIONS_SPREADSHEET_ID privately. Add
 `https://YOUR_SITE/api/google/oauth/callback` as an authorized redirect URI in

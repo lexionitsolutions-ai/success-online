@@ -1,0 +1,10 @@
+import {loadEnvFile} from 'node:process';
+loadEnvFile('.env');
+const origin=process.argv[2]||'https://success-online.vercel.app';
+const login=await fetch(origin+'/api/login',{method:'POST',headers:{'content-type':'application/json',origin},body:JSON.stringify({username:process.env.INITIAL_ADMIN_USERNAME,password:process.env.INITIAL_ADMIN_PASSWORD}),signal:AbortSignal.timeout(45000)});
+if(!login.ok) throw new Error('Administrator login failed.');
+const cookie=login.headers.get('set-cookie').split(';')[0];
+const start=await fetch(origin+'/api/google/oauth/start',{headers:{cookie},signal:AbortSignal.timeout(45000)});
+if(!start.ok) throw new Error('Google authorization is not configured.');
+const url=new URL((await start.json()).authorizationUrl);
+console.log(JSON.stringify({callbackUrl:url.searchParams.get('redirect_uri'),clientSettingsUrl:'https://console.cloud.google.com/apis/credentials/oauthclient/'+encodeURIComponent(url.searchParams.get('client_id'))}));

@@ -520,7 +520,9 @@ async function routeApi(req, res, url) {
       reconnectRequired: process.env.GOOGLE_RECONNECT_REQUIRED === '1',
       folderInvalid: process.env.GOOGLE_ROOT_FOLDER_INVALID === '1',
       live: process.env.DRIVE_MODE === 'live',
-      rootFolderId: config.rootFolderId || null
+      rootFolderId: config.rootFolderId || null,
+      callbackUrl: config.redirectUri,
+      oauthClientSettingsUrl: config.clientId ? 'https://console.cloud.google.com/apis/credentials/oauthclient/' + encodeURIComponent(config.clientId) : null
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/google/sheets/status') {
@@ -626,8 +628,8 @@ async function routeApi(req, res, url) {
       if (value && field.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return send(res, 400, { error: `Invalid ${field.label}` });
       if (value && field.type === 'number' && (!Number.isFinite(Number(value)) || Number(value) < 0)) return send(res, 400, { error: `Invalid ${field.label}` });
     }
-    // Detect expired credentials before saving a new case needing live uploads.
-    if (process.env.DRIVE_MODE === 'live') await verifyDriveRoot();
+    // Supabase is the primary store; Google availability must not block intake.
+    if (process.env.DRIVE_MODE === 'live' && !storageEnabled()) await verifyDriveRoot();
     let customerId = b.customerId;
     if (!customerId) {
       customerId = id('cus');
@@ -708,11 +710,17 @@ async function routeApi(req, res, url) {
       if (!signatureOK) return send(res, 400, { error: 'File content does not match JPG, PNG, or PDF format' });
       let storage;
       let driveFileId;
+      let googleSyncError;
       if (process.env.DRIVE_MODE === 'live') {
-        const folders = await driveFoldersForCase(c, customer, service);
-        const uploaded = await uploadDriveFile(safeName, b.mimeType, folders.caseFolderId, content);
-        storage = `gdrive://${uploaded.id}`;
-        driveFileId = uploaded.id;
+        try {
+          const folders = await driveFoldersForCase(c, customer, service);
+          const uploaded = await uploadDriveFile(safeName, b.mimeType, folders.caseFolderId, content);
+          storage = `gdrive://${uploaded.id}`;
+          driveFileId = uploaded.id;
+        } catch (error) {
+          if (!storageEnabled()) throw error;
+          googleSyncError = error.code || 'GOOGLE_SYNC_FAILED';
+        }
       } else if (!storageEnabled()) {
         const folder = join(DEMO_ROOT, 'Success Online Customers', customerDriveFolderName(customer), safeFileName(`${c.ref} - ${service.name}`));
         mkdirSync(folder, { recursive: true });
@@ -728,11 +736,13 @@ async function routeApi(req, res, url) {
       }
       const old = (await one('SELECT MAX(version) v FROM documents WHERE case_id=$id AND doc_type=$t', { $id: c.id, $t: b.docType }))?.v || 0;
       if (old) (await run('UPDATE documents SET state=$replaced WHERE case_id=$id AND doc_type=$t AND state!=$replaced', { $id: c.id, $t: b.docType, $replaced: 'replaced' }));
-      (await run('INSERT INTO documents VALUES ($id,$case_id,$doc_type,$file_name,$mime_type,$size,$storage,$drive,$state,$version,$created)', { $id: id('doc'), $case_id: c.id, $doc_type: b.docType, $file_name: safeName, $mime_type: b.mimeType, $size: content.length, $storage: storage, $drive: driveFileId, $state: 'uploaded', $version: old + 1, $created: now() }));
+      const documentId = id('doc');
+      (await run('INSERT INTO documents VALUES ($id,$case_id,$doc_type,$file_name,$mime_type,$size,$storage,$drive,$state,$version,$created)', { $id: documentId, $case_id: c.id, $doc_type: b.docType, $file_name: safeName, $mime_type: b.mimeType, $size: content.length, $storage: storage, $drive: driveFileId, $state: 'uploaded', $version: old + 1, $created: now() }));
+      if (googleSyncError) await run('INSERT INTO sync_jobs VALUES ($id,$type,$entity,$status,1,$error,$at,$at)',{$id:id('sync'),$type:'drive',$entity:documentId,$status:'failed',$error:googleSyncError,$at:now()});
       if (intent) await run('UPDATE upload_intents SET completed_at=$at WHERE id=$id',{$id:intent.id,$at:now()});
       if (intent) await run('UPDATE upload_intents SET expires_at=$at WHERE case_id=$case AND doc_type=$type AND completed_at IS NULL',{$at:now(),$case:c.id,$type:b.docType});
       (await recomputeCase(c.id));
-      send(res, 201, { ok: true, case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
+      send(res, 201, { ok: true, googleSyncPending:Boolean(googleSyncError), case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
     });
     if (req.method === 'POST' && caseMatch[2] === 'payment-order') {
       if (!(await documentGate(c, res))) return;

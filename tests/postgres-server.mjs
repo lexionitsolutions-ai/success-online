@@ -49,6 +49,13 @@ const storageServer = http.createServer(async (req,res) => {
   return json({error:'Unexpected method'},400);
 });
 await new Promise(resolve => storageServer.listen(storagePort,resolve));
+if(process.env.TEST_GOOGLE_REVOKED==='1') {
+  const originalFetch=globalThis.fetch;
+  globalThis.fetch=async (input,options)=>{
+    if(new URL(String(input)).hostname==='oauth2.googleapis.com') return new Response(JSON.stringify({error:'invalid_grant'}),{status:400,headers:{'content-type':'application/json'}});
+    return originalFetch(input,options);
+  };
+}
 const {initialize,handler} = await import('../server.js');
 await initialize({setup:true});
 const tableState = await postgres.query("SELECT relname,relrowsecurity FROM pg_class WHERE relname IN ('users','cases','documents','upload_intents')");
