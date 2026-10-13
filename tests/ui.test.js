@@ -156,6 +156,38 @@ test('admin overview skips unrelated analytics requests and loads them on the re
   assert.equal(run('requested.length'),4);
 });
 
+test('a dashboard refresh failure after payment save preserves the saved checkout', async () => {
+  const {run}=client();
+  run(`
+    checkout={id:'pay1',status:'AWAITING_VERIFICATION'};
+    const paymentSteps=[];
+    setDrawerBusy=message=>{drawerBusy=!!message;};
+    api=async()=>({payment:{id:'pay1',status:'PAID'}});
+    showPayment=async()=>{paymentSteps.push(checkout.status);if(drawerBusy) throw Error('Checkout still locked');};
+    load=async()=>{throw Error('Failed to fetch');};
+  `);
+  await run("paymentAction('verify',{})");
+  assert.equal(run('checkout.status'),'PAID');
+  assert.equal(run('paymentSteps[0]'),'PAID');
+  assert.equal(run('drawerBusy'),false);
+  assert.ok(run("messages.some(m=>m.includes('Payment details saved'))"));
+  assert.equal(run("messages.includes('Failed to fetch')"),false);
+});
+
+test('a failed payment save unlocks the existing form without reporting success', async () => {
+  const {run}=client();
+  run(`
+    checkout={id:'pay1',status:'AWAITING_VERIFICATION'};
+    setDrawerBusy=message=>{drawerBusy=!!message;};
+    api=async()=>{throw Error('Failed to fetch');};
+    showPayment=async()=>{throw Error('Should preserve the current form');};
+  `);
+  await run("paymentAction('verify',{})");
+  assert.equal(run('checkout.status'),'AWAITING_VERIFICATION');
+  assert.equal(run('drawerBusy'),false);
+  assert.equal(run('messages[0]'),'Failed to fetch');
+});
+
 test('sign-out clears admin caches and returns to the overview', async () => {
   const {run}=client();
   run("me={role:'admin'};view='admin';adminAnalytics={private:'cached'};employeeData={private:'cached'};api=async()=>({});renderLogin=()=>{};");
