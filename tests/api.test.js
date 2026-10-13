@@ -1,3 +1,4 @@
+import {confirmTestReceiver,verifyTestOrder,confirmations} from './payment-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -30,6 +31,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal((await request('/api/health')).status, 200);
     assert.equal((await request('/api/cases')).status, 401);
     const sales = await login('sales01'), otherSales = await login('sales02'), admin = await login('admin01'), office = await login('backoffice01');
+    await confirmTestReceiver(request,admin);
     assert.equal((await request('/api/admin/dashboard', { cookie:sales })).status, 403);
     const employeeBody = { name:'New Employee', username:'new.sales', role:'sales', password:'StaffPassword123' };
     assert.equal((await request('/api/admin/employees', { cookie:sales })).status, 403);
@@ -55,7 +57,8 @@ test('real API: access, document gates, uploads, bundle and completion', async (
       const details = Object.fromEntries(v.fields.filter(f => f.type === 'select').map(f => [f.label, f.options[0]]));
       const r = await request('/api/cases', { cookie:sales, body:{ variantId:v.id, customer:{ name:'Checklist Trial', mobile:'9876543210' }, details, consent:true } });
       assert.equal(r.status, 201, service.name);
-      assert.equal((await request(`/api/cases/${r.data.case.id}/payment-order`, {cookie:sales,method:'POST'})).status, 409, service.name);
+      const order=await request(`/api/cases/${r.data.case.id}/payment-order`,{cookie:sales,method:'POST'});
+      assert.equal(order.status,201,service.name);assert.equal(order.data.amount,100);assert.equal(new URL(order.data.upiIntent).searchParams.get('am'),'1.00');
     }
     const variant = services.find(s => s.slug === 'income-certificate').variants[0];
     const payload = { variantId:variant.id, customer:{ name:'Trial Customer', mobile:'9876543210' }, details:{ 'Certificate duration':'1 year', 'Ration card colour':'Other', 'Ration card area rural?':'No' }, consent:true };
@@ -68,7 +71,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const forged = 'so_session=' + Buffer.from(`${created.data.case.sales.id}|invalid`).toString('base64url');
     assert.equal((await request('/api/me', { cookie:forged })).status, 401);
     assert.equal((await request(path + '/progress', { cookie:admin, body:{status:'Awaiting Payment'} })).status, 409);
-    assert.equal((await request(path + '/payment-order', { cookie:sales, method:'POST' })).status, 409);
+    assert.equal((await request(path + '/payment-order', { cookie:sales, method:'POST' })).status, 201);
     const pdf = Buffer.from('%PDF-1.4\ntrial-document\n%%EOF');
     const upload = type => ({ docType:type, fileName:'test.pdf', mimeType:'application/pdf', size:pdf.length, content:pdf.toString('base64') });
     assert.equal((await request(path + '/documents', { cookie:sales, body:{...upload('Photo'), content:Buffer.from('fake').toString('base64')} })).status, 400);
@@ -88,7 +91,8 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal(bytes.readUInt32LE(), 0x04034b50); assert.ok(bytes.includes(Buffer.from('Trial Work/Aadhaar Card/')));
     assert.equal(bytes.readUInt16LE(bytes.length - 12), 3);
     const order = (await request(path + '/payment-order', { cookie:sales, method:'POST' })).data;
-    assert.equal((await request(path + '/verify-payment', { cookie:sales, body:{orderId:order.orderId} })).status, 200);
+    assert.equal((await request(path + '/verify-payment', { cookie:sales, body:{orderId:order.orderId} })).status, 403);
+    await verifyTestOrder(request,admin,sales,order.id);
     assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 200);
     assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 409);
     for (const status of ['Ready to Submit','Submitted to Official Portal','Document Received']) assert.equal((await request(path + '/progress', { cookie:office, body:{status} })).status, 200, status);
@@ -139,7 +143,7 @@ test('ZIP preserves Unicode names and valid central-directory count', () => {
 test('live Google adapter: workbook sync, Drive upload and private downloads (mock Google)', async () => {
   const root = mkdtempSync(join(tmpdir(), 'success-google-test-'));
   const port = 42000 + Math.floor(Math.random() * 10000), origin = `http://localhost:${port}`;
-  const child = spawn(process.execPath, ['--import','./tests/google-mock.mjs','server.js'], { env:{ ...process.env, NODE_ENV:'test', VERCEL:'', DATABASE_URL:'', SUPABASE_URL:'', SUPABASE_SECRET_KEY:'', PORT:String(port), APP_ORIGIN:origin, DATABASE_PATH:join(root,'test.sqlite'), STORAGE_PATH:join(root,'files'), DRIVE_MODE:'live', SHEETS_MODE:'live', PAYMENT_MODE:'demo', SESSION_SECRET:'google-test-secret-with-at-least-32-characters', GOOGLE_OAUTH_CLIENT_ID:'mock', GOOGLE_OAUTH_CLIENT_SECRET:'mock', GOOGLE_OAUTH_REFRESH_TOKEN:'mock', GOOGLE_ROOT_FOLDER_ID:'root', GOOGLE_OPERATIONS_SPREADSHEET_ID:'workbook', GOOGLE_MOCK_FAILURE_FILE:join(root,'revoked') }, stdio:['ignore','pipe','pipe'] });
+  const child = spawn(process.execPath, ['--import','./tests/google-mock.mjs','server.js'], { env:{ ...process.env, NODE_ENV:'test', VERCEL:'', DATABASE_URL:'', SUPABASE_URL:'', SUPABASE_SECRET_KEY:'', PORT:String(port), APP_ORIGIN:origin, DATABASE_PATH:join(root,'test.sqlite'), STORAGE_PATH:join(root,'files'), DRIVE_MODE:'live', SHEETS_MODE:'live', PAYMENT_MODE:'demo', SESSION_SECRET:'google-test-secret-with-at-least-32-characters', GOOGLE_OAUTH_CLIENT_ID:'mock', GOOGLE_OAUTH_CLIENT_SECRET:'mock', GOOGLE_OAUTH_REFRESH_TOKEN:'mock', GOOGLE_ROOT_FOLDER_ID:'root', GOOGLE_OPERATIONS_SPREADSHEET_ID:'workbook', GOOGLE_MOCK_FAILURE_FILE:join(root,'revoked'), GOOGLE_MOCK_SHEETS_FILE:join(root,'sheets.json') }, stdio:['ignore','pipe','pipe'] });
   try {
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Google test server timeout')), 15000);
@@ -166,9 +170,26 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     const zip = await fetch(origin + `/api/cases/${c.id}/download-all`,{headers:{cookie}});
     assert.equal(zip.status,200); assert.equal(Buffer.from(await zip.arrayBuffer()).readUInt32LE(),0x04034b50);
     const sync = await api('/api/google/sheets/activate', undefined, 'POST');
-    assert.equal(sync.syncedCases,1); assert.equal(sync.workbook.tabs.length,21);
+    assert.equal(sync.syncedCases,1); assert.equal(sync.workbook.tabs.length,23);
     assert.ok(sync.workbook.tabs.includes('Documents'));
     assert.ok(sync.workbook.tabs.includes('Income Certificate'));
+    await api('/api/payment-settings',{action:'confirm-receiver',utr:'100000000001',amount:1,received:true,correctRecipient:true,notes:'Synthetic fixture, not a real transfer'});
+    await api(`/api/payments/${c.payment.id}/submit`,{utr:'333333333333'});
+    writeFileSync(join(root,'revoked'),'sheets-fail');
+    const verified=await api(`/api/payments/${c.payment.id}/verify`,confirmations);
+    assert.equal(verified.payment.status,'PAID','Sheets outage must not lose database verification');
+    const inspect=new DatabaseSync(join(root,'test.sqlite'));
+    assert.equal(inspect.prepare("SELECT status FROM sync_jobs WHERE type='sheets' AND entity_id=?").get(c.id).status,'failed');inspect.close();
+    unlinkSync(join(root,'revoked'));
+    await api('/api/payments-sync',undefined,'POST');
+    await api('/api/google/sheets/activate',undefined,'POST');
+    const workbook=JSON.parse(readFileSync(join(root,'sheets.json'),'utf8'));
+    assert.equal(Object.values(workbook.Payments).length,1);
+    assert.equal(Object.values(workbook.Payments)[0][9],'PAID');
+    assert.equal(Object.values(workbook.Cashflow).length,1,'Retries upsert the same cashflow ID');
+    assert.equal(Object.values(workbook.Cashflow)[0][3],c.payment.id);
+    assert.equal(Object.values(workbook.Cashflow)[0][7],1);
+
     writeFileSync(join(root,'revoked'), 'mock revoked token');
     const failedCase = await fetch(origin + '/api/cases', {method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({variantId:variant.id,customer:{name:'Retry Trial',mobile:'9876543210'},consent:true})});
     assert.equal(failedCase.status,409);

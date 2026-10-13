@@ -42,6 +42,31 @@ const SHEET_HEADERS = {
     "Total",
     "Status"
   ],
+  "Payments": [
+    "Payment ID",
+    "Date",
+    "Order ID",
+    "Customer Name",
+    "Mobile Number",
+    "Service",
+    "Amount",
+    "Payment Method",
+    "UTR",
+    "Payment Status",
+    "Sales Employee",
+    "Verified By",
+    "Verified At"
+  ],
+  "Payment History": [
+    "Event ID",
+    "Payment ID",
+    "Action",
+    "Method",
+    "UTR",
+    "Actor ID",
+    "Notes",
+    "Date"
+  ],
   "Daily Report": [
     "Date",
     "New Cases",
@@ -263,7 +288,7 @@ function rebuildDailyReport() {
   });
   payments.forEach(function(p) {
     const key = day(p[0]);
-    if (key && ['verified','offline_approved'].indexOf(p[8]) >= 0) { bucket(key)[2]++; bucket(key)[3] += Number(p[7]) || 0; }
+    if (key && p[2] !== 'demo' && ['PAID','verified','offline_approved'].indexOf(p[8]) >= 0) { bucket(key)[2]++; bucket(key)[3] += Number(p[7]) || 0; }
   });
   const daily = ss.getSheetByName('Daily Report');
   if (daily.getLastRow() > 1) daily.getRange(2, 1, daily.getLastRow() - 1, 7).clearContent();

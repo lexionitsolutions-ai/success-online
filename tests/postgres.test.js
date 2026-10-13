@@ -1,3 +1,4 @@
+import {confirmTestReceiver,verifyTestOrder,confirmations} from './payment-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -66,6 +67,7 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const login = await request('/api/login',{body:{username:'admin',password:'AdminPassword123'}});
     assert.equal(login.status,200);
     const admin = login.response.headers.get('set-cookie').split(';')[0];
+    await confirmTestReceiver(request,admin);
     const accounts = {};
     for (const role of ['sales','backoffice']) {
       const created = await request('/api/admin/employees',{cookie:admin,body:{name:role,username:role,role,password:'EmployeePassword123'}});
@@ -109,7 +111,14 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const zipped = await fetch(zip.response.headers.get('location'));assert.equal(Buffer.from(await zipped.arrayBuffer()).readUInt32LE(),0x04034b50);
     const order = await request(path+'/payment-order',{cookie:accounts.sales,method:'POST'});
     assert.equal(order.status,201,JSON.stringify(order.data));
-    assert.equal((await request(path+'/verify-payment',{cookie:accounts.sales,body:{orderId:order.data.orderId}})).status,200);
+    assert.equal((await request(path+'/verify-payment',{cookie:accounts.sales,body:{orderId:order.data.orderId}})).status,403);
+    await verifyTestOrder(request,admin,accounts.sales,order.data.id);
+    const repeated=await Promise.all(Array.from({length:2},()=>request('/api/payments/'+order.data.id+'/verify',{cookie:admin,body:confirmations})));
+    assert.deepEqual(repeated.map(r=>r.status),[200,200]);
+    const duplicates=concurrent.slice(1).map(r=>r.data.case.payment.id);
+    for(const pid of duplicates) assert.equal((await request('/api/payments/'+pid+'/submit',{cookie:accounts.sales,body:{utr:'222222222222'}})).status,200);
+    const duplicateResults=await Promise.all(duplicates.map(pid=>request('/api/payments/'+pid+'/verify',{cookie:admin,body:confirmations})));
+    assert.deepEqual(duplicateResults.map(r=>r.status).sort(),[200,409],'Database uniqueness arbitrates competing UTR verification');
     assert.equal((await request(path+'/claim',{cookie:accounts.backoffice,method:'POST'})).status,200);
     for (const status of ['Ready to Submit','Submitted to Official Portal','Document Received']) assert.equal((await request(path+'/progress',{cookie:accounts.backoffice,body:{status}})).status,200);
     assert.equal((await upload('Received Document',pdf,accounts.backoffice)).result.status,201);

@@ -1,6 +1,6 @@
 # Success Online
 
-Internal web app for Success Online, a private Indian e-Seva assistance business. It includes sales intake, back-office queues, admin oversight, employee performance reviews, role checks, Supabase PostgreSQL and private Storage support, optional Google Drive/Sheets integrations, and isolated integration tests. Payments currently run in demo mode.
+Internal web app for Success Online, a private Indian e-Seva assistance business. It includes sales intake, back-office queues, admin oversight, employee performance reviews, role checks, Supabase PostgreSQL and private Storage support, optional Google Drive/Sheets integrations, and isolated integration tests. Direct UPI payments use manual receiving-account verification; every service costs INR 1 while test pricing is enabled.
 
 For Vercel hosting with Supabase, follow [supabase/README.md](supabase/README.md).
 
@@ -51,14 +51,14 @@ npm.cmd run build
 - `public/script.js` is the generated browser entry point. `google-apps-script/script.js` is the complete paste-ready Apps Script, identical to `Code.gs`.
 - The service catalog includes all 15 services listed in the client PDF, with conditional requirements for income, age, caste, and ration-card cases.
 - PF password entry is not collected or stored by the case intake; the customer is directed to enter it in the official portal during an assisted session.
-- The client PDF does not list service or government fees. Trial mode provides a clearly labelled no-charge simulated payment after documents are complete so clients can test assignment and delivery. Live collections require confirmed fees and a configured gateway.
+- Every service costs INR 1 while TEST_PRICING_MODE is enabled. These are real UPI transfers. An administrator must confirm the receiver before checkout opens, and verify each claimed transfer before processing.
 - Sales users only see their own cases.
 - Back office users see operational queues, claim ready cases atomically, and post status updates with notes.
 - Admin users see all cases, business metrics, employee performance over custom dates, and can create sales/back-office accounts with credentials.
 - Case references are readable (`SO-2026-000001`) while internal IDs are non-guessable UUIDs.
 - Demo Drive writes private local files under `demo-integrations/Success Online Customers`.
 - Demo Sheets writes/upserts case summaries into `demo-integrations/Success Online Operations.json` keyed by case ID.
-- Payment orders and verification are server-side and idempotent in demo mode.
+- Direct UPI orders have server-controlled amounts, UTR claims, admin verification and database uniqueness controls.
 - Apps Script source is in `google-apps-script/` for workbook setup and report maintenance.
 
 The checklists reproduce the client-provided PDF. Confirm current official requirements, document formats, and fee amounts before production submissions.
@@ -80,7 +80,7 @@ Create `Success Online Operations`, copy `google-apps-script/Code.gs` into Exten
 
 ### Payments
 
-The app is in `PAYMENT_MODE=demo`. For production, create a merchant account with a UPI-capable gateway such as Razorpay or Cashfree, then set gateway key, secret, and webhook secret privately in environment variables. Do not treat screenshots or typed UPI IDs as verified payment.
+See [PAYMENTS.md](PAYMENTS.md) for migration, receiver confirmation, prices, verification, reporting and device acceptance tests. No payment gateway is used. Opening a UPI app or submitting a UTR never marks an order paid.
 
 ## Security notes
 

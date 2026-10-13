@@ -1,0 +1,83 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtempSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+import {confirmTestReceiver,confirmations} from './payment-fixture.js';
+
+test('direct UPI security, attempts, expiry, manual verification, prices, refunds and receipts',{timeout:30000},async()=>{
+  const root=mkdtempSync(join(tmpdir(),'upi-test-')),port=45000+Math.floor(Math.random()*5000),origin=`http://localhost:${port}`,path=join(root,'test.sqlite');
+  const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),DATABASE_PATH:path,STORAGE_PATH:join(root,'files'),DRIVE_MODE:'demo',SHEETS_MODE:'demo',TEST_PRICING_MODE:'true',SESSION_SECRET:'test-secret-for-isolated-payment-db-only',APP_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
+  let output='';child.stderr.on('data',c=>output+=c);
+  try {
+    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(output)),15000);child.stdout.on('data',d=>{if(String(d).includes('running')) {clearTimeout(timer);resolve();}});child.on('exit',()=>{clearTimeout(timer);reject(Error(output));});});
+    async function request(route,{cookie,body,method=body?'POST':'GET'}={}) {const r=await fetch(origin+route,{method,headers:{'content-type':'application/json',...(cookie?{cookie}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json(),response:r};}
+    const login=async username=>(await request('/api/login',{body:{username,password:'Demo@12345'}})).response.headers.get('set-cookie').split(';')[0];
+    const admin=await login('admin01'),sales=await login('sales01'),other=await login('sales02'),office=await login('backoffice01');
+    const services=(await request('/api/services',{cookie:sales})).data.services,variant=services.find(s=>s.slug==='pf-assistance').variants[0];
+    const create=async()=>{const r=await request('/api/cases',{cookie:sales,body:{variantId:variant.id,customer:{name:'Test Customer',mobile:'9876543210'},consent:true,amount:1,upiId:'attacker@upi',payment_status:'PAID'}});assert.equal(r.status,201);return r.data.case;};
+    const c=await create(),base='/api/payments/'+c.payment.id;
+    assert.equal(c.payment.amount,100);assert.equal(c.payment.status,'PENDING');
+    assert.equal((await request(base,{cookie:sales})).data.upiIntent,null);
+    assert.equal((await request(base+'/initiate',{cookie:sales,body:{method:'QR'}})).status,409);
+    assert.equal((await request('/api/payment-settings',{cookie:sales,body:{action:'test-pricing',enabled:false}})).status,403);
+    await confirmTestReceiver(request,admin);
+    assert.equal((await request(base,{cookie:other})).status,404);
+    assert.equal((await request(base)).status,401);
+    const opened=await request(`/api/cases/${c.id}/payment-order`,{cookie:sales,method:'POST'});
+    assert.equal(opened.data.id,c.payment.id);assert.equal(new URL(opened.data.upiIntent).searchParams.get('pa'),'7558548187-3@ybl');
+    assert.equal((await request(base+'/receipt',{cookie:sales})).status,409);
+    for(const method of ['Google Pay','PhonePe','Paytm','BHIM','Other UPI App','QR']) {
+      const r=await request(base+'/initiate',{cookie:sales,body:{method,amount:100000,status:'PAID'}});assert.equal(r.status,200);assert.equal(r.data.payment.status,'INITIATED');assert.equal(r.data.payment.amount,100);
+    }
+    for(const utr of ['abc','12345678901','1234567890123']) assert.equal((await request(base+'/submit',{cookie:sales,body:{utr}})).status,400);
+    assert.equal((await request(base+'/cancel',{cookie:sales,body:{}})).data.payment.status,'CANCELLED');
+    const replacement=(await request(`/api/cases/${c.id}/payment-order`,{cookie:sales,method:'POST'})).data;
+    assert.notEqual(replacement.id,c.payment.id);
+    const local=new DatabaseSync(path);local.prepare('UPDATE upi_orders SET expires_at=? WHERE payment_id=?').run('2000-01-01',replacement.id);local.close();
+    assert.equal((await request('/api/payments/'+replacement.id,{cookie:sales})).data.status,'EXPIRED');
+    // Late claims on cancelled/expired checkouts must remain reconcilable.
+    assert.equal((await request(base+'/submit',{cookie:sales,body:{utr:'123456789012'}})).data.payment.status,'AWAITING_VERIFICATION');
+    assert.equal((await request(base+'/verify',{cookie:sales,body:confirmations})).status,403);
+    assert.equal((await request(base+'/verify',{cookie:office,body:confirmations})).status,403);
+    assert.equal((await request(base+'/verify',{cookie:admin,body:{...confirmations,amountMatches:false}})).status,400);
+    assert.equal((await request('/api/payments',{cookie:admin})).data.metrics.collected,0);
+    assert.equal((await request(`/api/cases/${c.id}/claim`,{cookie:office,method:'POST'})).status,409);
+    const c2=await create(),base2='/api/payments/'+c2.payment.id;
+    await request(base2+'/submit',{cookie:sales,body:{utr:'123456789012'}});
+    const verified=await Promise.all([request(base+'/verify',{cookie:admin,body:confirmations}),request(base2+'/verify',{cookie:admin,body:confirmations})]);
+    assert.deepEqual(verified.map(r=>r.status).sort(),[200,409]);
+    const winner=verified[0].status===200 ? base : base2,loser=winner===base?base2:base;
+    assert.equal((await request(winner+'/verify',{cookie:admin,body:confirmations})).status,200);
+    assert.equal((await request(loser+'/submit',{cookie:sales,body:{utr:'123456789012'}})).status,409);
+    assert.equal((await request('/api/payments',{cookie:admin})).data.metrics.collected,100);
+    assert.equal((await request('/api/admin/dashboard?period=all',{cookie:admin})).data.metrics.collected,100);
+    assert.equal((await request(winner+'/receipt',{cookie:sales})).data.status,'PAID');
+    await request(loser+'/reject',{cookie:admin,body:{notes:'Synthetic claim was not received'}});
+    assert.equal((await request(loser,{cookie:sales})).data.status,'FAILED');
+    assert.equal((await request(winner+'/refund',{cookie:admin,body:{refundReceived:false,notes:'Wrong amount'}})).status,409);
+    assert.equal((await request(winner+'/refund',{cookie:admin,body:{refundReceived:true,notes:'Actual refund confirmation fixture REF-001'}})).status,200);
+    assert.equal((await request('/api/payments',{cookie:admin})).data.metrics.collected,0);
+    assert.equal((await request(loser+'/submit',{cookie:sales,body:{utr:'123456789012'}})).status,409,'Refunded references remain assigned');
+    await request('/api/payment-settings',{cookie:admin,body:{action:'price',variantId:variant.id,price:345}});
+    assert.equal((await create()).payment.amount,100,'Test pricing overrides stored standard price');
+    await request('/api/payment-settings',{cookie:admin,body:{action:'test-pricing',enabled:false}});
+    assert.equal((await create()).payment.amount,345);
+    assert.equal((await request(base,{cookie:sales})).data.amount,100,'Existing orders remain frozen');
+    assert.equal((await request(`/api/cases/${c.id}/payment-exception`,{cookie:sales,body:{reason:'Unauthorized'}})).status,403);
+    assert.equal((await request(`/api/cases/${c.id}/payment-exception`,{cookie:admin,body:{reason:''}})).status,400);
+    const pdf=Buffer.from('%PDF-1.4\nfixture\n%%EOF');
+    assert.equal((await request(`/api/cases/${c.id}/documents`,{cookie:sales,body:{docType:'Bank Passbook',fileName:'fixture.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')}})).status,201);
+    assert.equal((await request(`/api/cases/${c.id}/claim`,{cookie:office,method:'POST'})).status,409);
+    assert.equal((await request(`/api/cases/${c.id}/payment-exception`,{cookie:admin,body:{reason:'Synthetic exception fixture for approved work before payment'}})).status,200);
+    assert.equal((await request(`/api/cases/${c.id}/claim`,{cookie:office,method:'POST'})).status,200);
+    assert.equal((await request('/api/payments',{cookie:admin})).data.metrics.collected,0,'Processing exceptions are never revenue');
+    const check=new DatabaseSync(path);
+    assert.ok(check.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action LIKE 'payment.%'").get().n>=10);
+    assert.ok(check.prepare('SELECT COUNT(*) n FROM payment_attempts').get().n>=10);
+    assert.equal(check.prepare('SELECT COUNT(*) n FROM verified_upi_refs').get().n,1);
+    assert.equal(check.prepare('SELECT original_price FROM service_prices WHERE variant_id=?').get(variant.id).original_price,0);check.close();
+  } finally {child.kill();}
+});

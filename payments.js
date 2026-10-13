@@ -1,0 +1,173 @@
+import { randomUUID } from 'node:crypto';
+import QRCode from 'qrcode';
+
+export function paymentConfig() {
+  return { upiId: '7558548187-3@ybl', payeeName: 'SUCCESS ONLINE SERVICES', mobile: '+91 7558548187', currency: 'INR', testPricingMode: process.env.TEST_PRICING_MODE !== 'false' };
+}
+export function priceAmounts(v, override, original) {
+  if (paymentConfig().testPricingMode) return { serviceCharge:100, officialFee:0, tax:0, total:100 };
+  const serviceCharge = override ?? v.service_charge ?? 0, officialFee = original?.officialFee ?? v.official_fee ?? 0;
+  const tax = Math.round(serviceCharge * (original?.taxRate ?? v.tax_rate ?? 0) / 100);
+  return {serviceCharge, officialFee, tax, total:serviceCharge + officialFee + tax};
+}
+export function generateUPIPaymentURL({upiId, payeeName, amount, orderId, serviceName}) {
+  const config = paymentConfig();
+  if (upiId !== config.upiId || payeeName !== config.payeeName) throw new Error('Incorrect payment receiver');
+  if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 100000000) throw new Error('Invalid payment amount in paise');
+  const description = `${serviceName} ${orderId}`.replace(/[\x00-\x1f\x7f]/g,' ').replace(/\s+/g,' ').slice(0,160);
+  return 'upi://pay?' + Object.entries({pa:upiId,pn:payeeName,am:(amount/100).toFixed(2),cu:'INR',tn:description}).map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('&');
+}
+export const paymentSchema = `
+CREATE TABLE IF NOT EXISTS service_prices (variant_id TEXT PRIMARY KEY, price INTEGER NOT NULL CHECK(price >= 0), original_price INTEGER NOT NULL, original_config TEXT NOT NULL, updated_by TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS upi_orders (payment_id TEXT PRIMARY KEY REFERENCES payments(id), upi_id TEXT NOT NULL, payee_name TEXT NOT NULL, service_name TEXT NOT NULL, created_by TEXT NOT NULL, payment_method TEXT, initiated_at TEXT, submitted_at TEXT, verified_by TEXT, verification_notes TEXT, expires_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS payment_attempts (id TEXT PRIMARY KEY, payment_id TEXT NOT NULL REFERENCES payments(id), action TEXT NOT NULL, method TEXT, utr TEXT, actor_id TEXT NOT NULL, notes TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS verified_upi_refs (utr TEXT PRIMARY KEY, payment_id TEXT UNIQUE NOT NULL REFERENCES payments(id));
+CREATE TABLE IF NOT EXISTS payment_exceptions (case_id TEXT PRIMARY KEY REFERENCES cases(id), approved_by TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS one_paid_upi_per_case ON payments(case_id) WHERE gateway='direct_upi' AND status='PAID';
+CREATE INDEX IF NOT EXISTS upi_status_idx ON payments(gateway,status,created_at);
+`;
+const fail = (status,message) => { throw Object.assign(new Error(message),{status}); };
+const normalizeUTR = value => {
+  const utr = String(value || '').trim();
+  if (!/^\d{12}$/.test(utr)) fail(400,'Enter the 12-digit UPI transaction reference from the receiving or paying app.');
+  return utr;
+};
+export function createPayments({db, recomputeCase, send, body}) {
+  const {one,all,run} = db;
+  const at = () => new Date().toISOString();
+  async function audit(user, action, entity, notes) {
+    await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:randomUUID(),$actor:user.id,$action:`payment.${action}`,$type:'payment',$entity:entity,$reason:notes || '',$at:at()});
+  }
+  async function receiverReady() {
+    const record = await one("SELECT value FROM integration_settings WHERE name='UPI_RECEIVER_CONFIRMATION'");
+    try { const saved = JSON.parse(record?.value || '{}'), config = paymentConfig(); return saved.upiId === config.upiId && saved.payeeName === config.payeeName && !!saved.verifiedBy; } catch { return false; }
+  }
+  async function list(caseId, user) {
+    const params = caseId ? {$case:caseId} : user.role === 'sales' ? {$user:user.id} : {};
+    return all(`SELECT p.*,o.*,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id JOIN cases c ON c.id=p.case_id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${caseId ? 'WHERE p.case_id=$case' : user.role === 'sales' ? 'WHERE c.sales_user_id=$user' : ''} ORDER BY p.created_at DESC,p.id`,params);
+  }
+  async function createOrder(c,user) {
+    if (c.status === 'Cancelled') fail(409,'The service request is cancelled');
+    await run("UPDATE payments SET status='EXPIRED' WHERE case_id=$case AND gateway='direct_upi' AND status IN ('PENDING','INITIATED') AND id IN (SELECT payment_id FROM upi_orders WHERE expires_at < $at)",{$case:c.id,$at:at()});
+    const existing = await one("SELECT * FROM payments WHERE case_id=$case AND gateway='direct_upi' AND status IN ('PENDING','INITIATED','AWAITING_VERIFICATION','PAID') ORDER BY CASE WHEN status='PAID' THEN 0 ELSE 1 END,created_at DESC LIMIT 1",{$case:c.id});
+    if (existing) return existing;
+    const variant = await one('SELECT v.*,s.price configured_price,s.original_config FROM variants v LEFT JOIN service_prices s ON s.variant_id=v.id WHERE v.id=$id',{$id:c.variant_id});
+    const a = priceAmounts(variant,variant.configured_price,variant.original_config ? JSON.parse(variant.original_config) : undefined);
+    if (!Number.isSafeInteger(a.total) || a.total <= 0) fail(409,'Configure a positive service price first');
+    const service = await one('SELECT name FROM services WHERE id=$id',{$id:c.service_id});
+    const config = paymentConfig(), pid = `pay_${randomUUID()}`, order = `SO-P-${new Date().getUTCFullYear()}-${randomUUID()}`, stamp = at();
+    await run("INSERT INTO payments VALUES ($id,$case,'direct_upi',$order,NULL,$amount,$sc,$fee,$tax,'PENDING',NULL,$at)",{$id:pid,$case:c.id,$order:order,$amount:a.total,$sc:a.serviceCharge,$fee:a.officialFee,$tax:a.tax,$at:stamp});
+    await run('INSERT INTO upi_orders(payment_id,upi_id,payee_name,service_name,created_by,expires_at,updated_at) VALUES ($id,$upi,$name,$service,$user,$expires,$at)',{$id:pid,$upi:config.upiId,$name:config.payeeName,$service:service.name,$user:user.id,$expires:new Date(Date.now()+30*60000).toISOString(),$at:stamp});
+    await audit(user,'create',pid,`Order ${order}; amount ${a.total} paise`);
+    return one('SELECT * FROM payments WHERE id=$id',{$id:pid});
+  }
+  async function detail(pid,user) {
+    const p = (await list(null,user)).find(row=>row.id===pid);
+    if (!p) fail(404,'Payment not found');
+    if (['PENDING','INITIATED'].includes(p.status) && p.expires_at < at()) {
+      await run("UPDATE payments SET status='EXPIRED' WHERE id=$id AND status IN ('PENDING','INITIATED')",{$id:pid}); p.status='EXPIRED';
+      await run('UPDATE upi_orders SET updated_at=$at WHERE payment_id=$id',{$at:at(),$id:pid});
+      await audit(user,'expire',pid,'Checkout expired; this does not cancel a bank transfer');
+      await recomputeCase(p.case_id);
+    }
+    const ready = await receiverReady();
+    const otherPaid=await one("SELECT id FROM payments WHERE case_id=$case AND id!=$id AND status='PAID' AND gateway='direct_upi'",{$case:p.case_id,$id:p.id});
+    const active = ready && !otherPaid && p.case_status!=='Cancelled' && ['PENDING','INITIATED'].includes(p.status);
+    const upiIntent = active ? generateUPIPaymentURL({upiId:p.upi_id,payeeName:p.payee_name,amount:p.amount,orderId:p.gateway_order_id,serviceName:p.service_name}) : null;
+    return {...p,orderId:p.gateway_order_id,receiverReady:ready,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
+  }
+  async function event(p,user,action,b) {
+    await run('UPDATE upi_orders SET updated_at=$at WHERE payment_id=$id',{$at:at(),$id:p.id});
+    await run('INSERT INTO payment_attempts VALUES ($id,$payment,$action,$method,$utr,$actor,$notes,$at)',{$id:randomUUID(),$payment:p.id,$action:action,$method:b.method || null,$utr:b.utr || null,$actor:user.id,$notes:b.notes || '',$at:at()});
+    await audit(user,action,p.id,b.notes);
+  }
+  async function handle(req,res,url,user) {
+    if (url.pathname === '/api/payment-settings') {
+      if (req.method === 'GET') { send(res,200,{...paymentConfig(),receiverReady:await receiverReady(),prices:user.role==='admin' ? await all('SELECT p.*,v.name,s.name service_name FROM service_prices p JOIN variants v ON v.id=p.variant_id JOIN services s ON s.id=v.service_id') : []}); return true; }
+      if (user.role !== 'admin') fail(403,'Admin access required');
+      const b = await body(req);
+      if (req.method !== 'POST') fail(405,'Method not allowed');
+      if (b.action === 'confirm-receiver') {
+        if (b.received !== true || b.correctRecipient !== true || b.amount !== 1 || !String(b.notes || '').trim()) fail(400,'Confirm the actual recipient and a received ₹1 test transfer, with notes');
+        const utr=normalizeUTR(b.utr), record={...paymentConfig(),utr,verifiedBy:user.id,verifiedAt:at(),notes:String(b.notes).slice(0,1000)};
+        await run("INSERT INTO integration_settings VALUES ('UPI_RECEIVER_CONFIRMATION',$value) ON CONFLICT(name) DO UPDATE SET value=$value",{$value:JSON.stringify(record)});
+        await audit(user,'receiver.confirm','receiver',JSON.stringify(record));
+      } else if (b.action === 'price') {
+        if (!Number.isSafeInteger(b.price) || b.price < 1 || b.price > 100000000) fail(400,'Price must be positive integer paise');
+        const result=await run('UPDATE service_prices SET price=$price,updated_by=$user,updated_at=$at WHERE variant_id=$id',{$price:b.price,$user:user.id,$at:at(),$id:b.variantId});
+        if (!result.changes) fail(404,'Service price not found');
+        await audit(user,'price',b.variantId,String(b.price));
+      } else if (b.action === 'test-pricing') {
+        if (typeof b.enabled !== 'boolean') fail(400,'A boolean enabled setting is required');
+        await run("INSERT INTO integration_settings VALUES ('TEST_PRICING_MODE',$v) ON CONFLICT(name) DO UPDATE SET value=$v",{$v:String(b.enabled)});
+        process.env.TEST_PRICING_MODE=String(b.enabled); await audit(user,'test-pricing','settings',String(b.enabled));
+      } else fail(400,'Unknown settings action');
+      send(res,200,{ok:true});return true;
+    }
+    if (url.pathname === '/api/payments' && req.method === 'GET') {
+      let rows=await list(null,user);
+      const today=new Date(Date.now()+330*60000).toISOString().slice(0,10), verified=rows.filter(p=>p.status==='PAID');
+      const metrics={collected:verified.reduce((n,p)=>n+p.amount,0),today:verified.filter(p=>new Date(Date.parse(p.verified_at)+330*60000).toISOString().startsWith(today)).reduce((n,p)=>n+p.amount,0),verified:verified.length,pending:rows.filter(p=>['PENDING','INITIATED','EXPIRED'].includes(p.status)).length,awaiting:rows.filter(p=>p.status==='AWAITING_VERIFICATION').length,failed:rows.filter(p=>['FAILED','CANCELLED'].includes(p.status)).length};
+      for (const [key,column] of Object.entries({utr:'transaction_id',mobile:'customer_mobile',employee:'created_by',service:'service_id',status:'status'})) { const value=url.searchParams.get(key);if(value) rows=rows.filter(p=>String(p[column]||'').includes(value)); }
+      for(const key of ['from','to']) {const value=url.searchParams.get(key);if(value && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)))) fail(400,'Invalid date filter');}
+      const indiaDay=p=>new Date(Date.parse(p.created_at)+330*60000).toISOString().slice(0,10);
+      if(url.searchParams.get('from')) rows=rows.filter(p=>indiaDay(p)>=url.searchParams.get('from'));
+      if(url.searchParams.get('to')) rows=rows.filter(p=>indiaDay(p)<=url.searchParams.get('to'));
+      send(res,200,{payments:rows,metrics}); return true;
+    }
+    const match=url.pathname.match(/^\/api\/payments\/([^/]+)(?:\/(initiate|submit|cancel|verify|reject|refund|receipt))?$/);
+    if (!match) return false;
+    if (req.method==='POST' && db.cloud) {
+      // Serialize payment mutations with order creation, refunds and case processing.
+      await one('SELECT id FROM cases WHERE id=(SELECT case_id FROM payments WHERE id=$id) FOR UPDATE',{$id:match[1]});
+    }
+    const p=await detail(match[1],user), action=match[2];
+    if (req.method==='GET') {
+      if(action==='receipt' && p.status!=='PAID') fail(409,'A receipt requires verified payment');
+      send(res,200,p);return true;
+    }
+    if(req.method!=='POST' || !action || action==='receipt') fail(405,'Method not allowed');
+    const b=await body(req);
+    b.notes=String(b.notes || '').trim().slice(0,1000);
+    if(['verify','reject','refund'].includes(action) && user.role!=='admin') fail(403,'Only administrators can verify receiving account records');
+    if(['initiate','submit','cancel'].includes(action) && user.role==='backoffice') fail(403,'Only sales or admin can record payment attempts');
+    if(action==='initiate') {
+      if(!p.upiIntent) fail(409,'Checkout unavailable. Confirm the receiver or reopen an active order.');
+      if(!['Google Pay','PhonePe','Paytm','BHIM','Other UPI App','QR'].includes(b.method)) fail(400,'Choose a UPI payment method');
+      await run("UPDATE payments SET status='INITIATED' WHERE id=$id",{$id:p.id});
+      await run('UPDATE upi_orders SET payment_method=$method,initiated_at=$at,updated_at=$at WHERE payment_id=$id',{$id:p.id,$method:b.method,$at:at()});
+    } else if(action==='submit') {
+      if(['PAID','REFUNDED'].includes(p.status)) fail(409,'This payment is already verified');
+      b.utr=normalizeUTR(b.utr);
+      const used=await one('SELECT payment_id FROM verified_upi_refs WHERE utr=$utr',{$utr:b.utr});
+      if(used && used.payment_id!==p.id) fail(409,'This UTR is already assigned to a verified payment');
+      await run("UPDATE payments SET status='AWAITING_VERIFICATION',transaction_id=$utr WHERE id=$id",{$utr:b.utr,$id:p.id});
+      await run('UPDATE upi_orders SET submitted_at=$at,updated_at=$at WHERE payment_id=$id',{$id:p.id,$at:at()});
+    } else if(action==='verify') {
+      if(p.status==='PAID') {send(res,200,{ok:true,payment:p});return true;}
+      if(p.status!=='AWAITING_VERIFICATION') fail(409,'A submitted UTR is required');
+      if(!['exists','amountMatches','recipientMatches','utrMatches','notAssigned'].every(key=>b[key]===true) || !b.notes) fail(400,'Confirm all receiving-account checks and enter verification notes');
+      if(!(await receiverReady())) fail(409,'Confirm the receiving account first');
+      const assigned=await one('SELECT payment_id FROM verified_upi_refs WHERE utr=$utr',{$utr:p.transaction_id});
+      if(assigned && assigned.payment_id!==p.id) fail(409,'This UTR is already assigned to a verified payment');
+      const paid=await one("SELECT id FROM payments WHERE case_id=$case AND gateway='direct_upi' AND status='PAID'",{$case:p.case_id});
+      if(paid && paid.id!==p.id) fail(409,'Another payment is already verified for this service request');
+      await run('INSERT INTO verified_upi_refs VALUES ($utr,$id)',{$utr:normalizeUTR(p.transaction_id),$id:p.id});
+      await run("UPDATE payments SET status='PAID',verified_at=$at WHERE id=$id",{$at:at(),$id:p.id});
+      await run('UPDATE upi_orders SET verified_by=$user,verification_notes=$notes,updated_at=$at WHERE payment_id=$id',{$user:user.id,$notes:b.notes,$at:at(),$id:p.id});
+    } else if(action==='reject') {
+      if(p.status!=='AWAITING_VERIFICATION' || !b.notes) fail(409,'Reject only a pending claim with a reason');
+      await run("UPDATE payments SET status='FAILED' WHERE id=$id",{$id:p.id});
+    } else if(action==='cancel') {
+      if(!['PENDING','INITIATED'].includes(p.status)) fail(409,'Only an unsubmitted checkout can be cancelled; receiving account verification may still be necessary');
+      await run("UPDATE payments SET status='CANCELLED' WHERE id=$id",{$id:p.id});
+    } else if(action==='refund') {
+      if(p.status!=='PAID' || b.refundReceived!==true || !b.notes) fail(409,'Confirm an actual completed refund and record its reference in notes');
+      await run("UPDATE payments SET status='REFUNDED' WHERE id=$id",{$id:p.id});
+    }
+    await event(p,user,action,b);
+    await recomputeCase(p.case_id);
+    send(res,200,{ok:true,payment:await detail(p.id,user)}); return true;
+  }
+  return {handle,createOrder,detail,list,receiverReady,audit};
+}

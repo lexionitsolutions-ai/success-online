@@ -41,7 +41,7 @@ INITIAL_SALES_PASSWORD=
 INITIAL_BACKOFFICE_USERNAME=
 INITIAL_BACKOFFICE_PASSWORD=
 SESSION_SECRET=YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
-PAYMENT_MODE=demo
+TEST_PRICING_MODE=true
 DRIVE_MODE=demo
 SHEETS_MODE=demo
 ```
@@ -135,7 +135,7 @@ The `.vercelignore` file excludes local credentials, certificates and client dat
    the Node API. Do not run the legacy `configure-vercel.js` proxy generator for
    this setup.
 3. In Vercel **Settings → Environment Variables**, add DATABASE_URL, SUPABASE_URL,
-   SUPABASE_SECRET_KEY, both bucket names, SESSION_SECRET, PAYMENT_MODE,
+   SUPABASE_SECRET_KEY, both bucket names, SESSION_SECRET, TEST_PRICING_MODE,
    DRIVE_MODE and SHEETS_MODE. Put them in the Production environment. Do not
    expose database credentials to the frontend.
 4. Set `APP_ORIGIN` to the exact production website URL, including `https://` and
@@ -190,7 +190,7 @@ Supabase works without Google integration: documents remain private in Storage.
 - Review employee performance over preset and custom periods.
 - Redeploy Vercel and verify that employee accounts, cases and documents persist.
 
-Payments remain simulated until a real payment gateway adapter is implemented.
+Direct UPI payments require manual receiving-account verification. See PAYMENTS.md for receiver confirmation and release requirements.
 
 ## Maintenance
 
@@ -202,3 +202,7 @@ appropriate to your business retention policy.
 
 No real Supabase project credentials are included in the repository. Hosted
 connection and Google OAuth verification must be completed with your project.
+
+## Direct UPI upgrade
+
+Follow [PAYMENTS.md](../PAYMENTS.md) to migrate and confirm the receiver before release. The upgrade uses manual bank-record verification and no payment gateway.

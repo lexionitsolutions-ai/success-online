@@ -3,7 +3,7 @@ const app = document.querySelector('#app');
 let me = null;
 let cases = [];
 let services = [];
-let demoPayments = false;
+let testPricingMode = true;
 let cloudUploads = false;
 let googleStatus = null;
 let sheetsStatus = null;
@@ -104,9 +104,10 @@ async function load() {
   const requests = [api('/api/services'), api('/api/cases')];
   const [serviceData, caseData] = await Promise.all(requests);
   services = serviceData.services;
-  demoPayments = serviceData.demoPayments === true;
+  testPricingMode = serviceData.testPricingMode;
   cloudUploads = serviceData.cloudUploads === true;
   cases = caseData.cases;
+  if(view==='payments') await loadPayments();
   if(me.role==='admin') await loadViewData();
   else googleStatus=sheetsStatus=adminAnalytics=employeeData=null;
   render();
@@ -142,12 +143,12 @@ function renderLogin() {
   };
 }
 
-const navLabels = { dashboard: 'Overview', cases: 'Active Cases', completed: 'Completed Cases', payments: 'Pending Payments', queue: 'Operations', admin: 'Business analytics', employees: 'Employees' };
+const navLabels = { dashboard: 'Overview', cases: 'Active Cases', completed: 'Completed Cases', payments: 'Payments', queue: 'Operations', admin: 'Business analytics', employees: 'Employees' };
 
 function shell(content) {
   const links = ['dashboard','cases','completed','payments','queue','admin','employees']
     .filter(item => item !== 'queue' || me.role !== 'sales')
-    .filter(item => item !== 'payments' || me.role === 'admin')
+
     .filter(item => !['admin','employees'].includes(item) || me.role === 'admin');
   const canCreate = ['sales','admin'].includes(me.role);
   const primaryLinks=links.filter(item=>['dashboard','cases','completed','queue'].includes(item));
@@ -173,7 +174,7 @@ function shell(content) {
 
 function render() {
   if (!me) return renderLogin();
-  const content = view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPendingPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : renderDashboard();
+  const content = view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : renderDashboard();
   app.innerHTML = shell(content);
   labelTables();
 }
@@ -232,31 +233,12 @@ function caseToolbar(rows, completed) {
   return `<div class="toolbar"><div class="toolbar-controls"><label class="search"><span>Search</span><input id="caseSearch" oninput="filterCases(${completed})" placeholder="Case ID, customer, service, phone"></label>${serviceFilter}</div><span id="caseListCount" class="count-label">${number(rows.length)} ${completed ? 'completed' : 'active'} cases</span></div>`;
 }
 
-function renderPendingPayments() {
-  if (me.role !== 'admin') return empty('Admin access required.');
-  const pending = cases.filter(item => item.payment_state === 'unpaid');
-  return `${pageHead('Pending Payments', 'Clients whose payment has not yet been completed.')}
-    <section class="metric-grid compact">
-      ${metricCard('Pending clients', number(pending.length), 'Awaiting payment', 'amber')}
-      ${metricCard('Amount pending', money(pending.reduce((total, item) => total + item.amounts.total, 0)), 'Total outstanding', 'blue')}
-    </section>
-    <section class="section-head"><div><h2>Unpaid clients</h2><p>Open a client to review the case or record payment.</p></div><span class="count-label">${number(pending.length)} clients</span></section>
-    <div class="table-shell">${pending.length ? pendingPaymentTable(pending) : empty('No pending payments.')}</div>`;
-}
-
-function pendingPaymentTable(rows) {
-  return `<table class="table"><thead><tr><th>Case</th><th>Client</th><th>Service</th><th>Case status</th><th>Amount due</th><th>Created</th></tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
-    <td><strong>${h(item.ref)}</strong></td><td><strong>${h(item.customer.name)}</strong><small>${h(item.customer.mobile.replace(/\d(?=\d{4})/g, 'x'))}</small></td>
-    <td>${h(item.service.name)}<small>${h(item.variant.name)}</small></td><td>${statusBadge(item.status)}</td><td><strong>${money(item.amounts.total)}</strong>${statusBadge('Unpaid')}</td><td>${dateTime(item.created_at)}</td>
-  </tr>`).join('')}</tbody></table>`;
-}
-
 function caseTable(rows) {
   return `<table class="table case-table"><thead><tr><th>Case</th><th>Customer</th><th>Service</th><th>Status</th><th>Payment</th><th>Owner</th><th>Updated</th></tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
     <td><strong><button class="case-link" onclick="event.stopPropagation();openCase('${item.id}')" aria-label="Open case ${h(item.ref)}">${h(item.ref)}</button></strong><small>${h(item.priority)}</small></td>
     <td><strong>${h(item.customer.name)}</strong><small>${h(item.customer.mobile.replace(/\d(?=\d{4})/g, 'x'))}</small></td>
     <td>${h(item.service.name)}<small>${h(item.variant.name)}</small></td>
-    <td>${statusBadge(item.status)}</td><td>${statusBadge(item.payment_state)}</td>
+    <td>${statusBadge(item.status)}</td><td>${statusBadge(item.payment?.status || item.payment_state)}<small>${money(item.amounts.total)}</small><small>${h(item.payment?.gateway_order_id || '')}</small></td>
     <td>${h(item.backoffice?.name || 'Unassigned')}</td><td>${dateTime(item.updated_at)}</td>
   </tr>`).join('')}</tbody></table>`;
 }
@@ -418,7 +400,7 @@ function wizardBody(service, variant) {
   }
   const amount = variant?.amounts || { serviceCharge:0, officialFee:0, tax:0, total:0 };
   const pricing = amount.total ? `<div class="price-row"><span>Service charge ${money(amount.serviceCharge)}</span><span>Official fee ${money(amount.officialFee)}</span><span>Tax ${money(amount.tax)}</span></div><div class="review-total"><span>Total payable</span><strong>${money(amount.total)}</strong></div>` : `<div class="review-total"><span>Price</span><strong>To be confirmed</strong><small>Confirm the service and official fees before collecting payment.</small></div>`;
-  return `<div class="review"><div><span>Customer</span><strong>${h(draft.customer.name)}</strong></div><div><span>Service</span><strong>${h(service.name)} · ${h(variant.name)}</strong></div>${pricing}<label class="check"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></div><div class="form-actions"><button class="primary" onclick="submitCase()">Create case</button></div>`;
+  return `<div class="review"><div><span>Customer</span><strong>${h(draft.customer.name)}</strong></div><div><span>Service</span><strong>${h(service.name)} · ${h(variant.name)}</strong></div>${pricing}${testPricingMode ? '<p>INR 1 test pricing is active. UPI payments transfer real money.</p>' : ''}<label class="check"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></div><div class="form-actions"><button class="primary" onclick="submitCase()">Create case</button></div>`;
 }
 
 function bindWizard() {
@@ -520,7 +502,7 @@ async function submitCase() {
       draft.uploaded[docType] = identity;
       completed++;
     }
-    setDrawerBusy(); closeDrawer(); await load(); toast(`Created ${created.ref}`); await openCase(created.id);
+    setDrawerBusy(); closeDrawer(); await load(); toast(`Created ${created.ref}`); await pay(created.id);
   } catch (error) {
     toast(error.message + (draft.createdCase ? ` Case ${draft.createdCase.ref} is saved; retry pending uploads after fixing the issue.` : ''));
     const actions = document.querySelector('#wizard .form-actions');
@@ -578,7 +560,7 @@ function caseDetail(item, documents, notes) {
   return `<div class="drawer-head"><div><p class="eyebrow">${h(item.ref)}</p><h2>${h(item.customer.name)}</h2><p>${h(item.service.name)} · ${h(item.variant.name)}</p></div><button class="quiet" onclick="closeDrawer()">Close</button></div>
     <div class="case-summary"><div><span>Status</span>${statusBadge(item.status)}</div><div><span>Payment</span>${statusBadge(item.payment_state)}</div><div><span>${priced ? 'Total' : 'Price'}</span><strong>${priced ? money(item.amounts.total) : 'To be confirmed'}</strong></div><div><span>Owner</span><strong>${h(item.backoffice?.name || 'Unassigned')}</strong></div></div>
     ${intakeDetails ? `<section class="detail-section"><div class="panel-title"><div><h3>Application details</h3><p>Information collected for this service request.</p></div></div><div class="review">${intakeDetails}</div></section>` : ''}
-    <section class="detail-section"><div class="panel-title"><div><h3>Payment</h3><p>${priced ? 'Service, government fee, and tax collection.' : 'Fees need confirmation. Trial payment lets you demonstrate the workflow without collecting money.'}</p></div>${demoPayments && item.payment_state === 'unpaid' ? `<button onclick="pay('${item.id}')" ${item.document_state !== 'complete' ? 'disabled' : ''}>${priced ? 'Run demo payment' : 'Confirm trial payment (no charge)'}</button>` : ''}</div>${priced ? `<div class="price-row"><span>Service ${money(item.amounts.serviceCharge)}</span><span>Official ${money(item.amounts.officialFee)}</span><span>Tax ${money(item.amounts.tax)}</span></div>` : ''}</section>
+    <section class="detail-section"><div class="panel-title"><div><h3>Payment</h3><p>Direct UPI — receiving-account verification required.</p></div>${['sales','admin'].includes(me.role) ? `<button onclick="pay('${item.id}')">${item.payment?.status==='PAID' ? 'View payment receipt' : 'Open UPI checkout'}</button>` : ''}</div><p>Amount ${money(item.amounts.total)} · ${h(item.payment?.status || item.payment_state)}</p>${item.payment ? `<p class="payment-order">Order ${h(item.payment.gateway_order_id)} · Verified ${dateTime(item.payment.verified_at)}</p>` : ''}${me.role==='admin' && item.payment_state!=='paid' ? `<details><summary>Approve processing before payment</summary><label>Exception reason<input id="exceptionReason" maxlength="1000"></label><button onclick="approvePaymentException('${item.id}')">Record exception</button></details>` : ''}</section>
     <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div>${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div><div class="upload-list">${documentChecklist(item, documents)}</div></section>
     ${receivedDocumentPanel(item, documents)}
     <section class="detail-section"><div class="panel-title"><div><h3>Timeline</h3><p>Recorded status changes and internal notes.</p></div></div><div class="timeline">${notes.length ? notes.map(note => `<div><i></i><span><strong>${h(note.new_status)}</strong><p>${h(note.note || 'Status updated')}</p><small>${h(note.actor)} · ${dateTime(note.created_at)}</small></span></div>`).join('') : empty('No updates yet.')}</div></section>
@@ -657,7 +639,7 @@ async function uploadCaseDocument(caseId, encodedType, input) {
   } catch (error) { input.value = ''; if (badge) { badge.textContent = 'Upload failed'; badge.className = 'badge danger'; } toast(error.message); }
   finally { setDrawerBusy(); }
 }
-async function pay(caseId) { try { const order = await api(`/api/cases/${caseId}/payment-order`, { method:'POST' }); await api(`/api/cases/${caseId}/verify-payment`, { method:'POST', body:{ orderId:order.orderId } }); closeDrawer(); await load(); openCase(caseId); toast('Demo payment verified'); } catch (error) { toast(error.message); } }
+
 async function claim(caseId) { try { await api(`/api/cases/${caseId}/claim`, { method:'POST' }); closeDrawer(); await load(); openCase(caseId); toast('Case assigned to you'); } catch (error) { toast(error.message); } }
 async function submitReceivedDocument(caseId, button) { try { button.disabled = true; button.textContent = 'Submitting...'; await api(`/api/cases/${caseId}/submit-received-document`, { method:'POST' }); closeDrawer(); await load(); setView('completed'); toast('Document submitted. Request closed'); } catch (error) { button.disabled = false; button.textContent = 'Submit'; toast(error.message); } }
 async function progress(caseId) { try { await api(`/api/cases/${caseId}/progress`, { method:'POST', body:{ status:document.querySelector('#nextStatus').value, note:document.querySelector('#note').value, visibility:'sales' } }); closeDrawer(); await load(); openCase(caseId); toast('Status updated'); } catch (error) { toast(error.message); } }
@@ -672,10 +654,11 @@ async function saveDriveRootFolder(button) {
 }
 async function activateGoogleSheets() { try { toast('Verifying workbook and syncing cases'); const result = await api('/api/google/sheets/activate', { method:'POST' }); await load(); toast(`Google Sheets live: ${result.syncedCases} cases synced`); } catch (error) { toast(error.message); } }
 async function setAnalyticsPeriod(period) { analyticsPeriod = period; adminAnalytics = await api(`/api/admin/dashboard?period=${period}`); render(); }
-async function logout() { if (drawerBusy) return; closeDrawer(); await api('/api/logout', { method:'POST' }); me = null;view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;renderLogin(); }
+async function logout() { if (drawerBusy) return; closeDrawer(); await api('/api/logout', { method:'POST' }); me = null;view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;paymentData=paymentSettings=checkout=null;paymentFilters='';renderLogin(); }
 async function setView(next) {
   if(drawerBusy) return;
   closeDrawer();view=next;render();
+  if(next==='payments') {await refreshPayments();return;}
   if(me.role==='admin' && ['admin','employees'].includes(next)) {
     try {await loadViewData();if(view===next) render();} catch(error) {toast(error.message);}
   }
@@ -688,4 +671,94 @@ Object.assign(window, { toggleEmployeeDates, applyEmployeePeriod, createEmployee
 Object.assign(window,{focusSignIn,switchAccount});
 document.addEventListener('click',event=>{document.querySelectorAll('.profile[open],.mobile-more[open]').forEach(menu=>{if(!menu.contains(event.target)) menu.open=false;});});
 document.addEventListener('keydown',event=>{if(event.key==='Escape') document.querySelectorAll('.profile[open],.mobile-more[open]').forEach(menu=>{menu.open=false;menu.querySelector('summary')?.focus();});});
+// Direct UPI checkout uses the existing staff session and UI.
+let paymentData = null, paymentSettings = null, checkout = null;
+let paymentFilters = '';
+async function loadPayments() {
+  [paymentData,paymentSettings] = await Promise.all([api('/api/payments'+paymentFilters),api('/api/payment-settings')]);
+}
+function renderPayments() {
+  if (!paymentData) return empty('Loading payments…');
+  const m=paymentData.metrics;
+  return `${pageHead('Payments','Direct UPI collections. Only receiving-account verification records revenue.')}
+    ${me.role==='admin' ? `<section class="metric-grid compact">${metricCard('Verified collections',money(m.collected),'All verified UPI collections','green')}${metricCard('Today',money(m.today),'India time','green')}${metricCard('Pending',number(m.pending),'Unsubmitted / expired','amber')}${metricCard('Awaiting verification',number(m.awaiting),'Customer claims','amber')}${metricCard('Failed / cancelled',number(m.failed),'Review receiving account if needed','blue')}${metricCard('Verified transactions',number(m.verified),'Manually checked','green')}</section>${paymentSettingsPanel()}` : ''}
+    <form id="paymentFilters" class="formgrid" onsubmit="filterPayments(event)">
+      <label>UTR<input name="utr" inputmode="numeric"></label><label>Customer mobile<input name="mobile" inputmode="tel"></label>
+      <label>Service<select name="service"><option value="">All services</option>${services.map(s=>`<option value="${h(s.id)}">${h(s.name)}</option>`).join('')}</select></label>
+      <label>Employee<select name="employee"><option value="">All employees</option>${[...new Map(paymentData.payments.map(p=>[p.created_by,p])).values()].map(p=>`<option value="${h(p.created_by)}">${h(p.employee_name)}</option>`).join('')}</select></label>
+      <label>From<input name="from" type="date"></label><label>To<input name="to" type="date"></label>
+      <label>Status<select name="status"><option value="">All statuses</option>${['PENDING','INITIATED','AWAITING_VERIFICATION','PAID','FAILED','CANCELLED','EXPIRED','REFUNDED'].map(s=>`<option>${s}</option>`).join('')}</select></label>
+      <div class="form-actions"><button class="primary">Filter</button><button type="button" onclick="resetPaymentFilters()">Reset</button><button type="button" onclick="exportPayments()">Export report</button></div>
+    </form><div class="table-shell"><table class="table"><thead><tr><th>Order / Customer</th><th>Service</th><th>Amount</th><th>Method / UTR</th><th>Employee</th><th>Status</th><th>Date</th><th>Action</th></tr></thead><tbody>${paymentData.payments.map(p=>`<tr><td><strong>${h(p.gateway_order_id)}</strong><small>${h(p.customer_name)} · ${h(p.customer_mobile)}</small></td><td>${h(p.service_name)}</td><td>${money(p.amount)}</td><td>${h(p.payment_method || '—')}<small>${h(p.transaction_id || '—')}</small></td><td>${h(p.employee_name)}</td><td>${statusBadge(p.status)}</td><td>${dateTime(p.created_at)}</td><td><button onclick="showPayment('${p.id}')">${me.role==='admin' && p.status==='AWAITING_VERIFICATION' ? 'Review claim' : 'View'}</button></td></tr>`).join('')}</tbody></table></div>`;
+}
+function paymentSettingsPanel() {
+  const c=paymentSettings;
+  return `<details class="summary-box" ${!c.receiverReady ? 'open' : ''}><summary><strong>Receiver & service pricing</strong> · ${c.receiverReady ? 'Receiver confirmed' : 'Receiver confirmation required'} · ${c.testPricingMode ? 'TEST_PRICING_MODE: ₹1' : 'Standard pricing'}</summary>
+    <p>${h(c.payeeName)} · ${h(c.upiId)} · ${h(c.mobile)}</p><p>₹1 testing transfers real money. Before enabling checkout, make one controlled transfer in your UPI app and confirm the actual receiving account.</p>
+    ${!c.receiverReady ? `<form class="formgrid" onsubmit="confirmReceiver(event)"><label>Received test UTR<input name="utr" pattern="[0-9]{12}" required maxlength="12"></label><label>Receiving-account evidence / notes<textarea name="notes" required maxlength="1000"></textarea></label><label class="check"><input name="received" type="checkbox" required>Actual ₹1 transfer received</label><label class="check"><input name="correctRecipient" type="checkbox" required>Account belongs to SUCCESS ONLINE SERVICES</label><button class="primary">Confirm receiving account</button></form>` : ''}
+    <p>Saved standard prices remain available when test pricing is disabled. Existing orders keep their original amount.</p><button onclick="setTestPricing(${!c.testPricingMode})">${c.testPricingMode ? 'Disable' : 'Enable'} ₹1 test pricing</button>
+    <div class="formgrid">${c.prices.map(p=>`<form onsubmit="saveServicePrice(event,'${p.variant_id}')"><label>${h(p.service_name)} — standard ₹ price<input name="price" type="number" min="0.01" max="1000000" step="0.01" value="${(p.price/100).toFixed(2)}" required></label><small>Original: ${money(p.original_price)}</small><button>Save price</button></form>`).join('')}</div>
+    <button onclick="retryPaymentSync()">Retry failed Google Sheets sync</button></details>`;
+}
+async function filterPayments(event) {event.preventDefault();paymentFilters='?'+new URLSearchParams(new FormData(event.target));await refreshPayments();}
+async function resetPaymentFilters() {paymentFilters='';await refreshPayments();}
+async function refreshPayments() {try {await loadPayments();render();} catch(e) {toast(e.message);}}
+async function paymentSetting(body) {try {await api('/api/payment-settings',{method:'POST',body});await load();await refreshPayments();} catch(e) {toast(e.message);}}
+async function confirmReceiver(event) {event.preventDefault();const f=event.target;await paymentSetting({action:'confirm-receiver',utr:f.utr.value,notes:f.notes.value,amount:1,received:f.received.checked,correctRecipient:f.correctRecipient.checked});}
+async function setTestPricing(enabled) {await paymentSetting({action:'test-pricing',enabled});}
+async function saveServicePrice(event,variantId) {event.preventDefault();await paymentSetting({action:'price',variantId,price:Math.round(Number(event.target.price.value)*100)});}
+async function retryPaymentSync() {try {await api('/api/payments-sync',{method:'POST'});toast('Google Sheets retry completed; inspect integration status for failures.');} catch(e) {toast(e.message);}}
+function exportPayments() {
+  const columns=['id','gateway_order_id','customer_name','customer_mobile','service_name','amount','payment_method','transaction_id','employee_name','status','created_at','verified_by','verified_at'];
+  const cell=value=>'"'+String(value??'').replace(/^[=+\-@\t\r]/,"'$&").replace(/"/g,'""')+'"';
+  const csv=[columns.join(','),...paymentData.payments.map(p=>columns.map(k=>cell(k==='amount' ? (p.amount/100).toFixed(2) : p[k])).join(','))].join('\r\n');
+  downloadPaymentAsset(URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'})),'payments.csv',true);
+}
+function downloadPaymentAsset(url,name,revoke=false) {const a=document.createElement('a');a.href=url;a.download=name;a.click();if(revoke) setTimeout(()=>URL.revokeObjectURL(url),1000);}
+async function copyPayment(kind) {try {await navigator.clipboard.writeText(kind==='id' ? checkout.upi_id : checkout.upiIntent);toast('Copied');} catch {toast('Copy unavailable. Select the displayed UPI ID or payment link manually.');}}
+async function pay(caseId) {
+  try {const p=await api(`/api/cases/${caseId}/payment-order`,{method:'POST'});closeDrawer();await showPayment(p.id);} catch(e) {toast(e.message);}
+}
+async function showPayment(pid) {
+  if(drawerBusy) return;
+  try {checkout=await api(`/api/payments/${pid}`);closeDrawer();document.body.insertAdjacentHTML('beforeend',`<div class="drawer" id="drawer"><div class="panel case-panel payment-checkout">${checkoutHTML(checkout)}</div></div>`);} catch(e) {toast(e.message);}
+}
+function checkoutHTML(p) {
+  const active=!!p.upiIntent, editable=['sales','admin'].includes(me.role), verified=p.status==='PAID';
+  return `<div class="drawer-head"><div><p class="eyebrow">Direct UPI checkout</p><h2>${h(p.payee_name)}</h2><p>${h(p.service_name)} · ${h(p.customer_name)}</p></div><button onclick="closeDrawer()">Close</button></div>
+    <div class="review-total"><span>Amount payable</span><strong>${money(p.amount)}</strong></div><p class="payment-order">Order: ${h(p.gateway_order_id)}</p>${statusBadge(p.status)}
+    <p>${verified ? 'Payment verified successfully. Your service request is now eligible for processing once required documents are complete.' : p.status==='AWAITING_VERIFICATION' ? 'Payment details submitted successfully. Your payment is awaiting verification.' : 'Opening an app, returning here, or entering a UTR does not verify payment.'}</p>
+    ${!p.receiverReady ? '<div class="summary-box" role="alert">Checkout is blocked until an administrator confirms the receiving account using a controlled ₹1 test transfer.</div>' : ''}
+    ${['EXPIRED','CANCELLED','FAILED'].includes(p.status) ? '<div class="summary-box" role="alert">This checkout is inactive. An expired or cancelled checkout does not cancel a UPI transfer. Submit the UTR if money was sent; otherwise reopen checkout.</div>' : ''}
+    ${active && editable ? `<div class="upi-layout"><section class="upi-apps"><h3>Pay using UPI</h3><div class="upi-options">${['Google Pay','PhonePe','Paytm','BHIM','Other UPI App'].map((app,i)=>`<button class="upi-app upi-${i}" onclick="launchUPI('${app}')"><span aria-hidden="true">${['G','P','P','B','↗'][i]}</span>${app}</button>`).join('')}</div><p class="muted">On supported mobile browsers, choose your installed app. PhonePe, Paytm and BHIM use the generic UPI chooser. If an app does not open, scan or download the QR.</p><button onclick="paymentAction('initiate',{method:'QR'})">Scan QR code</button><p>Review the actual recipient and ${money(p.amount)} in your app before authorizing.</p><p>Checkout expires ${dateTime(p.expires_at)}.</p></section><section class="upi-qr"><h3>Scan & Pay</h3><img src="${p.qrDataUrl}" alt="UPI QR for ${h(p.gateway_order_id)}" width="360" height="360"><strong>${money(p.amount)}</strong><p>UPI ID: <span class="selectable">${h(p.upi_id)}</span></p><div class="form-actions"><button onclick="downloadPaymentAsset(checkout.qrDataUrl,'upi-qr.png')">Download QR</button><button onclick="copyPayment('id')">Copy UPI ID</button><button onclick="copyPayment('link')">Copy payment link</button></div><details><summary>Payment link</summary><p class="payment-order selectable">${h(p.upiIntent)}</p></details></section></div>
+    <p>Have you completed your payment?</p><div class="form-actions"><button class="primary" onclick="document.querySelector('#utrForm').scrollIntoView();document.querySelector('#utrForm input').focus()">I Have Paid</button><button onclick="launchUPI('Other UPI App')">Retry Payment</button><button onclick="paymentAction('cancel',{})">Cancel Payment</button></div>` : ''}
+    ${editable && !['PAID','REFUNDED'].includes(p.status) ? `<form id="utrForm" class="summary-box" onsubmit="submitUTR(event)"><label>UPI transaction reference (UTR)<input name="utr" inputmode="numeric" pattern="[0-9]{12}" maxlength="12" required placeholder="12-digit reference" value="${h(p.transaction_id || '')}"></label><p>Copy the reference from the actual transaction. An administrator will check the receiving account.</p><button class="primary">Submit payment details</button></form>` : ''}
+    ${editable && ['EXPIRED','CANCELLED','FAILED'].includes(p.status) ? `<button onclick="pay('${p.case_id}')">Reopen payment request</button>` : ''}
+    ${verified ? `<div class="summary-box"><h3>Verified payment receipt</h3><p>Amount ${money(p.amount)} · UTR ${h(p.transaction_id)}</p><p>Verified by ${h(p.verified_by)} at ${dateTime(p.verified_at)}</p><button onclick="downloadReceipt()">Download receipt</button></div>` : ''}
+    ${me.role==='admin' && p.status==='AWAITING_VERIFICATION' ? `<form id="verifyForm" class="summary-box" onsubmit="verifyUPIPayment(event)"><h3>Check the actual receiving account</h3><p>Expected amount: ${money(p.amount)} · Recipient: ${h(p.upi_id)} · UTR: ${h(p.transaction_id)}</p>${[['exists','Transaction exists in the receiving account'],['amountMatches','Received amount matches the order'],['recipientMatches','Recipient is correct'],['utrMatches','UTR matches the actual transaction'],['notAssigned','Transaction has not been assigned to another order']].map(([key,label])=>`<label class="check"><input type="checkbox" name="${key}" required>${label}</label>`).join('')}<label>Verification notes<textarea name="notes" required maxlength="1000"></textarea></label><div class="form-actions"><button class="primary">Verify received payment</button><button type="button" onclick="rejectUPIPayment()">Reject claim</button></div></form>` : ''}
+    <section class="detail-section"><h3>Payment history</h3>${p.attempts.map(e=>`<p>${dateTime(e.created_at)} · ${h(e.action)} · ${h(e.method || '')} · ${h(e.utr || '')} · ${h(e.notes || '')}</p>`).join('') || '<p>No payment attempts yet.</p>'}</section>`;
+}
+async function launchUPI(method) {
+  if(!checkout?.upiIntent) return toast('Reopen checkout before paying.');
+  if(Date.now()>=Date.parse(checkout.expires_at)) {toast('Checkout has expired. Reopen the payment request.');await showPayment(checkout.id);return;}
+  const mobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if(!mobile) {toast('Use the QR code with your phone.');document.querySelector('.upi-qr')?.scrollIntoView();return;}
+  // Navigation is synchronous within the tap so browsers retain user activation.
+  const uri=checkout.upiIntent;
+  api(`/api/payments/${checkout.id}/initiate`,{method:'POST',body:{method}}).catch(e=>toast(e.message));
+  location.href=method==='Google Pay' ? uri.replace('upi://pay','gpay://upi/pay') : uri;
+  setTimeout(()=>toast('If no app opened, use Other UPI Apps or scan the QR. Payment still requires verification.'),1800);
+}
+async function paymentAction(action,body) {
+  if(drawerBusy) return;
+  setDrawerBusy('Saving payment details…');
+  try {const r=await api(`/api/payments/${checkout.id}/${action}`,{method:'POST',body});checkout=r.payment;await load();setDrawerBusy();await showPayment(checkout.id);if(action==='submit') toast('Payment details submitted successfully. Your payment is awaiting verification.');} catch(e) {toast(e.message);} finally {setDrawerBusy();}
+}
+async function submitUTR(event) {event.preventDefault();await paymentAction('submit',{utr:event.target.utr.value});}
+async function verifyUPIPayment(event) {event.preventDefault();const f=event.target;await paymentAction('verify',Object.fromEntries(['exists','amountMatches','recipientMatches','utrMatches','notAssigned'].map(k=>[k,f.elements[k].checked]).concat([['notes',f.notes.value]])));}
+async function rejectUPIPayment() {const notes=document.querySelector('#verifyForm textarea').value.trim();if(!notes) return toast('Enter a rejection reason in verification notes.');await paymentAction('reject',{notes});}
+async function downloadReceipt() {try {const p=await api(`/api/payments/${checkout.id}/receipt`);const text=`SUCCESS ONLINE SERVICES\nVerified direct UPI receipt\nOrder: ${p.gateway_order_id}\nCustomer: ${p.customer_name}\nService: ${p.service_name}\nAmount: INR ${(p.amount/100).toFixed(2)}\nUTR: ${p.transaction_id}\nVerified at: ${p.verified_at}\nVerified by: ${p.verified_by}\n`;downloadPaymentAsset(URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),'payment-receipt.txt',true);} catch(e) {toast(e.message);}}
+async function approvePaymentException(caseId) {const reason=document.querySelector('#exceptionReason').value.trim();if(!reason) return toast('Enter a reason');try {await api(`/api/cases/${caseId}/payment-exception`,{method:'POST',body:{reason}});closeDrawer();await load();await openCase(caseId);} catch(e) {toast(e.message);}}
+Object.assign(window,{showPayment,pay,launchUPI,paymentAction,submitUTR,verifyUPIPayment,rejectUPIPayment,filterPayments,resetPaymentFilters,exportPayments,confirmReceiver,setTestPricing,saveServicePrice,retryPaymentSync,downloadPaymentAsset,copyPayment,downloadReceipt,approvePaymentException});
+
 boot();

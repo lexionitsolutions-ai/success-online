@@ -14,6 +14,14 @@
     CREATE TABLE IF NOT EXISTS integration_settings (name TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS upload_intents (id TEXT PRIMARY KEY, case_id TEXT, user_id TEXT, doc_type TEXT, file_name TEXT, mime_type TEXT, size INTEGER, storage_path TEXT, expires_at TEXT, completed_at TEXT);
 
+CREATE TABLE IF NOT EXISTS service_prices (variant_id TEXT PRIMARY KEY, price INTEGER NOT NULL CHECK(price >= 0), original_price INTEGER NOT NULL, original_config TEXT NOT NULL, updated_by TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS upi_orders (payment_id TEXT PRIMARY KEY REFERENCES payments(id), upi_id TEXT NOT NULL, payee_name TEXT NOT NULL, service_name TEXT NOT NULL, created_by TEXT NOT NULL, payment_method TEXT, initiated_at TEXT, submitted_at TEXT, verified_by TEXT, verification_notes TEXT, expires_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS payment_attempts (id TEXT PRIMARY KEY, payment_id TEXT NOT NULL REFERENCES payments(id), action TEXT NOT NULL, method TEXT, utr TEXT, actor_id TEXT NOT NULL, notes TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS verified_upi_refs (utr TEXT PRIMARY KEY, payment_id TEXT UNIQUE NOT NULL REFERENCES payments(id));
+CREATE TABLE IF NOT EXISTS payment_exceptions (case_id TEXT PRIMARY KEY REFERENCES cases(id), approved_by TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS one_paid_upi_per_case ON payments(case_id) WHERE gateway='direct_upi' AND status='PAID';
+CREATE INDEX IF NOT EXISTS upi_status_idx ON payments(gateway,status,created_at);
+
 CREATE INDEX IF NOT EXISTS cases_sales_idx ON cases(sales_user_id,created_at);
 CREATE INDEX IF NOT EXISTS cases_backoffice_idx ON cases(backoffice_user_id,status);
 CREATE INDEX IF NOT EXISTS documents_case_idx ON documents(case_id,doc_type,state);
@@ -47,3 +55,13 @@ ALTER TABLE public.integration_settings ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.integration_settings FROM anon, authenticated;
 ALTER TABLE public.upload_intents ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.upload_intents FROM anon, authenticated;
+ALTER TABLE public.service_prices ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.service_prices FROM anon, authenticated;
+ALTER TABLE public.upi_orders ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.upi_orders FROM anon, authenticated;
+ALTER TABLE public.payment_attempts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.payment_attempts FROM anon, authenticated;
+ALTER TABLE public.verified_upi_refs ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.verified_upi_refs FROM anon, authenticated;
+ALTER TABLE public.payment_exceptions ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.payment_exceptions FROM anon, authenticated;
