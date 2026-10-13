@@ -2,7 +2,7 @@ import {confirmTestReceiver,verifyTestOrder,confirmations} from './payment-fixtu
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtempSync,writeFileSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,readFileSync,existsSync,unlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {rootCertificates} from 'node:tls';
@@ -130,5 +130,41 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     }
     assert.equal((await request('/api/admin/employees?period=all',{cookie:admin})).status,200);
     assert.equal((await request('/api/admin/employees',{cookie:accounts.sales})).status,403);
+  } finally {child.kill();}
+});
+test('cloud payments commit before delayed Sheets work and preserve retryable jobs', {timeout:60000}, async()=>{
+  const root=mkdtempSync(join(tmpdir(),'payment-cloud-sync-'));
+  const port=34000+Math.floor(Math.random()*4000)*2, origin=`http://localhost:${port}`;
+  const failure=join(root,'google-failure'), workbookFile=join(root,'sheets.json');
+  const child=spawn(process.execPath,['--import','./tests/google-mock.mjs','tests/postgres-server.mjs'],{env:{...process.env,NODE_ENV:'test',PORT:String(port),APP_ORIGIN:origin,VERCEL:'1',DATABASE_URL:'postgresql://test:test@localhost/test',INITIAL_ADMIN_USERNAME:'admin',INITIAL_ADMIN_PASSWORD:'AdminPassword123',SESSION_SECRET:'cloud-payment-test-private-session-secret',DRIVE_MODE:'demo',SHEETS_MODE:'live',TEST_GOOGLE_REVOKED:'0',GOOGLE_OAUTH_CLIENT_ID:'mock',GOOGLE_OAUTH_CLIENT_SECRET:'mock',GOOGLE_OAUTH_REFRESH_TOKEN:'mock',GOOGLE_OPERATIONS_SPREADSHEET_ID:'workbook',GOOGLE_MOCK_FAILURE_FILE:failure,GOOGLE_MOCK_SHEETS_FILE:workbookFile},stdio:['ignore','pipe','pipe']});
+  let errors='';child.stderr.on('data',chunk=>errors+=chunk);
+  try {
+    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(errors)),20000);child.stdout.on('data',chunk=>{if(String(chunk).includes('running')){clearTimeout(timer);resolve();}});child.on('exit',code=>{clearTimeout(timer);reject(Error('Cloud fixture exited '+code+': '+errors));});});
+    const login=await fetch(origin+'/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'admin',password:'AdminPassword123'})});
+    const cookie=login.headers.get('set-cookie').split(';')[0];
+    async function api(path,body,method=body?'POST':'GET') {
+      const r=await fetch(origin+path,{method,headers:{cookie,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});const data=await r.json();assert.ok(r.ok,path+': '+JSON.stringify(data));return data;
+    }
+    await api('/api/payment-settings',{action:'enable-receiver',ownerConfirmed:true});
+    const services=(await api('/api/services')).services;
+    const variant=services.find(s=>s.slug==='pf-assistance').variants[0];
+    const c=(await api('/api/cases',{variantId:variant.id,customer:{name:'Synthetic Cloud Payment',mobile:'9876543210'},consent:true})).case;
+    await api('/api/payments/'+c.payment.id+'/submit',{utr:'444444444444'});
+    await api('/api/payments-sync',undefined,'POST');
+    writeFileSync(failure,'sheets-slow-fail');
+    const started=performance.now();
+    const result=await api('/api/payments/'+c.payment.id+'/verify',confirmations);
+    assert.equal(result.payment.status,'PAID');
+    assert.ok(performance.now()-started<1500,'Cloud verification returns before the 2-second Google response');
+    // The fixture has one physical connection, so allow its background worker to finish.
+    await new Promise(resolve=>setTimeout(resolve,2500));
+    assert.equal((await api('/api/payments/'+c.payment.id)).status,'PAID');
+    unlinkSync(failure);
+    await api('/api/payments-sync',undefined,'POST');
+    assert.ok(existsSync(workbookFile));
+    const workbook=JSON.parse(readFileSync(workbookFile,'utf8'));
+    assert.equal(Object.values(workbook.Cashflow).length,1);
+    assert.equal(Object.values(workbook.Cashflow)[0][3],c.payment.id);
+    assert.ok(!errors.includes('Deferred Sheets sync failed'),errors);
   } finally {child.kill();}
 });

@@ -54,9 +54,12 @@ export function createPayments({db, recomputeCase, send, body}) {
     return receiverActivation(read('UPI_RECEIVER_CONFIRMATION'),read('UPI_RECEIVER_ACTIVATION'));
   }
   async function receiverReady() {return (await receiverStatus()).ready;}
-  async function list(caseId, user) {
-    const params = caseId ? {$case:caseId} : user.role === 'sales' ? {$user:user.id} : {};
-    return all(`SELECT p.*,o.*,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id JOIN cases c ON c.id=p.case_id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${caseId ? 'WHERE p.case_id=$case' : user.role === 'sales' ? 'WHERE c.sales_user_id=$user' : ''} ORDER BY p.created_at DESC,p.id`,params);
+  async function list(caseId, user, paymentId=null) {
+    const params={}, filters=[];
+    if(caseId) {params.$case=caseId;filters.push('p.case_id=$case');}
+    if(user.role==='sales') {params.$user=user.id;filters.push('c.sales_user_id=$user');}
+    if(paymentId) {params.$payment=paymentId;filters.push('p.id=$payment');}
+    return all(`SELECT p.*,o.*,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id JOIN cases c ON c.id=p.case_id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${filters.length ? 'WHERE '+filters.join(' AND ') : ''} ORDER BY p.created_at DESC,p.id`,params);
   }
   async function createOrder(c,user) {
     if (c.status === 'Cancelled') fail(409,'The service request is cancelled');
@@ -80,7 +83,7 @@ export function createPayments({db, recomputeCase, send, body}) {
     return one('SELECT * FROM payments WHERE id=$id',{$id:pid});
   }
   async function detail(pid,user) {
-    const p = (await list(null,user)).find(row=>row.id===pid);
+    const p = (await list(null,user,pid))[0];
     if (!p) fail(404,'Payment not found');
     if (['PENDING','INITIATED'].includes(p.status) && p.expires_at < at()) {
       await run("UPDATE payments SET status='EXPIRED' WHERE id=$id AND status IN ('PENDING','INITIATED')",{$id:pid}); p.status='EXPIRED';

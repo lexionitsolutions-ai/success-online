@@ -7,6 +7,8 @@ import { loadEnvFile } from 'node:process';
 import { createDatabase } from './database.js';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { waitUntil } from '@vercel/functions';
 import { storage, storageEnabled, signedDownload, readStorage, writeStorage, downloadFileLimit } from './storage.js';
 import { serviceCatalog } from './service-catalog.js';
 import { sheetHeaders, serviceTabs } from './operations-schema.js';
@@ -23,6 +25,8 @@ const RECEIVED_DOCUMENT_TYPE = 'Received Document';
 if (!process.env.VERCEL) mkdirSync(DEMO_ROOT, { recursive: true });
 export const db = createDatabase();
 const { one, all, run } = db;
+const deferredSheets = new AsyncLocalStorage();
+const sheetsContext = new AsyncLocalStorage();
 const paymentSystem = createPayments({db, recomputeCase, send, body});
 let servicePrices = new Map();
 
@@ -205,7 +209,8 @@ async function tokenRequest(params) {
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams(params)
+    body: new URLSearchParams(params),
+    signal: sheetsContext.getStore()?.signal || AbortSignal.timeout(10000)
   });
   const result = await response.json();
   if (!response.ok) {
@@ -218,10 +223,13 @@ async function tokenRequest(params) {
   return result;
 }
 async function googleAccessToken() {
+  const batch = sheetsContext.getStore();
+  if (batch?.token) return batch.token;
   const config = oauthConfig();
   if (!config.clientId || !config.clientSecret || !config.refreshToken) throw new Error('Google Drive OAuth is not connected');
   const token = await tokenRequest({ client_id: config.clientId, client_secret: config.clientSecret, refresh_token: config.refreshToken, grant_type: 'refresh_token' });
   if (process.env.GOOGLE_RECONNECT_REQUIRED === '1') (await updateEnv('GOOGLE_RECONNECT_REQUIRED', '0'));
+  if (batch) batch.token = token.access_token;
   return token.access_token;
 }
 async function driveRequest(path, options = {}) {
@@ -239,6 +247,7 @@ async function sheetsRequest(path, options = {}) {
   const token = await googleAccessToken();
   const response = await fetch(`https://sheets.googleapis.com${path}`, {
     ...options,
+    signal: sheetsContext.getStore()?.signal || AbortSignal.timeout(10000),
     headers: { authorization: `Bearer ${token}`, ...(options.headers || {}) }
   });
   const text = await response.text();
@@ -304,19 +313,29 @@ async function syncCaseToGoogle(caseId) {
 let sheetsSyncChain = Promise.resolve();
 async function queueSheetsSync(caseId) {
   (await run(`INSERT INTO sync_jobs VALUES ($id,'sheets',$entity,'pending',0,NULL,$n,$n) ON CONFLICT(type, entity_id) DO UPDATE SET status='pending', updated_at=$n`, { $id: id('sync'), $entity: caseId, $n: now() }));
+  const deferred = deferredSheets.getStore();
+  if (deferred) { deferred.add(caseId); return; }
+  await performSheetsSync(caseId);
+}
+async function performSheetsSync(caseId) {
   if(process.env.GOOGLE_RECONNECT_REQUIRED==='1' && storageEnabled()) {
     await run("UPDATE sync_jobs SET status='failed',attempts=attempts+1,last_error='GOOGLE_RECONNECT_REQUIRED',updated_at=$n WHERE type='sheets' AND entity_id=$entity",{$entity:caseId,$n:now()});
     return;
   }
-  sheetsSyncChain = sheetsSyncChain.then(async () => {
+  const sync = async () => {
+    // Serialize workbook upserts across instances, outside payment transactions.
+    if (db.cloud) await one('SELECT pg_advisory_xact_lock(73194201)');
+    const job = await one("SELECT updated_at,status FROM sync_jobs WHERE type='sheets' AND entity_id=$entity",{$entity:caseId});
+    if (!job || job.status === 'ok') return;
     try {
-      await syncCaseToGoogle(caseId);
-      (await run("UPDATE sync_jobs SET status='ok',attempts=attempts+1,last_error=NULL,updated_at=$n WHERE type='sheets' AND entity_id=$entity", { $entity: caseId, $n: now() }));
+      await sheetsContext.run({signal:AbortSignal.timeout(40000)},()=>syncCaseToGoogle(caseId));
+      (await run("UPDATE sync_jobs SET status='ok',attempts=attempts+1,last_error=NULL,updated_at=$n WHERE type='sheets' AND entity_id=$entity AND updated_at=$version", { $entity: caseId, $n: now(), $version:job.updated_at }));
     } catch (error) {
-      (await run("UPDATE sync_jobs SET status='failed',attempts=attempts+1,last_error=$error,updated_at=$n WHERE type='sheets' AND entity_id=$entity", { $entity: caseId, $error: error.message, $n: now() }));
+      (await run("UPDATE sync_jobs SET status='failed',attempts=attempts+1,last_error=$error,updated_at=$n WHERE type='sheets' AND entity_id=$entity AND updated_at=$version", { $entity: caseId, $error: error.message, $n: now(), $version:job.updated_at }));
       console.error(`Sheets sync failed for ${caseId}: ${error.message}`);
     }
-  });
+  };
+  sheetsSyncChain = sheetsSyncChain.catch(() => {}).then(() => db.cloud ? db.transaction(sync) : sync());
   await sheetsSyncChain;
 }
 async function verifyDriveRoot(folderId = oauthConfig().rootFolderId) {
@@ -592,9 +611,6 @@ async function routeApi(req, res, url) {
       (await updateEnv('SHEETS_MODE', 'live'));
       const caseIds = (await all('SELECT id FROM cases ORDER BY created_at')).map(row => row.id);
       for (const caseId of caseIds) await queueSheetsSync(caseId);
-      await sheetsSyncChain;
-      const failures = (await all("SELECT entity_id,last_error FROM sync_jobs WHERE type='sheets' AND status='failed'"));
-      if (failures.length) throw new Error(`Workbook connected, but ${failures.length} case syncs failed: ${failures[0].last_error}`);
       send(res, 200, { live: true, workbook, syncedCases: caseIds.length });
     })();
   }
@@ -1007,12 +1023,26 @@ export async function handler(req, res) {
       end(content) { response ||= {status:200,headers:{}}; response.content = content; },
       setHeader(key,value) { res.setHeader(key,value); }
     };
-    await db.transaction(async () => {
+    const sheetsJobs = new Set();
+    const paymentRequest = /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/payment-order$/.test(url.pathname);
+    await deferredSheets.run(sheetsJobs, () => db.transaction(async () => {
       if (db.cloud) for (const setting of await all('SELECT name,value FROM integration_settings')) process.env[setting.name] = setting.value;
       servicePrices=new Map((await all('SELECT variant_id,price,original_config FROM service_prices')).map(p=>[p.variant_id,{price:p.price,original:JSON.parse(p.original_config)}]));
       await routeApi(req, buffered, url);
-    });
+    }));
+    const syncWork = () => Promise.all([...sheetsJobs].map(caseId=>performSheetsSync(caseId)));
+    if (!paymentRequest) {
+      await syncWork();
+      if (url.pathname === '/api/google/sheets/activate' && response.status === 200) {
+        const failures = await all("SELECT entity_id,last_error FROM sync_jobs WHERE type='sheets' AND status='failed'");
+        if (failures.length) throw new Error(`Workbook connected, but ${failures.length} case syncs failed: ${failures[0].last_error}`);
+      }
+    }
     res.writeHead(response.status, response.headers); res.end(response.content);
+    if (paymentRequest && sheetsJobs.size) {
+      const work = syncWork().catch(error=>console.error('Deferred Sheets sync failed:',error.code || error.name));
+      if (process.env.VERCEL) waitUntil(work);
+    }
   } catch (error) {
     const constraint = ['23505','SQLITE_CONSTRAINT_UNIQUE'].includes(error.code) || error.errcode===2067;
     const status = error.status || (constraint ? 409 : 500);

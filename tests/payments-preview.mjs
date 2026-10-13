@@ -20,6 +20,21 @@ try {
   const serviceResponse=await context.request.get(origin+'/api/services'),services=(await serviceResponse.json()).services;
   const v=services.find(s=>s.slug==='pf-assistance').variants[0];
   const c=await (await context.request.post(origin+'/api/cases',{data:{variantId:v.id,customer:{name:'Browser Test',mobile:'9876543210'},consent:true}})).json();
+  await page.goto(origin);
+  for(const width of [320,390,1280]) {
+    await page.setViewportSize({width,height:900});
+    await page.evaluate(caseId=>window.openCase(caseId),c.case.id);
+    const card=page.locator('.case-payment');await card.waitFor();
+    assert.ok(await card.evaluate(el=>el.scrollWidth<=el.clientWidth+1),'Case payment card overflow at '+width);
+    assert.equal(await card.locator('.case-payment-details').evaluate(el=>el.open),false);
+    await card.screenshot({path:join(screenshots,`case-payment-${width}.png`)});
+    const requests=[];const onRequest=req=>{if(req.url().includes('/api/') && req.url().includes('payment')) requests.push(req.url());};
+    page.on('request',onRequest);
+    await card.getByRole('button',{name:'Open UPI checkout'}).click();
+    await page.locator('.checkout-amount').waitFor();page.off('request',onRequest);
+    assert.equal(requests.length,1,'Opening checkout uses its complete POST response, with no duplicate payment GET');
+    await page.locator('.checkout-close').click();
+  }
   await page.goto(origin);await page.evaluate(()=>window.setView('payments'));
   await page.locator('[name="ownerConfirmed"]').waitFor();
   await page.locator('[name="ownerConfirmed"]').check();await page.getByRole('button',{name:'Enable UPI checkout',exact:true}).click();
@@ -32,6 +47,7 @@ try {
     await page.keyboard.press('Shift+Tab');
     assert.ok(await page.locator('.payment-checkout').evaluate(el=>el.contains(document.activeElement)),'Keyboard focus stays in checkout');
     assert.equal(await page.locator('.upi-app').count(),5);
+    assert.equal(await page.locator('.upi-brand-logo').evaluateAll(images=>images.filter(img=>img.complete && img.naturalWidth>0).length),4,'All local brand logos load');
     assert.equal(await page.locator('#qrChoice').evaluate(el=>el.open),width>=701);
     assert.equal(await page.locator('#utrForm').isVisible(),false);
     assert.ok(await page.locator('.payment-checkout').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'Checkout overflow at '+width);

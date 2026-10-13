@@ -175,10 +175,15 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     assert.ok(sync.workbook.tabs.includes('Income Certificate'));
     await api('/api/payment-settings',{action:'confirm-receiver',utr:'100000000001',amount:1,received:true,correctRecipient:true,notes:'Synthetic fixture, not a real transfer'});
     await api(`/api/payments/${c.payment.id}/submit`,{utr:'333333333333'});
-    writeFileSync(join(root,'revoked'),'sheets-fail');
+    writeFileSync(join(root,'revoked'),'sheets-slow-fail');
+    const started=performance.now();
     const verified=await api(`/api/payments/${c.payment.id}/verify`,confirmations);
+    assert.ok(performance.now()-started<1500,'Payment verification must return before a slow Sheets request');
     assert.equal(verified.payment.status,'PAID','Sheets outage must not lose database verification');
+    assert.equal((await api(`/api/payments/${c.payment.id}`)).status,'PAID','The committed payment remains readable while Google is still waiting');
     const inspect=new DatabaseSync(join(root,'test.sqlite'));
+    const deadline=Date.now()+6000;
+    while(inspect.prepare("SELECT status FROM sync_jobs WHERE type='sheets' AND entity_id=?").get(c.id).status!=='failed' && Date.now()<deadline) await new Promise(resolve=>setTimeout(resolve,50));
     assert.equal(inspect.prepare("SELECT status FROM sync_jobs WHERE type='sheets' AND entity_id=?").get(c.id).status,'failed');inspect.close();
     unlinkSync(join(root,'revoked'));
     await api('/api/payments-sync',undefined,'POST');
