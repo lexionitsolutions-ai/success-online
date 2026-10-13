@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 
 export function paymentConfig() {
-  return { upiId: '7558548187-3@ybl', payeeName: 'SUCCESS ONLINE SERVICES', mobile: '+91 7558548187', currency: 'INR', accountType:'personal', testPricingMode: process.env.TEST_PRICING_MODE !== 'false' };
+  return { upiId: '0791934A0195602.bqr@kotak', payeeName: 'SUCCESS ONLINE SERVICES', mobile: '+91 7558548187', currency: 'INR', accountType:'merchant', testPricingMode: process.env.TEST_PRICING_MODE !== 'false' };
 }
 export function receiverActivation(confirmation, activation) {
   const config=paymentConfig();
@@ -21,7 +21,10 @@ export function generateUPIPaymentURL({upiId, payeeName, amount, orderId, servic
   const config = paymentConfig();
   if (upiId !== config.upiId || payeeName !== config.payeeName) throw new Error('Incorrect payment receiver');
   if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 100000000) throw new Error('Invalid payment amount in paise');
-  const description = `${serviceName} ${orderId}`.replace(/[\x00-\x1f\x7f]/g,' ').replace(/\s+/g,' ').slice(0,160);
+  const clean=value=>String(value || '').replace(/[\x00-\x1f\x7f]/g,' ').replace(/\s+/g,' ').trim();
+  const reference=clean(orderId);
+  if(!reference || reference.length>60) throw new Error('Invalid payment order reference');
+  const description = `${clean(serviceName).slice(0,79-reference.length)} ${reference}`.trim();
   return 'upi://pay?' + Object.entries({pa:upiId,pn:payeeName,am:(amount/100).toFixed(2),cu:'INR',tn:description}).map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('&');
 }
 export const paymentSchema = `
@@ -57,8 +60,14 @@ export function createPayments({db, recomputeCase, send, body}) {
   }
   async function createOrder(c,user) {
     if (c.status === 'Cancelled') fail(409,'The service request is cancelled');
+    const receiver=paymentConfig();
+    const superseded=await all("SELECT p.* FROM payments p JOIN upi_orders o ON o.payment_id=p.id WHERE p.case_id=$case AND p.gateway='direct_upi' AND p.status IN ('PENDING','INITIATED') AND (o.upi_id!=$upi OR o.payee_name!=$name)",{$case:c.id,$upi:receiver.upiId,$name:receiver.payeeName});
+    for(const p of superseded) {
+      await run("UPDATE payments SET status='CANCELLED' WHERE id=$id AND status IN ('PENDING','INITIATED')",{$id:p.id});
+      await event(p,user,'receiver_changed',{notes:`Payment request superseded by the configured receiver ${receiver.upiId}. Original receiver and any late transfer remain reconcilable.`});
+    }
     await run("UPDATE payments SET status='EXPIRED' WHERE case_id=$case AND gateway='direct_upi' AND status IN ('PENDING','INITIATED') AND id IN (SELECT payment_id FROM upi_orders WHERE expires_at < $at)",{$case:c.id,$at:at()});
-    const existing = await one("SELECT * FROM payments WHERE case_id=$case AND gateway='direct_upi' AND status IN ('PENDING','INITIATED','AWAITING_VERIFICATION','PAID') ORDER BY CASE WHEN status='PAID' THEN 0 ELSE 1 END,created_at DESC LIMIT 1",{$case:c.id});
+    const existing = await one("SELECT * FROM payments WHERE case_id=$case AND gateway='direct_upi' AND status IN ('PENDING','INITIATED','AWAITING_VERIFICATION','PAID') ORDER BY CASE WHEN status='PAID' THEN 0 WHEN status='AWAITING_VERIFICATION' THEN 1 ELSE 2 END,created_at DESC LIMIT 1",{$case:c.id});
     if (existing) return existing;
     const variant = await one('SELECT v.*,s.price configured_price,s.original_config FROM variants v LEFT JOIN service_prices s ON s.variant_id=v.id WHERE v.id=$id',{$id:c.variant_id});
     const a = priceAmounts(variant,variant.configured_price,variant.original_config ? JSON.parse(variant.original_config) : undefined);
@@ -81,9 +90,11 @@ export function createPayments({db, recomputeCase, send, body}) {
     }
     const ready = await receiverReady();
     const otherPaid=await one("SELECT id FROM payments WHERE case_id=$case AND id!=$id AND status='PAID' AND gateway='direct_upi'",{$case:p.case_id,$id:p.id});
-    const active = ready && !otherPaid && p.case_status!=='Cancelled' && ['PENDING','INITIATED'].includes(p.status);
+    const otherClaim=await one("SELECT id FROM payments WHERE case_id=$case AND id!=$id AND status='AWAITING_VERIFICATION' AND gateway='direct_upi'",{$case:p.case_id,$id:p.id});
+    const config=paymentConfig(),receiverChanged=p.upi_id!==config.upiId || p.payee_name!==config.payeeName;
+    const active = ready && !receiverChanged && !otherPaid && !otherClaim && p.case_status!=='Cancelled' && ['PENDING','INITIATED'].includes(p.status);
     const upiIntent = active ? generateUPIPaymentURL({upiId:p.upi_id,payeeName:p.payee_name,amount:p.amount,orderId:p.gateway_order_id,serviceName:p.service_name}) : null;
-    return {...p,orderId:p.gateway_order_id,receiverReady:ready,receiverAccountType:paymentConfig().accountType,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
+    return {...p,orderId:p.gateway_order_id,receiverReady:ready,receiverChanged,otherClaimPending:!!otherClaim,receiverAccountType:receiverChanged ? 'previous_receiver' : config.accountType,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
   }
   async function event(p,user,action,b) {
     await run('UPDATE upi_orders SET updated_at=$at WHERE payment_id=$id',{$at:at(),$id:p.id});

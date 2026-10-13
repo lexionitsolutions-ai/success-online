@@ -34,7 +34,7 @@ test('direct UPI security, attempts, expiry, manual verification, prices, refund
     assert.equal((await request(base,{cookie:other})).status,404);
     assert.equal((await request(base)).status,401);
     const opened=await request(`/api/cases/${c.id}/payment-order`,{cookie:sales,method:'POST'});
-    assert.equal(opened.data.id,c.payment.id);assert.equal(new URL(opened.data.upiIntent).searchParams.get('pa'),'7558548187-3@ybl');
+    assert.equal(opened.data.id,c.payment.id);assert.equal(new URL(opened.data.upiIntent).searchParams.get('pa'),'0791934A0195602.bqr@kotak');
     assert.equal((await request(base+'/receipt',{cookie:sales})).status,409);
     for(const method of ['Google Pay','PhonePe','Paytm','BHIM','Other UPI App','QR','Manual UPI']) {
       const r=await request(base+'/initiate',{cookie:sales,body:{method,amount:100000,status:'PAID'}});assert.equal(r.status,200);assert.equal(r.data.payment.status,'INITIATED');assert.equal(r.data.payment.amount,100);
@@ -81,6 +81,18 @@ test('direct UPI security, attempts, expiry, manual verification, prices, refund
     assert.equal((await request(`/api/cases/${c.id}/payment-exception`,{cookie:admin,body:{reason:'Synthetic exception fixture for approved work before payment'}})).status,200);
     assert.equal((await request(`/api/cases/${c.id}/claim`,{cookie:office,method:'POST'})).status,200);
     assert.equal((await request('/api/payments',{cookie:admin})).data.metrics.collected,0,'Processing exceptions are never revenue');
+    const rotationCase=await create(),oldId=rotationCase.payment.id;
+    const rotationDb=new DatabaseSync(path);
+    rotationDb.prepare('UPDATE upi_orders SET upi_id=? WHERE payment_id=?').run('7558548187-3@ybl',oldId);rotationDb.close();
+    const oldDetail=await request('/api/payments/'+oldId,{cookie:sales});
+    assert.equal(oldDetail.status,200);assert.equal(oldDetail.data.receiverChanged,true);assert.equal(oldDetail.data.upiIntent,null);
+    const rotated=(await request(`/api/cases/${rotationCase.id}/payment-order`,{cookie:sales,method:'POST'})).data;
+    assert.notEqual(rotated.id,oldId);assert.equal(rotated.upi_id,'0791934A0195602.bqr@kotak');assert.equal(rotated.amount,rotationCase.payment.amount);
+    const preserved=(await request('/api/payments/'+oldId,{cookie:sales})).data;
+    assert.equal(preserved.upi_id,'7558548187-3@ybl');assert.equal(preserved.status,'CANCELLED');assert.ok(preserved.attempts.some(e=>e.action==='receiver_changed'));
+    assert.equal((await request('/api/payments/'+oldId+'/submit',{cookie:sales,body:{utr:'444444444444'}})).status,200,'Late transfers to the previous receiver remain reconcilable');
+    assert.equal((await request('/api/payments/'+rotated.id,{cookie:sales})).data.upiIntent,null,'An earlier pending claim blocks duplicate collection');
+    assert.equal((await request(`/api/cases/${rotationCase.id}/payment-order`,{cookie:sales,method:'POST'})).data.id,oldId,'Review the existing claim before requesting another payment');
     const check=new DatabaseSync(path);
     assert.ok(check.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action LIKE 'payment.%'").get().n>=10);
     assert.ok(check.prepare('SELECT COUNT(*) n FROM payment_attempts').get().n>=10);

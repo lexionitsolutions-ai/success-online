@@ -26,7 +26,7 @@ test('UPI app buttons preserve server-prefilled recipient and amount without ver
   context.setTimeout=()=>0;
   run(`
     const paymentCalls=[];
-    checkout={id:'pay1',receiverAccountType:'personal',amount:100,status:'PENDING',expires_at:new Date(Date.now()+60000).toISOString(),upiIntent:'upi://pay?pa=7558548187-3%40ybl&pn=SUCCESS%20ONLINE%20SERVICES&am=1.00&cu=INR&tn=PAN%20Card%20SO1'};
+    checkout={id:'pay1',receiverAccountType:'merchant',amount:100,status:'PENDING',expires_at:new Date(Date.now()+60000).toISOString(),upiIntent:'upi://pay?pa=0791934A0195602.bqr%40kotak&pn=SUCCESS%20ONLINE%20SERVICES&am=1.00&cu=INR&tn=PAN%20Card%20SO1'};
     api=async(path,options)=>{paymentCalls.push({path,options});return {};};
   `);
   for(const platform of ['iPhone','Android']) {
@@ -35,7 +35,7 @@ test('UPI app buttons preserve server-prefilled recipient and amount without ver
       await run(`launchUPI(${JSON.stringify(method)})`);
       const uri=new URL(context.location.href);
       assert.equal(uri.protocol,method==='Google Pay' ? 'gpay:' : 'upi:');
-      assert.equal(uri.searchParams.get('pa'),'7558548187-3@ybl');assert.equal(uri.searchParams.get('am'),'1.00');assert.equal(uri.searchParams.get('cu'),'INR');
+      assert.equal(uri.searchParams.get('pa'),'0791934A0195602.bqr@kotak');assert.equal(uri.searchParams.get('am'),'1.00');assert.equal(uri.searchParams.get('cu'),'INR');
       assert.equal(run('checkout.status'),'PENDING');
     }
   }

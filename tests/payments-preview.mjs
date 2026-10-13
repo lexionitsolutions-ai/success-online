@@ -58,11 +58,11 @@ try {
   await page.getByRole('button',{name:'Pay directly in my UPI app',exact:true}).click();
   await page.locator('#manualUPI').waitFor({state:'visible'});
   assert.equal(page.url(),originalURL,'Manual fallback keeps the checkout open');
-  assert.ok((await page.locator('#manualUPI').textContent()).includes('7558548187-3@ybl'));
+  assert.ok((await page.locator('#manualUPI').textContent()).includes('0791934A0195602.bqr@kotak'));
   assert.ok((await page.locator('#manualUPI').textContent()).includes('₹1.00'));
   const pending=await (await context.request.get(origin+'/api/payments/'+c.case.payment.id)).json();
   assert.equal(pending.status,'INITIATED');assert.equal(pending.payment_method,'Manual UPI');assert.equal(pending.verified_at,null);
-  assert.equal(pending.receiverAccountType,'personal');
+  assert.equal(pending.receiverAccountType,'merchant');
   assert.ok(pending.attempts.some(e=>e.method==='Manual UPI'));
   await page.screenshot({path:join(screenshots,'manual-upi.png'),fullPage:true});
   await page.getByRole('button',{name:'I have paid',exact:true}).click();
