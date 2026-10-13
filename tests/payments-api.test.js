@@ -36,7 +36,7 @@ test('direct UPI security, attempts, expiry, manual verification, prices, refund
     const opened=await request(`/api/cases/${c.id}/payment-order`,{cookie:sales,method:'POST'});
     assert.equal(opened.data.id,c.payment.id);assert.equal(new URL(opened.data.upiIntent).searchParams.get('pa'),'7558548187-3@ybl');
     assert.equal((await request(base+'/receipt',{cookie:sales})).status,409);
-    for(const method of ['Google Pay','PhonePe','Paytm','BHIM','Other UPI App','QR']) {
+    for(const method of ['Google Pay','PhonePe','Paytm','BHIM','Other UPI App','QR','Manual UPI']) {
       const r=await request(base+'/initiate',{cookie:sales,body:{method,amount:100000,status:'PAID'}});assert.equal(r.status,200);assert.equal(r.data.payment.status,'INITIATED');assert.equal(r.data.payment.amount,100);
     }
     for(const utr of ['abc','12345678901','1234567890123']) assert.equal((await request(base+'/submit',{cookie:sales,body:{utr}})).status,400);

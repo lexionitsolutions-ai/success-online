@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 
 export function paymentConfig() {
-  return { upiId: '7558548187-3@ybl', payeeName: 'SUCCESS ONLINE SERVICES', mobile: '+91 7558548187', currency: 'INR', testPricingMode: process.env.TEST_PRICING_MODE !== 'false' };
+  return { upiId: '7558548187-3@ybl', payeeName: 'SUCCESS ONLINE SERVICES', mobile: '+91 7558548187', currency: 'INR', accountType:'personal', testPricingMode: process.env.TEST_PRICING_MODE !== 'false' };
 }
 export function receiverActivation(confirmation, activation) {
   const config=paymentConfig();
@@ -83,7 +83,7 @@ export function createPayments({db, recomputeCase, send, body}) {
     const otherPaid=await one("SELECT id FROM payments WHERE case_id=$case AND id!=$id AND status='PAID' AND gateway='direct_upi'",{$case:p.case_id,$id:p.id});
     const active = ready && !otherPaid && p.case_status!=='Cancelled' && ['PENDING','INITIATED'].includes(p.status);
     const upiIntent = active ? generateUPIPaymentURL({upiId:p.upi_id,payeeName:p.payee_name,amount:p.amount,orderId:p.gateway_order_id,serviceName:p.service_name}) : null;
-    return {...p,orderId:p.gateway_order_id,receiverReady:ready,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
+    return {...p,orderId:p.gateway_order_id,receiverReady:ready,receiverAccountType:paymentConfig().accountType,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
   }
   async function event(p,user,action,b) {
     await run('UPDATE upi_orders SET updated_at=$at WHERE payment_id=$id',{$at:at(),$id:p.id});
@@ -147,7 +147,7 @@ export function createPayments({db, recomputeCase, send, body}) {
     if(['initiate','submit','cancel'].includes(action) && user.role==='backoffice') fail(403,'Only sales or admin can record payment attempts');
     if(action==='initiate') {
       if(!p.upiIntent) fail(409,'Checkout unavailable. Confirm the receiver or reopen an active order.');
-      if(!['Google Pay','PhonePe','Paytm','BHIM','Other UPI App','QR'].includes(b.method)) fail(400,'Choose a UPI payment method');
+      if(!['Google Pay','PhonePe','Paytm','BHIM','Other UPI App','QR','Manual UPI'].includes(b.method)) fail(400,'Choose a UPI payment method');
       await run("UPDATE payments SET status='INITIATED' WHERE id=$id",{$id:p.id});
       await run('UPDATE upi_orders SET payment_method=$method,initiated_at=$at,updated_at=$at WHERE payment_id=$id',{$id:p.id,$method:b.method,$at:at()});
     } else if(action==='submit') {
