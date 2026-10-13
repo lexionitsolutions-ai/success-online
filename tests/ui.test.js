@@ -19,6 +19,33 @@ function client() {
   return { context, run: source => vm.runInContext(source, context) };
 }
 
+test('UPI app buttons preserve server-prefilled recipient and amount without verifying payment',async()=>{
+  const {context,run}=client();
+  context.location={href:'https://example.test/'};
+  context.navigator={userAgent:'iPhone'};
+  context.setTimeout=()=>0;
+  run(`
+    const paymentCalls=[];
+    checkout={id:'pay1',receiverAccountType:'personal',amount:100,status:'PENDING',expires_at:new Date(Date.now()+60000).toISOString(),upiIntent:'upi://pay?pa=7558548187-3%40ybl&pn=SUCCESS%20ONLINE%20SERVICES&am=1.00&cu=INR&tn=PAN%20Card%20SO1'};
+    api=async(path,options)=>{paymentCalls.push({path,options});return {};};
+  `);
+  for(const platform of ['iPhone','Android']) {
+    context.navigator.userAgent=platform;
+    for(const method of ['Google Pay','PhonePe','Paytm','BHIM','Other UPI App']) {
+      await run(`launchUPI(${JSON.stringify(method)})`);
+      const uri=new URL(context.location.href);
+      assert.equal(uri.protocol,method==='Google Pay' ? 'gpay:' : 'upi:');
+      assert.equal(uri.searchParams.get('pa'),'7558548187-3@ybl');assert.equal(uri.searchParams.get('am'),'1.00');assert.equal(uri.searchParams.get('cu'),'INR');
+      assert.equal(run('checkout.status'),'PENDING');
+    }
+  }
+  assert.equal(run('paymentCalls.length'),10);
+  assert.ok(run("paymentCalls.every(c=>c.path==='/api/payments/pay1/initiate' && c.options.keepalive===true)"));
+  context.location.href='https://example.test/';
+  run("checkout.expires_at='2000-01-01';showPayment=async()=>{};");
+  await run("launchUPI('Google Pay')");assert.equal(context.location.href,'https://example.test/');assert.equal(run('paymentCalls.length'),10);
+});
+
 test('intake cannot continue while a selected file is being read', async () => {
   const { context, run } = client();
   run(`draft.step = 3; fileAsBase64 = () => new Promise(resolve => { window.finishRead = resolve; });`);
