@@ -19,7 +19,12 @@ test('release check blocks an unconfirmed or changed receiver in the target data
   db.prepare('INSERT INTO integration_settings VALUES (?,?)').run('UPI_RECEIVER_CONFIRMATION',JSON.stringify(confirmation));
   assert.equal(check().status,0);
   db.prepare('UPDATE integration_settings SET value=?').run(JSON.stringify({...confirmation,upiId:'different@upi'}));
-  assert.equal(check().status,1);db.close();
+  assert.equal(check().status,1);
+  const activation={...paymentConfig(),basis:'owner_confirmation',enabledBy:'test-admin',enabledAt:new Date().toISOString()};
+  db.prepare('INSERT INTO integration_settings VALUES (?,?)').run('UPI_RECEIVER_ACTIVATION',JSON.stringify(activation));
+  assert.equal(check().status,0,'Owner activation passes without a received test UTR');
+  db.prepare("UPDATE integration_settings SET value=? WHERE name='UPI_RECEIVER_ACTIVATION'").run(JSON.stringify({...activation,upiId:'different@upi'}));
+  assert.equal(check().status,1,'Activation is bound to the configured recipient');db.close();
 });
 test('UPI URI validates integer paise, configured receiver and safe encoded description',()=>{
   const input={...paymentConfig(),amount:100,orderId:'SO-2026-000001',serviceName:'PAN & Aadhaar\nTrial'};

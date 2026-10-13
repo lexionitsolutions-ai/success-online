@@ -5,7 +5,7 @@ import {mkdtempSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
-import {confirmTestReceiver,confirmations} from './payment-fixture.js';
+import {confirmations} from './payment-fixture.js';
 
 test('direct UPI security, attempts, expiry, manual verification, prices, refunds and receipts',{timeout:30000},async()=>{
   const root=mkdtempSync(join(tmpdir(),'upi-test-')),port=45000+Math.floor(Math.random()*5000),origin=`http://localhost:${port}`,path=join(root,'test.sqlite');
@@ -23,7 +23,14 @@ test('direct UPI security, attempts, expiry, manual verification, prices, refund
     assert.equal((await request(base,{cookie:sales})).data.upiIntent,null);
     assert.equal((await request(base+'/initiate',{cookie:sales,body:{method:'QR'}})).status,409);
     assert.equal((await request('/api/payment-settings',{cookie:sales,body:{action:'test-pricing',enabled:false}})).status,403);
-    await confirmTestReceiver(request,admin);
+    assert.equal((await request('/api/payment-settings',{cookie:sales,body:{action:'enable-receiver',ownerConfirmed:true}})).status,403);
+    assert.equal((await request('/api/payment-settings',{cookie:admin,body:{action:'enable-receiver',ownerConfirmed:false}})).status,400);
+    assert.equal((await request('/api/payment-settings',{cookie:admin,body:{action:'enable-receiver',ownerConfirmed:true,notes:'Synthetic business-owner account declaration'}})).status,200);
+    const settings=(await request('/api/payment-settings',{cookie:admin})).data;
+    assert.equal(settings.receiverReady,true);assert.equal(settings.receiverActivationBasis,'owner_confirmation');
+    const activationDb=new DatabaseSync(path);
+    assert.equal(activationDb.prepare("SELECT COUNT(*) n FROM integration_settings WHERE name='UPI_RECEIVER_CONFIRMATION'").get().n,0,'Activation does not invent a test transfer');
+    assert.equal(activationDb.prepare("SELECT COUNT(*) n FROM payments WHERE status='PAID'").get().n,0,'Activation does not verify any customer payment');activationDb.close();
     assert.equal((await request(base,{cookie:other})).status,404);
     assert.equal((await request(base)).status,401);
     const opened=await request(`/api/cases/${c.id}/payment-order`,{cookie:sales,method:'POST'});

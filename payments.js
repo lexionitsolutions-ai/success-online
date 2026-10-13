@@ -4,6 +4,13 @@ import QRCode from 'qrcode';
 export function paymentConfig() {
   return { upiId: '7558548187-3@ybl', payeeName: 'SUCCESS ONLINE SERVICES', mobile: '+91 7558548187', currency: 'INR', testPricingMode: process.env.TEST_PRICING_MODE !== 'false' };
 }
+export function receiverActivation(confirmation, activation) {
+  const config=paymentConfig();
+  const matches=record=>record?.upiId===config.upiId && record?.payeeName===config.payeeName;
+  if(matches(activation) && activation.basis==='owner_confirmation' && activation.enabledBy && activation.enabledAt) return {ready:true,basis:'owner_confirmation'};
+  if(matches(confirmation) && confirmation.verifiedBy && confirmation.verifiedAt && /^\d{12}$/.test(confirmation.utr || '')) return {ready:true,basis:'test_transfer'};
+  return {ready:false,basis:null};
+}
 export function priceAmounts(v, override, original) {
   if (paymentConfig().testPricingMode) return { serviceCharge:100, officialFee:0, tax:0, total:100 };
   const serviceCharge = override ?? v.service_charge ?? 0, officialFee = original?.officialFee ?? v.official_fee ?? 0;
@@ -38,10 +45,12 @@ export function createPayments({db, recomputeCase, send, body}) {
   async function audit(user, action, entity, notes) {
     await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:randomUUID(),$actor:user.id,$action:`payment.${action}`,$type:'payment',$entity:entity,$reason:notes || '',$at:at()});
   }
-  async function receiverReady() {
-    const record = await one("SELECT value FROM integration_settings WHERE name='UPI_RECEIVER_CONFIRMATION'");
-    try { const saved = JSON.parse(record?.value || '{}'), config = paymentConfig(); return saved.upiId === config.upiId && saved.payeeName === config.payeeName && !!saved.verifiedBy; } catch { return false; }
+  async function receiverStatus() {
+    const records=await all("SELECT name,value FROM integration_settings WHERE name IN ('UPI_RECEIVER_CONFIRMATION','UPI_RECEIVER_ACTIVATION')");
+    const read=name=>{try {return JSON.parse(records.find(r=>r.name===name)?.value || '{}');} catch {return {};}};
+    return receiverActivation(read('UPI_RECEIVER_CONFIRMATION'),read('UPI_RECEIVER_ACTIVATION'));
   }
+  async function receiverReady() {return (await receiverStatus()).ready;}
   async function list(caseId, user) {
     const params = caseId ? {$case:caseId} : user.role === 'sales' ? {$user:user.id} : {};
     return all(`SELECT p.*,o.*,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id JOIN cases c ON c.id=p.case_id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${caseId ? 'WHERE p.case_id=$case' : user.role === 'sales' ? 'WHERE c.sales_user_id=$user' : ''} ORDER BY p.created_at DESC,p.id`,params);
@@ -83,11 +92,16 @@ export function createPayments({db, recomputeCase, send, body}) {
   }
   async function handle(req,res,url,user) {
     if (url.pathname === '/api/payment-settings') {
-      if (req.method === 'GET') { send(res,200,{...paymentConfig(),receiverReady:await receiverReady(),prices:user.role==='admin' ? await all('SELECT p.*,v.name,s.name service_name FROM service_prices p JOIN variants v ON v.id=p.variant_id JOIN services s ON s.id=v.service_id') : []}); return true; }
+      if (req.method === 'GET') { const receiver=await receiverStatus();send(res,200,{...paymentConfig(),receiverReady:receiver.ready,receiverActivationBasis:receiver.basis,prices:user.role==='admin' ? await all('SELECT p.*,v.name,s.name service_name FROM service_prices p JOIN variants v ON v.id=p.variant_id JOIN services s ON s.id=v.service_id') : []}); return true; }
       if (user.role !== 'admin') fail(403,'Admin access required');
       const b = await body(req);
       if (req.method !== 'POST') fail(405,'Method not allowed');
-      if (b.action === 'confirm-receiver') {
+      if(b.action==='enable-receiver') {
+        if(b.ownerConfirmed!==true) fail(400,'Confirm that the configured UPI account belongs to the business');
+        const record={upiId:paymentConfig().upiId,payeeName:paymentConfig().payeeName,basis:'owner_confirmation',enabledBy:user.id,enabledAt:at(),notes:String(b.notes || 'Business owner confirmed the configured account and requested checkout activation.').trim().slice(0,1000)};
+        await run("INSERT INTO integration_settings VALUES ('UPI_RECEIVER_ACTIVATION',$value) ON CONFLICT(name) DO UPDATE SET value=$value",{$value:JSON.stringify(record)});
+        await audit(user,'receiver.enable','receiver',JSON.stringify(record));
+      } else if (b.action === 'confirm-receiver') {
         if (b.received !== true || b.correctRecipient !== true || b.amount !== 1 || !String(b.notes || '').trim()) fail(400,'Confirm the actual recipient and a received ₹1 test transfer, with notes');
         const utr=normalizeUTR(b.utr), record={...paymentConfig(),utr,verifiedBy:user.id,verifiedAt:at(),notes:String(b.notes).slice(0,1000)};
         await run("INSERT INTO integration_settings VALUES ('UPI_RECEIVER_CONFIRMATION',$value) ON CONFLICT(name) DO UPDATE SET value=$value",{$value:JSON.stringify(record)});

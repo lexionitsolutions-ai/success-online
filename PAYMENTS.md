@@ -8,11 +8,11 @@ The existing Node HTTP API and plain JavaScript staff interface collect direct U
 
 1. Back up the existing database. Run `npm run build` and `npm run migrate` with the intended database configured privately. `migrate` adds the new tables, seeds the existing service catalog and preserves pricing; it does not change staff credentials. Avoid `setup:supabase` solely for this upgrade: that broader command also configures initial staff accounts and storage buckets.
 2. Run the new application against that database in a controlled environment. Sign in as an administrator and open Payments → Receiver & service pricing.
-3. Independently make one controlled **real ₹1 transfer** in a UPI app to the configured ID. Review the resolved account name before authorizing. Confirm that ₹1 actually arrived in the intended bank/PhonePe receiving account. Record its 12-digit UTR and receiving-account notes, and confirm both checkboxes.
-4. Run `npm run check:payments-release`. It fails until a confirmation exists for this exact receiver in the target database. Do not publish customer checkout until this check passes and physical-device acceptance is complete. Changing the receiver in server configuration invalidates the confirmation.
-5. Deploy through the existing Vercel workflow. No live migration, deployment, real transfer, or receiver confirmation was performed by the development implementation.
+3. Confirm that the configured UPI account belongs to the business, then click **Enable UPI checkout**. A setup test payment, received test UTR and receiving-account evidence are no longer mandatory. Activation records the administrator, time and owner declaration; it does not claim that a bank transfer was tested or received. Existing confirmations from the optional test-transfer procedure remain valid.
+4. Run `npm run check:payments-release`. It accepts owner-authorized activation or a recorded test-transfer confirmation for this exact receiver. Changing the receiver in server configuration invalidates the activation.
+5. Deploy through the existing Vercel workflow. Customer transfers still require individual receiving-account verification. App launches and actual money transfers must not be inferred from successful setup or automated checks.
 
-`TEST_PRICING_MODE=true` is the default. It is **not a bank sandbox**: customer transfers move real money. Legacy `PAYMENT_MODE=demo` and gateway placeholder variables are ignored. Old simulated payment records remain stored but cannot unlock processing or count as actual revenue.
+`TEST_PRICING_MODE=true` is the default. It is **not a bank sandbox**: customer transfers move real money. Legacy `PAYMENT_MODE=demo` and gateway placeholder variables are ignored. Old simulated payment records remain stored but cannot unlock processing or count as actual revenue. The business owner's request to start payments replaces the earlier mandatory setup-transfer requirement.
 
 ## Prices
 

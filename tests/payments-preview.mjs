@@ -19,10 +19,9 @@ try {
   const v=services.find(s=>s.slug==='pf-assistance').variants[0];
   const c=await (await context.request.post(origin+'/api/cases',{data:{variantId:v.id,customer:{name:'Browser Test',mobile:'9876543210'},consent:true}})).json();
   await page.goto(origin);await page.evaluate(()=>window.setView('payments'));
-  await page.getByText('Account belongs to SUCCESS ONLINE SERVICES',{exact:true}).waitFor();
-  await page.locator('[name="utr"]').first().fill('100000000001');await page.locator('[name="notes"]').fill('Synthetic receiving-account fixture, no real transfer');
-  await page.locator('[name="received"]').check();await page.locator('[name="correctRecipient"]').check();await page.getByRole('button',{name:'Confirm receiving account',exact:true}).click();
-  await page.getByText('Receiver confirmed',{exact:false}).first().waitFor();
+  await page.locator('[name="ownerConfirmed"]').waitFor();
+  await page.locator('[name="ownerConfirmed"]').check();await page.getByRole('button',{name:'Enable UPI checkout',exact:true}).click();
+  await page.getByText('Checkout enabled',{exact:false}).first().waitFor();
   for(const width of [320,390,768,1280]) {
     await page.setViewportSize({width,height:900});
     await page.evaluate(pid=>window.showPayment(pid),c.case.payment.id);

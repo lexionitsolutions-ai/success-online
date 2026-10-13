@@ -56,7 +56,7 @@ Paste [google-apps-script/script.js](google-apps-script/script.js) into Apps Scr
 6. Process through Document Received, upload the final document, and submit it. Sales can then download the final document.
 7. After Google reconnection, confirm new service tabs, Required Documents / Uploaded Required Documents / Missing Documents / Drive Folder columns, and the Documents register. Verify a Drive-backed individual download and ZIP from the hosted domain.
 
-Local development seeds demo users. A fresh production database creates the configured administrator; create staff accounts from Employees. Use synthetic client data for the trial. Direct UPI checkout remains blocked until the administrator confirms the receiver with a controlled real INR 1 transfer. Follow PAYMENTS.md; no gateway adapter is required.
+Local development seeds demo users. A fresh production database creates the configured administrator; create staff accounts from Employees. Use synthetic client data for the trial. Administrators can enable direct UPI checkout by confirming business ownership of the configured account; a setup test UTR is not required. Follow PAYMENTS.md; no gateway adapter is required.
 
 ## Verification completed
 
