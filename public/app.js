@@ -681,7 +681,30 @@ async function uploadCaseDocument(caseId, encodedType, input) {
 
 async function claim(caseId) { try { await api(`/api/cases/${caseId}/claim`, { method:'POST' }); closeDrawer(); await load(); openCase(caseId); toast('Case assigned to you'); } catch (error) { toast(error.message); } }
 async function submitReceivedDocument(caseId, button) { try { button.disabled = true; button.textContent = 'Submitting...'; await api(`/api/cases/${caseId}/submit-received-document`, { method:'POST' }); closeDrawer(); await load(); setView('completed'); toast('Document submitted. Request closed'); } catch (error) { button.disabled = false; button.textContent = 'Submit'; toast(error.message); } }
-async function progress(caseId) { try { await api(`/api/cases/${caseId}/progress`, { method:'POST', body:{ status:document.querySelector('#nextStatus').value, note:document.querySelector('#note').value, visibility:'sales' } }); closeDrawer(); await load(); openCase(caseId); toast('Status updated'); } catch (error) { toast(error.message); } }
+function renderSavedCase(result) {
+  cases=cases.map(item=>item.id===result.case.id?result.case:item);
+  if(selectedCase?.case.id===result.case.id) {
+    selectedCase={...selectedCase,case:result.case,notes:[...selectedCase.notes,...(result.note?[result.note]:[])]};
+    const panel=document.querySelector('#drawer .case-panel');
+    if(panel) {
+      const scroll=panel.scrollTop;
+      panel.innerHTML=caseDetail(selectedCase.case,selectedCase.documents,selectedCase.notes);
+      panel.scrollTop=scroll;
+    }
+  }
+  render();
+}
+async function progress(caseId) {
+  if(drawerBusy) return;
+  const body={status:document.querySelector('#nextStatus').value,note:document.querySelector('#note').value,visibility:'sales'};
+  setDrawerBusy('Updating status...');
+  let result;
+  try {result=await api(`/api/cases/${caseId}/progress`,{method:'POST',body});}
+  catch(error) {toast(error.message);return;}
+  finally {setDrawerBusy();}
+  try {renderSavedCase(result);toast('Status updated');}
+  catch {toast('Status saved. Reopen the case to refresh its details.');}
+}
 
 function closeDrawer() {
   if(drawerBusy) return;

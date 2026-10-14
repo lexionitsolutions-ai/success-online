@@ -134,6 +134,46 @@ test('cloud intake waits for concurrent uploads before final mirror scheduling',
   assert.equal(run("intakeCalls.filter(path=>path.endsWith('finish-uploads')).length"),1);
 });
 
+test('status update saves once, refreshes the open case in place and skips full reloads',async()=>{
+  const {context,run}=client();
+  const panel={scrollTop:160,innerHTML:''};
+  context.document.querySelector=selector=>({'#nextStatus':{value:'Ready to Submit'},'#note':{value:'Checked documents'},'#drawer .case-panel':panel}[selector] || null);
+  run(`
+    cases=[{id:'c1',status:'Assigned'}];selectedCase={case:cases[0],documents:[{id:'d1'}],notes:[]};
+    let saves=0,reloads=0,renders=0;
+    setDrawerBusy=message=>{drawerBusy=!!message;};
+    api=async()=>{saves++;await new Promise(resolve=>setTimeout(resolve,10));return {case:{id:'c1',status:'Ready to Submit'},note:{id:'n1',note:'Checked documents'}};};
+    load=async()=>{reloads++;};openCase=async()=>{reloads++;};
+    render=()=>{renders++;};caseDetail=item=>item.status;
+  `);
+  const pending=run("progress('c1')");
+  await run("progress('c1')");
+  assert.equal(run('drawerBusy'),true);
+  await pending;
+  assert.equal(run('saves'),1);assert.equal(run('reloads'),0);assert.equal(run('renders'),1);
+  assert.equal(run('cases[0].status'),'Ready to Submit');assert.equal(run('selectedCase.notes.length'),1);
+  assert.equal(run('selectedCase.documents[0].id'),'d1');assert.equal(panel.scrollTop,160);
+  assert.equal(panel.innerHTML,'Ready to Submit');assert.equal(run('drawerBusy'),false);
+});
+
+test('failed status save keeps the form and saved state unchanged and unlocks retry',async()=>{
+  const {context,run}=client();
+  context.document.querySelector=selector=>({'#nextStatus':{value:'Ready to Submit'},'#note':{value:'My note'}}[selector] || null);
+  run(`cases=[{id:'c1',status:'Assigned'}];setDrawerBusy=message=>{drawerBusy=!!message;};api=async()=>{throw Error('Connection lost');};`);
+  await run("progress('c1')");
+  assert.equal(run('cases[0].status'),'Assigned');assert.equal(run('drawerBusy'),false);
+  assert.ok(run("messages.includes('Connection lost')"));
+});
+
+test('a display error after status save does not report that the save failed',async()=>{
+  const {context,run}=client();
+  context.document.querySelector=selector=>({'#nextStatus':{value:'Ready to Submit'},'#note':{value:''}}[selector] || null);
+  run(`setDrawerBusy=message=>{drawerBusy=!!message;};api=async()=>({case:{id:'c1',status:'Ready to Submit'}});renderSavedCase=()=>{throw Error('Display failed');};`);
+  await run("progress('c1')");
+  assert.ok(run("messages.some(message=>message.startsWith('Status saved.'))"));
+  assert.equal(run('drawerBusy'),false);
+});
+
 test('drawer controls are locked during work and their disabled state is restored', () => {
   const { context, run } = client();
   const control = disabled => ({ disabled, dataset: {}, hasAttribute() { return 'wasDisabled' in this.dataset; } });

@@ -906,9 +906,10 @@ async function routeApi(req, res, url) {
       if (!['Awaiting Documents','Awaiting Payment','Correction Required','Customer Action Required','Rejected','Cancelled'].includes(b.status) && !(await processingGate(c,res))) return;
       if (['Correction Required','Rejected','Cancelled'].includes(b.status) && !b.note) return send(res, 400, { error: 'A reason is required' });
       (await run('UPDATE cases SET status=$s,follow_up_date=$f,official_reference=COALESCE($r,official_reference),completed_at=CASE WHEN $s IN ($delivered,$closed) THEN $at ELSE completed_at END,updated_at=$at WHERE id=$id', { $s: b.status, $f: b.followUpDate || null, $r: b.officialReference || null, $delivered: 'Delivered', $closed: 'Closed', $at: now(), $id: c.id }));
-      (await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)', { $id: id('note'), $case: c.id, $actor: user.id, $old: c.status, $new: b.status, $note: b.note || '', $vis: b.visibility || 'sales', $next: b.nextAction || '', $at: now() }));
+      const savedNote={id:id('note'),case_id:c.id,actor_id:user.id,actor:user.name,old_status:c.status,new_status:b.status,note:b.note || '',visibility:b.visibility || 'sales',next_action:b.nextAction || '',created_at:now()};
+      (await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)', { $id:savedNote.id,$case:c.id,$actor:user.id,$old:c.status,$new:b.status,$note:savedNote.note,$vis:savedNote.visibility,$next:savedNote.next_action,$at:savedNote.created_at }));
       (await syncCase(c.id));
-      send(res, 200, { case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
+      send(res, 200, { note:savedNote, case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/admin/dashboard') {
@@ -1071,6 +1072,7 @@ export async function handler(req, res) {
     };
     const sheetsJobs = new Set(), driveJobs = new Set();
     const documentRequest = req.method==='POST' && (url.pathname==='/api/cases' || /\/api\/cases\/[^/]+\/(documents|finish-uploads)$/.test(url.pathname));
+    const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|submit-received-document)$/.test(url.pathname);
     const paymentRequest = /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/payment-order$/.test(url.pathname);
     await deferredDrive.run(driveJobs, () => deferredSheets.run(sheetsJobs, () => db.transaction(async () => {
       if (db.cloud) for (const setting of await all('SELECT name,value FROM integration_settings')) process.env[setting.name] = setting.value;
@@ -1083,7 +1085,7 @@ export async function handler(req, res) {
       const reportingJobs=new Set([...sheetsJobs,...(process.env.SHEETS_MODE==='live'?[...driveJobs]:[])]);
       await Promise.all([...reportingJobs].map(caseId=>performSheetsSync(caseId)));
     };
-    if (!paymentRequest && !documentRequest) {
+    if (!paymentRequest && !documentRequest && !workflowRequest) {
       await syncWork();
       if (url.pathname === '/api/google/sheets/activate' && response.status === 200) {
         const failures = await all("SELECT entity_id,last_error FROM sync_jobs WHERE type='sheets' AND status='failed'");
@@ -1091,7 +1093,7 @@ export async function handler(req, res) {
       }
     }
     res.writeHead(response.status, response.headers); res.end(response.content);
-    if ((paymentRequest || documentRequest) && (sheetsJobs.size || driveJobs.size)) {
+    if ((paymentRequest || documentRequest || workflowRequest) && (sheetsJobs.size || driveJobs.size)) {
       const work = syncWork().catch(error=>console.error('Deferred Sheets sync failed:',error.code || error.name));
       if (process.env.VERCEL) waitUntil(work);
     }

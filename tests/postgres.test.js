@@ -196,6 +196,28 @@ test('cloud payments commit before delayed Sheets work and preserve retryable jo
     const workbook=JSON.parse(readFileSync(workbookFile,'utf8'));
     assert.equal(Object.values(workbook.Cashflow).length,1);
     assert.equal(Object.values(workbook.Cashflow)[0][3],c.payment.id);
+    await api('/api/admin/employees',{name:'Status Test Office',username:'statusoffice',role:'backoffice',password:'OfficeTestPassword123'});
+    const officeLogin=await fetch(origin+'/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'statusoffice',password:'OfficeTestPassword123'})});
+    const officeCookie=officeLogin.headers.get('set-cookie').split(';')[0];
+    const officeAction=async(action,body)=>{
+      const response=await fetch(origin+'/api/cases/'+c.id+'/'+action,{method:'POST',headers:{cookie:officeCookie,'content-type':'application/json'},body:JSON.stringify(body)});
+      const result=await response.json();assert.equal(response.status,200,JSON.stringify(result));return result;
+    };
+    await officeAction('claim',{});
+    await api('/api/payments-sync',undefined,'POST');
+    writeFileSync(failure,'sheets-slow-fail');
+    const statusStarted=performance.now();
+    const progressed=await officeAction('progress',{status:'Ready to Submit',note:'Validated status update fixture',visibility:'sales'});
+    assert.ok(performance.now()-statusStarted<1500,'Back-office status save must return before the 2-second Sheets response');
+    assert.equal(progressed.case.status,'Ready to Submit');assert.equal(progressed.note.note,'Validated status update fixture');
+    await new Promise(resolve=>setTimeout(resolve,2500));
+    const saved=await api('/api/cases/'+c.id);
+    assert.equal(saved.case.status,'Ready to Submit');
+    assert.equal(saved.notes.filter(n=>n.note==='Validated status update fixture').length,1);
+    unlinkSync(failure);
+    await api('/api/payments-sync',undefined,'POST');
+    const mirroredStatus=Object.values(JSON.parse(readFileSync(workbookFile,'utf8'))['All Cases']).find(row=>row[0]===c.ref);
+    assert.equal(mirroredStatus[9],'Ready to Submit','Retry eventually mirrors the saved back-office status');
     assert.ok(!errors.includes('Deferred Sheets sync failed'),errors);
   } finally {child.kill();}
 });
