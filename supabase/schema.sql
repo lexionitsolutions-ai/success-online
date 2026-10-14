@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS payment_exceptions (case_id TEXT PRIMARY KEY REFERENC
 CREATE UNIQUE INDEX IF NOT EXISTS one_paid_upi_per_case ON payments(case_id) WHERE gateway='direct_upi' AND status='PAID';
 CREATE INDEX IF NOT EXISTS upi_status_idx ON payments(gateway,status,created_at);
 
+CREATE TABLE IF NOT EXISTS payment_batches (id TEXT PRIMARY KEY, created_by TEXT NOT NULL REFERENCES users(id), status TEXT NOT NULL, amount INTEGER NOT NULL, transaction_id TEXT, payment_method TEXT, upi_id TEXT NOT NULL, payee_name TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, verified_at TEXT, verified_by TEXT);
+CREATE TABLE IF NOT EXISTS payment_batch_items (batch_id TEXT NOT NULL REFERENCES payment_batches(id), payment_id TEXT UNIQUE NOT NULL REFERENCES payments(id), PRIMARY KEY(batch_id,payment_id));
+
 CREATE INDEX IF NOT EXISTS cases_sales_idx ON cases(sales_user_id,created_at);
 CREATE INDEX IF NOT EXISTS cases_backoffice_idx ON cases(backoffice_user_id,status);
 CREATE INDEX IF NOT EXISTS documents_case_idx ON documents(case_id,doc_type,state);
@@ -65,3 +68,7 @@ ALTER TABLE public.verified_upi_refs ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.verified_upi_refs FROM anon, authenticated;
 ALTER TABLE public.payment_exceptions ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.payment_exceptions FROM anon, authenticated;
+ALTER TABLE public.payment_batches ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.payment_batches FROM anon, authenticated;
+ALTER TABLE public.payment_batch_items ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.payment_batch_items FROM anon, authenticated;

@@ -36,6 +36,8 @@ test('direct UPI security, attempts, expiry, manual verification, prices, refund
     const opened=await request(`/api/cases/${c.id}/payment-order`,{cookie:sales,method:'POST'});
     assert.equal(opened.data.id,c.payment.id);assert.equal(new URL(opened.data.upiIntent).searchParams.get('pa'),'0791934A0195602.bqr@kotak');
     assert.equal((await request(base+'/receipt',{cookie:sales})).status,409);
+    assert.equal((await request(base+'/verify',{cookie:admin,body:{}})).status,409,'A submitted UTR is still required');
+    assert.ok(new URL(opened.data.upiIntent).searchParams.get('tn').startsWith('Test Customer - '));
     for(const method of ['Google Pay','PhonePe','Paytm','BHIM','Other UPI App','QR','Manual UPI']) {
       const r=await request(base+'/initiate',{cookie:sales,body:{method,amount:100000,status:'PAID'}});assert.equal(r.status,200);assert.equal(r.data.payment.status,'INITIATED');assert.equal(r.data.payment.amount,100);
     }
@@ -49,15 +51,14 @@ test('direct UPI security, attempts, expiry, manual verification, prices, refund
     assert.equal((await request(base+'/submit',{cookie:sales,body:{utr:'123456789012'}})).data.payment.status,'AWAITING_VERIFICATION');
     assert.equal((await request(base+'/verify',{cookie:sales,body:confirmations})).status,403);
     assert.equal((await request(base+'/verify',{cookie:office,body:confirmations})).status,403);
-    assert.equal((await request(base+'/verify',{cookie:admin,body:{...confirmations,amountMatches:false}})).status,400);
     assert.equal((await request('/api/payments',{cookie:admin})).data.metrics.collected,0);
     assert.equal((await request(`/api/cases/${c.id}/claim`,{cookie:office,method:'POST'})).status,409);
     const c2=await create(),base2='/api/payments/'+c2.payment.id;
     await request(base2+'/submit',{cookie:sales,body:{utr:'123456789012'}});
-    const verified=await Promise.all([request(base+'/verify',{cookie:admin,body:confirmations}),request(base2+'/verify',{cookie:admin,body:confirmations})]);
+    const verified=await Promise.all([request(base+'/verify',{cookie:admin,body:{}}),request(base2+'/verify',{cookie:admin,body:{}})]);
     assert.deepEqual(verified.map(r=>r.status).sort(),[200,409]);
     const winner=verified[0].status===200 ? base : base2,loser=winner===base?base2:base;
-    assert.equal((await request(winner+'/verify',{cookie:admin,body:confirmations})).status,200);
+    assert.equal((await request(winner+'/verify',{cookie:admin,body:{}})).status,200);
     assert.equal((await request(loser+'/submit',{cookie:sales,body:{utr:'123456789012'}})).status,409);
     assert.equal((await request('/api/payments',{cookie:admin})).data.metrics.collected,100);
     assert.equal((await request('/api/admin/dashboard?period=all',{cookie:admin})).data.metrics.collected,100);

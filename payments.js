@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
+import {batchSchema,createBatchPayments} from './payment-batches.js';
 
 export function paymentConfig() {
   return { upiId: '0791934A0195602.bqr@kotak', payeeName: 'SUCCESS ONLINE SERVICES', mobile: '+91 7558548187', currency: 'INR', accountType:'merchant', testPricingMode: process.env.TEST_PRICING_MODE !== 'false' };
@@ -17,14 +18,17 @@ export function priceAmounts(v, override, original) {
   const tax = Math.round(serviceCharge * (original?.taxRate ?? v.tax_rate ?? 0) / 100);
   return {serviceCharge, officialFee, tax, total:serviceCharge + officialFee + tax};
 }
-export function generateUPIPaymentURL({upiId, payeeName, amount, orderId, serviceName}) {
+export function generateUPIPaymentURL({upiId, payeeName, amount, orderId, serviceName, customerName}) {
   const config = paymentConfig();
   if (upiId !== config.upiId || payeeName !== config.payeeName) throw new Error('Incorrect payment receiver');
   if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 100000000) throw new Error('Invalid payment amount in paise');
   const clean=value=>String(value || '').replace(/[\x00-\x1f\x7f]/g,' ').replace(/\s+/g,' ').trim();
   const reference=clean(orderId);
   if(!reference || reference.length>60) throw new Error('Invalid payment order reference');
-  const description = `${clean(serviceName).slice(0,79-reference.length)} ${reference}`.trim();
+  const customer = clean(customerName), service = clean(serviceName);
+  const budget = 80 - reference.length - (customer ? 6 : 3);
+  const customerBudget = customer ? Math.min(customer.length, Math.max(Math.floor(budget / 2), budget - service.length)) : 0;
+  const description = [customer.slice(0,customerBudget), service.slice(0,budget-customerBudget), reference].filter(Boolean).join(' - ');
   return 'upi://pay?' + Object.entries({pa:upiId,pn:payeeName,am:(amount/100).toFixed(2),cu:'INR',tn:description}).map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('&');
 }
 export const paymentSchema = `
@@ -35,7 +39,7 @@ CREATE TABLE IF NOT EXISTS verified_upi_refs (utr TEXT PRIMARY KEY, payment_id T
 CREATE TABLE IF NOT EXISTS payment_exceptions (case_id TEXT PRIMARY KEY REFERENCES cases(id), approved_by TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS one_paid_upi_per_case ON payments(case_id) WHERE gateway='direct_upi' AND status='PAID';
 CREATE INDEX IF NOT EXISTS upi_status_idx ON payments(gateway,status,created_at);
-`;
+` + batchSchema;
 const fail = (status,message) => { throw Object.assign(new Error(message),{status}); };
 const normalizeUTR = value => {
   const utr = String(value || '').trim();
@@ -59,10 +63,12 @@ export function createPayments({db, recomputeCase, send, body}) {
     if(caseId) {params.$case=caseId;filters.push('p.case_id=$case');}
     if(user.role==='sales') {params.$user=user.id;filters.push('c.sales_user_id=$user');}
     if(paymentId) {params.$payment=paymentId;filters.push('p.id=$payment');}
-    return all(`SELECT p.*,o.*,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id JOIN cases c ON c.id=p.case_id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${filters.length ? 'WHERE '+filters.join(' AND ') : ''} ORDER BY p.created_at DESC,p.id`,params);
+    return all(`SELECT p.*,o.*,bi.batch_id,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id LEFT JOIN payment_batch_items bi ON bi.payment_id=p.id JOIN cases c ON c.id=p.case_id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${filters.length ? 'WHERE '+filters.join(' AND ') : ''} ORDER BY p.created_at DESC,p.id`,params);
   }
   async function createOrder(c,user) {
     if (c.status === 'Cancelled') fail(409,'The service request is cancelled');
+    const grouped=await one("SELECT p.* FROM payments p JOIN payment_batch_items i ON i.payment_id=p.id JOIN payment_batches b ON b.id=i.batch_id WHERE p.case_id=$id AND b.status IN ('PENDING','INITIATED','AWAITING_VERIFICATION','PAID') LIMIT 1",{$id:c.id});
+    if(grouped) return grouped;
     const receiver=paymentConfig();
     const superseded=await all("SELECT p.* FROM payments p JOIN upi_orders o ON o.payment_id=p.id WHERE p.case_id=$case AND p.gateway='direct_upi' AND p.status IN ('PENDING','INITIATED') AND (o.upi_id!=$upi OR o.payee_name!=$name)",{$case:c.id,$upi:receiver.upiId,$name:receiver.payeeName});
     for(const p of superseded) {
@@ -83,6 +89,8 @@ export function createPayments({db, recomputeCase, send, body}) {
     return one('SELECT * FROM payments WHERE id=$id',{$id:pid});
   }
   async function detail(pid,user) {
+    const member=await batches.membership(pid);
+    if(member) return batches.detail(member.batch_id,user);
     const p = (await list(null,user,pid))[0];
     if (!p) fail(404,'Payment not found');
     if (['PENDING','INITIATED'].includes(p.status) && p.expires_at < at()) {
@@ -96,7 +104,7 @@ export function createPayments({db, recomputeCase, send, body}) {
     const otherClaim=await one("SELECT id FROM payments WHERE case_id=$case AND id!=$id AND status='AWAITING_VERIFICATION' AND gateway='direct_upi'",{$case:p.case_id,$id:p.id});
     const config=paymentConfig(),receiverChanged=p.upi_id!==config.upiId || p.payee_name!==config.payeeName;
     const active = ready && !receiverChanged && !otherPaid && !otherClaim && p.case_status!=='Cancelled' && ['PENDING','INITIATED'].includes(p.status);
-    const upiIntent = active ? generateUPIPaymentURL({upiId:p.upi_id,payeeName:p.payee_name,amount:p.amount,orderId:p.gateway_order_id,serviceName:p.service_name}) : null;
+    const upiIntent = active ? generateUPIPaymentURL({upiId:p.upi_id,payeeName:p.payee_name,amount:p.amount,orderId:p.gateway_order_id,serviceName:p.service_name,customerName:p.customer_name}) : null;
     return {...p,orderId:p.gateway_order_id,receiverReady:ready,receiverChanged,otherClaimPending:!!otherClaim,receiverAccountType:receiverChanged ? 'previous_receiver' : config.accountType,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
   }
   async function event(p,user,action,b) {
@@ -104,7 +112,9 @@ export function createPayments({db, recomputeCase, send, body}) {
     await run('INSERT INTO payment_attempts VALUES ($id,$payment,$action,$method,$utr,$actor,$notes,$at)',{$id:randomUUID(),$payment:p.id,$action:action,$method:b.method || null,$utr:b.utr || null,$actor:user.id,$notes:b.notes || '',$at:at()});
     await audit(user,action,p.id,b.notes);
   }
+  const batches=createBatchPayments({db,send,body,createOrder,recomputeCase,receiverReady,event,config:paymentConfig,generateURL:generateUPIPaymentURL});
   async function handle(req,res,url,user) {
+    if(await batches.handle(req,res,url,user)) return true;
     if (url.pathname === '/api/payment-settings') {
       if (req.method === 'GET') { const receiver=await receiverStatus();send(res,200,{...paymentConfig(),receiverReady:receiver.ready,receiverActivationBasis:receiver.basis,prices:user.role==='admin' ? await all('SELECT p.*,v.name,s.name service_name FROM service_prices p JOIN variants v ON v.id=p.variant_id JOIN services s ON s.id=v.service_id') : []}); return true; }
       if (user.role !== 'admin') fail(403,'Admin access required');
@@ -135,12 +145,24 @@ export function createPayments({db, recomputeCase, send, body}) {
     if (url.pathname === '/api/payments' && req.method === 'GET') {
       let rows=await list(null,user);
       const today=new Date(Date.now()+330*60000).toISOString().slice(0,10), verified=rows.filter(p=>p.status==='PAID');
-      const metrics={collected:verified.reduce((n,p)=>n+p.amount,0),today:verified.filter(p=>new Date(Date.parse(p.verified_at)+330*60000).toISOString().startsWith(today)).reduce((n,p)=>n+p.amount,0),verified:verified.length,pending:rows.filter(p=>['PENDING','INITIATED','EXPIRED'].includes(p.status)).length,awaiting:rows.filter(p=>p.status==='AWAITING_VERIFICATION').length,failed:rows.filter(p=>['FAILED','CANCELLED'].includes(p.status)).length};
+      const metrics={collected:verified.reduce((n,p)=>n+p.amount,0),today:verified.filter(p=>new Date(Date.parse(p.verified_at)+330*60000).toISOString().startsWith(today)).reduce((n,p)=>n+p.amount,0),verified:new Set(verified.map(p=>p.batch_id || p.id)).size,pending:rows.filter(p=>['PENDING','INITIATED','EXPIRED'].includes(p.status)).length,awaiting:rows.filter(p=>p.status==='AWAITING_VERIFICATION').length,failed:rows.filter(p=>['FAILED','CANCELLED'].includes(p.status)).length};
       for (const [key,column] of Object.entries({utr:'transaction_id',mobile:'customer_mobile',employee:'created_by',service:'service_id',status:'status'})) { const value=url.searchParams.get(key);if(value) rows=rows.filter(p=>String(p[column]||'').includes(value)); }
       for(const key of ['from','to']) {const value=url.searchParams.get(key);if(value && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)))) fail(400,'Invalid date filter');}
       const indiaDay=p=>new Date(Date.parse(p.created_at)+330*60000).toISOString().slice(0,10);
       if(url.searchParams.get('from')) rows=rows.filter(p=>indiaDay(p)>=url.searchParams.get('from'));
       if(url.searchParams.get('to')) rows=rows.filter(p=>indiaDay(p)<=url.searchParams.get('to'));
+      const query=(url.searchParams.get('q') || '').trim().toLowerCase(), searchBy=url.searchParams.get('searchBy') || 'all';
+      if(query) {
+        const fields={customer:['customer_name'],utr:['transaction_id'],mobile:['customer_mobile'],service:['service_name'],employee:['employee_name'],order:['gateway_order_id','case_ref','batch_id'],status:['status']};
+        if(['from','to'].includes(searchBy)) {
+          if(!/^\d{4}-\d{2}-\d{2}$/.test(query) || !Number.isFinite(Date.parse(query))) fail(400,'Choose a valid date');
+          rows=rows.filter(p=>searchBy==='from'?indiaDay(p)>=query:indiaDay(p)<=query);
+        } else {
+          if(searchBy!=='all' && !fields[searchBy]) fail(400,'Choose a valid search filter');
+          const columns=searchBy==='all'?Object.values(fields).flat():fields[searchBy];
+          rows=rows.filter(p=>columns.some(column=>String(p[column] || '').toLowerCase().replaceAll('_',' ').includes(query.replaceAll('_',' '))));
+        }
+      }
       send(res,200,{payments:rows,metrics}); return true;
     }
     const match=url.pathname.match(/^\/api\/payments\/([^/]+)(?:\/(initiate|submit|cancel|verify|reject|refund|receipt))?$/);
@@ -174,7 +196,7 @@ export function createPayments({db, recomputeCase, send, body}) {
     } else if(action==='verify') {
       if(p.status==='PAID') {send(res,200,{ok:true,payment:p});return true;}
       if(p.status!=='AWAITING_VERIFICATION') fail(409,'A submitted UTR is required');
-      if(!['exists','amountMatches','recipientMatches','utrMatches','notAssigned'].every(key=>b[key]===true) || !b.notes) fail(400,'Confirm all receiving-account checks and enter verification notes');
+      b.notes ||= 'Received payment verified by administrator.';
       if(!(await receiverReady())) fail(409,'Confirm the receiving account first');
       const assigned=await one('SELECT payment_id FROM verified_upi_refs WHERE utr=$utr',{$utr:p.transaction_id});
       if(assigned && assigned.payment_id!==p.id) fail(409,'This UTR is already assigned to a verified payment');

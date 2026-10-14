@@ -3,7 +3,7 @@ import { storage } from '../storage.js';
 try {
   if (!db.cloud) throw new Error('Cleanup requires the cloud database and private Storage configuration.');
   const cutoff = new Date(Date.now()-86400000).toISOString();
-  const pending = await db.all('SELECT id,storage_path FROM upload_intents WHERE expires_at<$at',{$at:cutoff});
+  const pending = await db.all('SELECT id,storage_path FROM upload_intents WHERE expires_at<$at AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.storage_path='supabase://' || upload_intents.storage_path)',{$at:cutoff});
   for (const intent of pending) {
     const {error} = await storage().remove([intent.storage_path]);
     if (error) throw error;

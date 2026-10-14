@@ -89,3 +89,12 @@ The local build hashes passwords, uses HTTP-only cookies, validates uploads, mas
 ## Backups and retention
 
 Back up the SQLite database and the business-controlled Drive root daily. Keep document retention aligned with Success Online's privacy notice and delete case documents when the lawful retention period ends.
+
+
+### Combined case payments and uploads
+
+In case review, **Save & create another** starts the next intake and **Save & pay later** opens Payments. Select 2?50 unpaid cases for one salesperson and click **Pay selected cases together**. The combined checkout lists each case and its amount, generates one UPI link/QR for the total, and accepts one UTR. An administrator verifies it once; each case receives its own payment allocation, and collections sum those allocations without duplicating the total. Opening any included case payment returns the combined checkout. Cancelled or expired combined checkouts can be reopened. Refunds apply to the entire combined transfer.
+
+Run the database migration before deploying this feature: `payment_batches` and `payment_batch_items` use the same private RLS policy as the other server-only tables.
+
+Cloud intake uploads at most three documents concurrently. Signed uploads are validated and retained in their original private object rather than copied again. Intake schedules Google Drive/Sheets mirroring after all files finish; the response does not wait for Google. Pending/failed mirrors remain in `sync_jobs` and can be retried from Payments settings. Storage cleanup preserves objects referenced by document records, including completed signed uploads.

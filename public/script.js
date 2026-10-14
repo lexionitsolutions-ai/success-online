@@ -417,7 +417,7 @@ function wizardBody(service, variant) {
   }
   const amount = variant?.amounts || { serviceCharge:0, officialFee:0, tax:0, total:0 };
   const pricing = amount.total ? `<div class="price-row"><span>Service charge ${money(amount.serviceCharge)}</span><span>Official fee ${money(amount.officialFee)}</span><span>Tax ${money(amount.tax)}</span></div><div class="review-total"><span>Total payable</span><strong>${money(amount.total)}</strong></div>` : `<div class="review-total"><span>Price</span><strong>To be confirmed</strong><small>Confirm the service and official fees before collecting payment.</small></div>`;
-  return `<div class="review"><div><span>Customer</span><strong>${h(draft.customer.name)}</strong></div><div><span>Service</span><strong>${h(service.name)} · ${h(variant.name)}</strong></div>${pricing}${testPricingMode ? '<p>INR 1 test pricing is active. UPI payments transfer real money.</p>' : ''}<label class="check"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></div><div class="form-actions"><button class="primary" onclick="submitCase()">Create case</button></div>`;
+  return `<div class="review"><div><span>Customer</span><strong>${h(draft.customer.name)}</strong></div><div><span>Service</span><strong>${h(service.name)} · ${h(variant.name)}</strong></div>${pricing}${testPricingMode ? '<p>INR 1 test pricing is active. UPI payments transfer real money.</p>' : ''}<label class="check"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></div><div class="form-actions"><button class="primary" onclick="submitCase()">Create & pay</button><button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button></div>`;
 }
 
 function bindWizard() {
@@ -498,7 +498,7 @@ async function pickDoc(encodedType, file) {
   } catch (error) { toast(error.message); }
   finally { setDrawerBusy(); rerenderWizard({keepScroll:true}); }
 }
-async function submitCase() {
+async function submitCase(nextAction='pay') {
   if (drawerBusy || draft.submitting) return;
   if (!document.querySelector('#consent').checked) return toast('Consent is required');
   if (draftMissing().length) return toast('Upload all required documents to create this case');
@@ -510,16 +510,29 @@ async function submitCase() {
     draft.createdCase = created;
     draft.uploaded ||= {};
     let completed = 0;
-    const total = Object.keys(draft.docs).length;
-    for (const [docType, document] of Object.entries(draft.docs)) {
-      const identity = document.file || document.content;
-      if (draft.uploaded[docType] === identity) { completed++; continue; }
-      setDrawerBusy(`Uploading document ${completed + 1} of ${total}: ${docType}…`);
-      await uploadDocument(created.id, docType, document);
-      draft.uploaded[docType] = identity;
-      completed++;
-    }
-    setDrawerBusy(); closeDrawer(); await load(); toast(`Created ${created.ref}`); await pay(created.id);
+    const entries = Object.entries(draft.docs), total = entries.length;
+    let cursor=0, failure;
+    // Three transfers can overlap without flooding a mobile connection.
+    const worker=async()=>{
+      while(cursor<entries.length && !failure) {
+        const [docType,document]=entries[cursor++], identity=document.file || document.content;
+        if(draft.uploaded[docType]===identity) {completed++;continue;}
+        setDrawerBusy(`Uploading documents: ${completed} of ${total} complete...`);
+        try {
+          await uploadDocument(created.id,docType,document,{deferMirrors:cloudUploads});
+          draft.uploaded[docType]=identity;
+          completed++;
+          setDrawerBusy(`Uploading documents: ${completed} of ${total} complete...`);
+        } catch(error) {failure ||= error;}
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(3,total)},worker));
+    if(failure) throw failure;
+    if(cloudUploads) await api(`/api/cases/${created.id}/finish-uploads`,{method:'POST',body:{}});
+    setDrawerBusy(); closeDrawer(); await load(); toast(`Created ${created.ref}`);
+    if(nextAction==='another') startCase();
+    else if(nextAction==='later') {toast('Case saved. Select unpaid cases in Payments to pay them together.');await setView('payments');}
+    else await pay(created.id);
   } catch (error) {
     toast(error.message + (draft.createdCase ? ` Case ${draft.createdCase.ref} is saved; retry pending uploads after fixing the issue.` : ''));
     const actions = document.querySelector('#wizard .form-actions');
@@ -640,7 +653,7 @@ async function fileAsBase64(file) {
   for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
   return btoa(binary);
 }
-async function uploadDocument(caseId, docType, document) {
+async function uploadDocument(caseId, docType, document, {deferMirrors=false} = {}) {
   if (!cloudUploads) return api(`/api/cases/${caseId}/documents`, {method:'POST',body:{docType,...document}});
   const metadata = {docType,fileName:document.fileName,mimeType:document.mimeType,size:document.size};
   document.cloudAuthorization ||= await api(`/api/cases/${caseId}/upload-url`, {method:'POST',body:metadata});
@@ -649,7 +662,7 @@ async function uploadDocument(caseId, docType, document) {
     if (!response.ok && response.status !== 409) throw new Error('Document upload failed. Retry the pending upload.');
     document.cloudTransferred = true;
   }
-  return api(`/api/cases/${caseId}/documents`, {method:'POST',body:{uploadId:document.cloudAuthorization.uploadId}});
+  return api(`/api/cases/${caseId}/documents`, {method:'POST',body:{uploadId:document.cloudAuthorization.uploadId,...(deferMirrors?{deferMirrors:true}:{})}});
 }
 async function uploadCaseDocument(caseId, encodedType, input) {
   const file = input.files?.[0];
@@ -684,7 +697,7 @@ async function saveDriveRootFolder(button) {
 }
 async function activateGoogleSheets() { try { toast('Verifying workbook and syncing cases'); const result = await api('/api/google/sheets/activate', { method:'POST' }); await load(); toast(`Google Sheets live: ${result.syncedCases} cases synced`); } catch (error) { toast(error.message); } }
 async function setAnalyticsPeriod(period) { analyticsPeriod = period; adminAnalytics = await api(`/api/admin/dashboard?period=${period}`); render(); }
-async function logout() { if (drawerBusy) return; closeDrawer(); await api('/api/logout', { method:'POST' }); me = null;view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;paymentData=paymentSettings=checkout=null;paymentFilters='';renderLogin(); }
+async function logout() { if (drawerBusy) return; closeDrawer(); await api('/api/logout', { method:'POST' }); me = null;view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';renderLogin(); }
 async function setView(next) {
   if(drawerBusy) return;
   closeDrawer();view=next;render();
@@ -704,6 +717,8 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape') document.qu
 // Direct UPI checkout uses the existing staff session and UI.
 let paymentData = null, paymentSettings = null, checkout = null;
 let paymentFilters = '';
+const selectedPaymentCases=new Set();
+const paymentSearchFields={all:'All fields',customer:'Customer name',utr:'UTR',mobile:'Mobile number',service:'Service',employee:'Employee',order:'Order / Case ID',status:'Status',from:'From date',to:'To date'};
 async function loadPayments() {
   [paymentData,paymentSettings] = await Promise.all([api('/api/payments'+paymentFilters),api('/api/payment-settings')]);
 }
@@ -712,14 +727,12 @@ function renderPayments() {
   const m=paymentData.metrics;
   return `${pageHead('Payments','Direct UPI collections. Only receiving-account verification records revenue.')}
     ${me.role==='admin' ? `<section class="metric-grid compact">${metricCard('Verified collections',money(m.collected),'All verified UPI collections','green')}${metricCard('Today',money(m.today),'India time','green')}${metricCard('Pending',number(m.pending),'Unsubmitted / expired','amber')}${metricCard('Awaiting verification',number(m.awaiting),'Customer claims','amber')}${metricCard('Failed / cancelled',number(m.failed),'Review receiving account if needed','blue')}${metricCard('Verified transactions',number(m.verified),'Manually checked','green')}</section>${paymentSettingsPanel()}` : ''}
-    <form id="paymentFilters" class="formgrid" onsubmit="filterPayments(event)">
-      <label>UTR<input name="utr" inputmode="numeric"></label><label>Customer mobile<input name="mobile" inputmode="tel"></label>
-      <label>Service<select name="service"><option value="">All services</option>${services.map(s=>`<option value="${h(s.id)}">${h(s.name)}</option>`).join('')}</select></label>
-      <label>Employee<select name="employee"><option value="">All employees</option>${[...new Map(paymentData.payments.map(p=>[p.created_by,p])).values()].map(p=>`<option value="${h(p.created_by)}">${h(p.employee_name)}</option>`).join('')}</select></label>
-      <label>From<input name="from" type="date"></label><label>To<input name="to" type="date"></label>
-      <label>Status<select name="status"><option value="">All statuses</option>${['PENDING','INITIATED','AWAITING_VERIFICATION','PAID','FAILED','CANCELLED','EXPIRED','REFUNDED'].map(s=>`<option>${s}</option>`).join('')}</select></label>
-      <div class="form-actions"><button class="primary">Filter</button><button type="button" onclick="resetPaymentFilters()">Reset</button><button type="button" onclick="exportPayments()">Export report</button></div>
-    </form><div class="table-shell"><table class="table"><thead><tr><th>Order / Customer</th><th>Service</th><th>Amount</th><th>Method / UTR</th><th>Employee</th><th>Status</th><th>Date</th><th>Action</th></tr></thead><tbody>${paymentData.payments.map(p=>`<tr><td><strong>${h(p.gateway_order_id)}</strong><small>${h(p.customer_name)} · ${h(p.customer_mobile)}</small></td><td>${h(p.service_name)}</td><td>${money(p.amount)}</td><td>${h(p.payment_method || '—')}<small>${h(p.transaction_id || '—')}</small></td><td>${h(p.employee_name)}</td><td>${statusBadge(p.status)}</td><td>${dateTime(p.created_at)}</td><td><button onclick="showPayment('${p.id}')">${me.role==='admin' && p.status==='AWAITING_VERIFICATION' ? 'Review claim' : 'View'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    ${['sales','admin'].includes(me.role) ? `<section class="summary-box"><strong>Pay for multiple cases together</strong><p>Create cases one by one, then select the unpaid cases below and pay their combined amount once.</p><p id="combinedPaymentTotal">${combinedPaymentSummary()}</p><button class="primary" onclick="paySelectedCases(this)">Pay selected cases together</button></section>` : ''}
+    <div class="payment-list-tools"><form id="paymentFilters" class="payment-search" role="search" aria-label="Search payments" onsubmit="filterPayments(event)">
+      <label class="payment-search-by"><span>Search by</span><select name="searchBy" onchange="updatePaymentSearch(this.value)">${Object.entries(paymentSearchFields).map(([key,label])=>`<option value="${key}" ${key===(new URLSearchParams(paymentFilters).get('searchBy') || 'all')?'selected':''}>${label}</option>`).join('')}</select></label>
+      <input id="paymentSearchInput" name="q" type="${['from','to'].includes(new URLSearchParams(paymentFilters).get('searchBy'))?'date':'search'}" aria-label="Search value" placeholder="Search payments" value="${h(new URLSearchParams(paymentFilters).get('q') || '')}">
+      <button class="primary payment-search-submit" aria-label="Search payments" title="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
+    </form><div class="payment-search-actions">${paymentFilters?'<button type="button" onclick="resetPaymentFilters()">Clear search</button>':''}<button type="button" onclick="exportPayments()">Export report</button></div></div><div class="table-shell"><table class="table"><thead><tr><th>Select</th><th>Order / Customer</th><th>Service</th><th>Amount</th><th>Method / UTR</th><th>Employee</th><th>Status</th><th>Date</th><th>Action</th></tr></thead><tbody>${paymentData.payments.map(p=>`<tr><td>${batchEligible(p) ? `<input type="checkbox" aria-label="Select ${h(p.customer_name)} ${h(p.case_ref)}" onchange="selectPaymentCase('${p.case_id}',this.checked)" ${selectedPaymentCases.has(p.case_id)?'checked':''}>` : ''}</td><td><strong>${h(p.gateway_order_id)}</strong><small>${h(p.customer_name)} · ${h(p.customer_mobile)}</small></td><td>${h(p.service_name)}</td><td>${money(p.amount)}</td><td>${h(p.payment_method || '—')}<small>${h(p.transaction_id || '—')}</small></td><td>${h(p.employee_name)}</td><td>${statusBadge(p.status)}</td><td>${dateTime(p.created_at)}</td><td><button onclick="showPayment('${p.id}')">${me.role==='admin' && p.status==='AWAITING_VERIFICATION' ? 'Review claim' : 'View'}</button></td></tr>`).join('')}</tbody></table></div>`;
 }
 function paymentSettingsPanel() {
   const c=paymentSettings;
@@ -728,9 +741,20 @@ function paymentSettingsPanel() {
     ${!c.receiverReady ? `<form class="formgrid" onsubmit="confirmReceiver(event)"><label class="check"><input name="ownerConfirmed" type="checkbox" required>I confirm this UPI account belongs to SUCCESS ONLINE SERVICES and want checkout enabled</label><button class="primary">Enable UPI checkout</button></form>` : `<p>Enabled by ${c.receiverActivationBasis==='owner_confirmation' ? 'business account confirmation' : 'received test transfer confirmation'}. Customer payments still require individual verification.</p>`}
     <p>Saved standard prices remain available when test pricing is disabled. Existing orders keep their original amount.</p><button onclick="setTestPricing(${!c.testPricingMode})">${c.testPricingMode ? 'Disable' : 'Enable'} ₹1 test pricing</button>
     <div class="formgrid">${c.prices.map(p=>`<form onsubmit="saveServicePrice(event,'${p.variant_id}')"><label>${h(p.service_name)} — standard ₹ price<input name="price" type="number" min="0.01" max="1000000" step="0.01" value="${(p.price/100).toFixed(2)}" required></label><small>Original: ${money(p.original_price)}</small><button>Save price</button></form>`).join('')}</div>
-    <button onclick="retryPaymentSync()">Retry failed Google Sheets sync</button></details>`;
+    <button onclick="retryPaymentSync()">Retry pending Google Drive / Sheets sync</button></details>`;
 }
-async function filterPayments(event) {event.preventDefault();paymentFilters='?'+new URLSearchParams(new FormData(event.target));await refreshPayments();}
+async function filterPayments(event) {
+  event.preventDefault();
+  const form=event.target, searchBy=form.elements.searchBy.value, q=form.elements.q.value.trim();
+  paymentFilters=q?'?'+new URLSearchParams({searchBy,q}):'';
+  await refreshPayments();
+}
+function updatePaymentSearch(field) {
+  const input=document.querySelector('#paymentSearchInput');
+  input.value='';input.type=['from','to'].includes(field)?'date':'search';
+  input.inputMode=['utr','mobile'].includes(field)?'numeric':'text';
+  input.placeholder=field==='all'?'Search payments':`Search ${paymentSearchFields[field].toLowerCase()}`;
+}
 async function resetPaymentFilters() {paymentFilters='';await refreshPayments();}
 async function refreshPayments() {try {await loadPayments();render();} catch(e) {toast(e.message);}}
 async function paymentSetting(body) {try {await api('/api/payment-settings',{method:'POST',body});await load();await refreshPayments();} catch(e) {toast(e.message);}}
@@ -781,7 +805,7 @@ function checkoutHTML(p) {
   const glyph=(name)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{close:'<path d="m6 6 12 12M18 6 6 18"/>',arrow:'<path d="m9 5 7 7-7 7"/>',download:'<path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/>',check:'<path d="m5 12 4 4L19 6"/>',qr:'<path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h3v3h-3zM21 15v6h-6"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'}[name]}</svg>`;
   const primary=editable && !['PAID','REFUNDED'].includes(p.status);
   return `<header class="checkout-header"><div class="checkout-brand"><span class="checkout-brand-mark">SO</span><div><h2>${h(p.payee_name)}</h2><p>UPI checkout</p></div></div><button class="checkout-close" onclick="closeDrawer()" aria-label="Close">${glyph('close')}</button></header>
-    <div class="checkout-body"><aside class="checkout-summary"><span class="checkout-kicker">TOTAL PAYABLE</span><div class="checkout-amount">${money(p.amount)}</div><span class="checkout-status checkout-status-${p.status.toLowerCase()}"><i></i>${h(labels[p.status] || p.status)}</span><div class="checkout-service"><span>Service</span><strong>${h(p.service_name)}</strong></div><div class="checkout-customer"><span>Customer</span><strong>${h(p.customer_name)}</strong></div><details class="checkout-order"><summary>Order details</summary><dl><dt class="checkout-mobile-customer">Customer</dt><dd class="checkout-mobile-customer">${h(p.customer_name)}</dd><dt>Order ID</dt><dd class="selectable">${h(p.gateway_order_id)}</dd><dt>UPI ID</dt><dd class="selectable">${h(p.upi_id)}</dd><dt>Checkout expiry</dt><dd>${dateTime(p.expires_at)}</dd></dl>${active ? '<button class="checkout-text-button" onclick="copyPayment(\'link\')">Copy payment link</button>' : ''}</details></aside>
+    <div class="checkout-body"><aside class="checkout-summary"><span class="checkout-kicker">TOTAL PAYABLE</span><div class="checkout-amount">${money(p.amount)}</div><span class="checkout-status checkout-status-${p.status.toLowerCase()}"><i></i>${h(labels[p.status] || p.status)}</span><div class="checkout-service"><span>Service</span><strong>${h(p.service_name)}</strong></div><div class="checkout-customer"><span>Customer</span><strong>${h(p.customer_name)}</strong></div>${p.batch ? `<section class="summary-box checkout-batch-items"><strong>Included work orders</strong>${p.items.map(item=>`<p>${h(item.customer_name)} - ${h(item.service_name)} - ${h(item.ref)} <strong>${money(item.amount)}</strong></p>`).join('')}</section>` : ''}<details class="checkout-order"><summary>Order details</summary><dl><dt class="checkout-mobile-customer">Customer</dt><dd class="checkout-mobile-customer">${h(p.customer_name)}</dd><dt>Order ID</dt><dd class="selectable">${h(p.gateway_order_id)}</dd><dt>UPI ID</dt><dd class="selectable">${h(p.upi_id)}</dd><dt>Checkout expiry</dt><dd>${dateTime(p.expires_at)}</dd></dl>${active ? '<button class="checkout-text-button" onclick="copyPayment(\'link\')">Copy payment link</button>' : ''}</details></aside>
     <main class="checkout-main">
       ${!p.receiverReady ? '<div class="checkout-notice" role="alert"><strong>Checkout is not enabled yet</strong><p>An administrator can enable the receiving account in Payments settings.</p></div>' : ''}
       ${p.otherClaimPending ? '<div class="checkout-notice" role="alert"><strong>A payment claim is already under review</strong><p>Wait for verification before making another payment for this service.</p></div>' : ''}
@@ -791,10 +815,10 @@ function checkoutHTML(p) {
       ${p.status==='REFUNDED' ? '<div class="checkout-result"><h3>Refund verified</h3><p>This payment has been recorded as refunded.</p></div>' : ''}
       ${active && editable ? `<div class="checkout-section-heading"><h3>Pay with UPI</h3><span>UPI</span></div><div class="upi-layout"><section class="upi-apps"><p class="checkout-section-label">Pay with an app</p><div class="upi-options">${['Google Pay','PhonePe','Paytm','BHIM','Other UPI App'].map((app,i)=>`<button class="upi-app upi-${i}" onclick="launchUPI('${app}')">${i<4 ? `<img class="upi-brand-logo" src="/assets/payments/${['google-pay.png','phonepe.svg','paytm.svg','bhim.png'][i]}" alt="" width="96" height="36"><strong class="upi-brand-name">${app}</strong>` : `<span class="upi-app-mark" aria-hidden="true">${glyph('qr')}</span><strong>${app}</strong>`}${glyph('arrow')}</button>`).join('')}</div><p class="checkout-app-note">Amount and recipient are prefilled.</p></section><details class="upi-qr" id="qrChoice" ontoggle="if(this.open && innerWidth&lt;701) this.querySelector('img').scrollIntoView({block:'center'})" ${compact ? '' : 'open'}><summary>${glyph('qr')}Scan & pay<span>${glyph('arrow')}</span></summary><div class="checkout-qr-content"><img src="${p.qrDataUrl}" alt="UPI QR for ${h(p.gateway_order_id)}" width="360" height="360"><p>Scan with any compatible UPI app</p><button class="checkout-text-button" onclick="downloadPaymentAsset(checkout.qrDataUrl,'upi-qr.png')">${glyph('download')}Download QR</button></div></details></div>` : ''}
       ${primary ? `<form id="utrForm" class="checkout-utr" hidden onsubmit="submitUTR(event)"><div class="checkout-section-heading"><h3>Confirm your payment</h3></div><label>UPI transaction reference<input name="utr" inputmode="numeric" pattern="[0-9]{12}" maxlength="12" required placeholder="Enter the 12-digit UTR" value="${h(p.transaction_id || '')}" autocomplete="off"></label><p>Find this in your UPI app’s transaction details. Our team will verify receipt.</p><button class="checkout-primary">Submit payment details</button></form>` : ''}
-      ${me.role==='admin' && p.status==='AWAITING_VERIFICATION' ? `<form id="verifyForm" class="checkout-verification" onsubmit="verifyUPIPayment(event)"><h3>Verify receiving-account record</h3><p>${money(p.amount)} · ${h(p.upi_id)} · ${h(p.transaction_id)}</p>${[['exists','Transaction exists in the receiving account'],['amountMatches','Received amount matches the order'],['recipientMatches','Recipient is correct'],['utrMatches','UTR matches the transaction'],['notAssigned','Transaction is not assigned to another order']].map(([key,label])=>`<label class="check"><input type="checkbox" name="${key}" required><span>${label}</span></label>`).join('')}<label>Verification notes<textarea name="notes" required maxlength="1000"></textarea></label><div class="checkout-verification-actions"><button class="checkout-primary">Verify received payment</button><button class="checkout-secondary" type="button" onclick="rejectUPIPayment()">Reject claim</button></div></form>` : ''}
+      ${me.role==='admin' && p.status==='AWAITING_VERIFICATION' ? `<section class="checkout-verification"><button class="checkout-primary" onclick="verifyUPIPayment()">Verify received payment</button></section>` : ''}
       ${active && editable ? `<details class="checkout-help"><summary>Need another way to pay?</summary><p>If an app link fails, pay directly to the UPI ID inside your app.</p><button class="checkout-secondary" onclick="startManualUPI()">Pay directly in my UPI app</button><section id="manualUPI" hidden><ol><li>Copy <strong class="selectable">${h(p.upi_id)}</strong>, then open your UPI app and choose to pay a UPI ID. <button class="checkout-text-button" onclick="copyPayment('id')">Copy UPI ID</button></li><li>Review the recipient and pay exactly <strong>${money(p.amount)}</strong>. <button class="checkout-text-button" onclick="copyPayment('amount')">Copy amount</button></li><li>Return here and submit the actual transaction UTR for verification.</li></ol><button class="checkout-text-button" onclick="revealPaymentUTR()">Enter UTR</button></section></details>` : ''}
       ${p.attempts.length ? `<details class="checkout-history"><summary>Payment activity <span>${p.attempts.length}</span></summary><div>${p.attempts.map(e=>`<p><strong>${h(e.action)}</strong><small>${dateTime(e.created_at)}${e.method ? ` · ${h(e.method)}` : ''}</small>${e.utr ? `<small>UTR ${h(e.utr)}</small>` : ''}${e.notes ? `<small>${h(e.notes)}</small>` : ''}</p>`).join('')}</div></details>` : ''}
-    </main></div><footer class="checkout-footer"><p>${glyph('lock')}Authorize payment only in your UPI app.</p><div>${primary && active ? `<button class="checkout-text-button checkout-cancel" onclick="paymentAction('cancel',{})">Cancel</button><button class="checkout-primary" data-claim-trigger onclick="revealPaymentUTR()">I have paid${glyph('arrow')}</button>` : primary && inactive ? `<button class="checkout-secondary" onclick="revealPaymentUTR()">Enter UTR</button><button class="checkout-primary" onclick="pay('${p.case_id}')">Reopen checkout</button>` : primary && !p.transaction_id ? '<button class="checkout-secondary" onclick="revealPaymentUTR()">Enter UTR</button>' : ''}</div></footer>`;
+    </main></div><footer class="checkout-footer"><p>${glyph('lock')}Authorize payment only in your UPI app.</p><div>${primary && active ? `<button class="checkout-text-button checkout-cancel" onclick="paymentAction('cancel',{})">Cancel</button><button class="checkout-primary" data-claim-trigger onclick="revealPaymentUTR()">I have paid${glyph('arrow')}</button>` : primary && inactive ? `<button class="checkout-secondary" onclick="revealPaymentUTR()">Enter UTR</button><button class="checkout-primary" onclick="reopenPayment()">Reopen checkout</button>` : primary && !p.transaction_id ? '<button class="checkout-secondary" onclick="revealPaymentUTR()">Enter UTR</button>' : ''}</div></footer>`;
 }
 function revealPaymentUTR() {
   const form=document.querySelector('#utrForm');
@@ -831,15 +855,48 @@ async function paymentAction(action,body) {
     checkout=r.payment;
     setDrawerBusy();
     await showPayment(checkout.id,checkout);
+    if(action==='verify') toast('Payment received and verified.');
     if(action==='submit') toast('Payment details submitted successfully. Your payment is awaiting verification.');
     try {await load();} catch {toast('Payment details saved. The dashboard could not refresh; reload it to see the latest status.');}
   } catch(e) {toast(e.message);} finally {setDrawerBusy();}
 }
 async function submitUTR(event) {event.preventDefault();await paymentAction('submit',{utr:event.target.utr.value});}
-async function verifyUPIPayment(event) {event.preventDefault();const f=event.target;await paymentAction('verify',Object.fromEntries(['exists','amountMatches','recipientMatches','utrMatches','notAssigned'].map(k=>[k,f.elements[k].checked]).concat([['notes',f.notes.value]])));}
-async function rejectUPIPayment() {const notes=document.querySelector('#verifyForm textarea').value.trim();if(!notes) return toast('Enter a rejection reason in verification notes.');await paymentAction('reject',{notes});}
-async function downloadReceipt() {try {const p=await api(`/api/payments/${checkout.id}/receipt`);const text=`SUCCESS ONLINE SERVICES\nVerified direct UPI receipt\nOrder: ${p.gateway_order_id}\nCustomer: ${p.customer_name}\nService: ${p.service_name}\nAmount: INR ${(p.amount/100).toFixed(2)}\nUTR: ${p.transaction_id}\nVerified at: ${p.verified_at}\nVerified by: ${p.verified_by}\n`;downloadPaymentAsset(URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),'payment-receipt.txt',true);} catch(e) {toast(e.message);}}
+async function verifyUPIPayment() {await paymentAction('verify',{});}
+async function downloadReceipt() {try {const p=await api(`/api/payments/${checkout.id}/receipt`);const text=`SUCCESS ONLINE SERVICES\nVerified direct UPI receipt\nOrder: ${p.gateway_order_id}\nCustomer: ${p.customer_name}\nService: ${p.service_name}\n${p.batch ? p.items.map(item=>`Work order: ${item.ref} | ${item.customer_name} | ${item.service_name} | INR ${(item.amount/100).toFixed(2)}`).join('\n')+'\n' : ''}Amount: INR ${(p.amount/100).toFixed(2)}\nUTR: ${p.transaction_id}\nVerified at: ${p.verified_at}\nVerified by: ${p.verified_by}\n`;downloadPaymentAsset(URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),'payment-receipt.txt',true);} catch(e) {toast(e.message);}}
 async function approvePaymentException(caseId) {const reason=document.querySelector('#exceptionReason').value.trim();if(!reason) return toast('Enter a reason');try {await api(`/api/cases/${caseId}/payment-exception`,{method:'POST',body:{reason}});closeDrawer();await load();await openCase(caseId);} catch(e) {toast(e.message);}}
-Object.assign(window,{showPayment,pay,launchUPI,startManualUPI,revealPaymentUTR,paymentAction,submitUTR,verifyUPIPayment,rejectUPIPayment,filterPayments,resetPaymentFilters,exportPayments,confirmReceiver,setTestPricing,saveServicePrice,retryPaymentSync,downloadPaymentAsset,copyPayment,downloadReceipt,approvePaymentException});
+Object.assign(window,{showPayment,pay,launchUPI,startManualUPI,revealPaymentUTR,paymentAction,submitUTR,verifyUPIPayment,filterPayments,resetPaymentFilters,updatePaymentSearch,exportPayments,confirmReceiver,setTestPricing,saveServicePrice,retryPaymentSync,downloadPaymentAsset,copyPayment,downloadReceipt,approvePaymentException,selectPaymentCase,paySelectedCases,reopenPayment});
+
+
+function batchEligible(p) {
+  const rows=paymentData?.payments || [];
+  return ['sales','admin'].includes(me.role) && !p.batch_id && p.case_status!=='Cancelled' &&
+    ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) &&
+    rows.find(row=>row.case_id===p.case_id)?.id===p.id &&
+    !rows.some(row=>row.case_id===p.case_id && ['PAID','AWAITING_VERIFICATION'].includes(row.status));
+}
+function combinedPaymentSummary() {
+  const rows=(paymentData?.payments || []).filter(p=>selectedPaymentCases.has(p.case_id) && batchEligible(p));
+  return `${rows.length} cases selected - Total ${money(rows.reduce((sum,p)=>sum+p.amount,0))}`;
+}
+function selectPaymentCase(id,checked) {
+  if(checked) selectedPaymentCases.add(id); else selectedPaymentCases.delete(id);
+  document.querySelector('#combinedPaymentTotal').textContent=combinedPaymentSummary();
+}
+async function paySelectedCases(button) {
+  if(drawerBusy || button?.disabled) return;
+  const ids=(paymentData?.payments || []).filter(p=>selectedPaymentCases.has(p.case_id) && batchEligible(p)).map(p=>p.case_id);
+  if(ids.length<2) return toast('Select at least two unpaid cases.');
+  if(button) button.disabled=true;
+  try {
+    const payment=await api('/api/payments/batch',{method:'POST',body:{caseIds:ids}});
+    selectedPaymentCases.clear();
+    await showPayment(payment.id,payment);
+    try {await load();} catch {toast('Combined checkout saved. Refresh Payments to see it in the list.');}
+  } catch(error) {toast(error.message);} finally {if(button) button.disabled=false;}
+}
+async function reopenPayment() {
+  if(checkout.batch) await paymentAction('reopen',{});
+  else await pay(checkout.case_id);
+}
 
 boot();

@@ -60,3 +60,18 @@ body.payment-open{overflow:hidden}
   .checkout-verification .check input{width:20px;height:20px;min-height:20px}
   .checkout-verification-actions{flex-direction:column}
 }
+
+.table input[type="checkbox"]{width:20px;height:20px;min-height:20px;padding:0;accent-color:#087f5b}
+.checkout-batch-items{grid-column:1/-1;margin-top:20px;width:100%;min-width:0}
+.checkout-batch-items p{overflow-wrap:anywhere;line-height:1.6}
+
+.payment-list-tools{margin:18px 0 10px;display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+#paymentFilters.payment-search{margin:0;display:grid;grid-template-columns:150px minmax(120px,1fr) 40px;align-items:end;gap:8px;flex:1;min-width:0}
+.payment-search-by{display:grid;gap:4px;margin:0;min-width:0}
+.payment-search-by>span{font-size:10px;color:var(--muted);font-weight:600}
+#paymentFilters input,#paymentFilters select{width:100%;min-width:0;min-height:40px;height:40px;padding:8px 10px;font-size:13px;border-radius:8px}
+#paymentFilters .payment-search-submit{width:40px;min-height:40px;height:40px;padding:10px;border-radius:8px}
+.payment-search-submit svg{display:block;width:20px;height:20px}
+.payment-search-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.payment-search-actions button{font-size:11px;min-height:32px;padding:6px 10px}
+@media(max-width:700px){.payment-list-tools{display:block}#paymentFilters.payment-search{grid-template-columns:112px minmax(0,1fr) 40px;gap:6px}.payment-search-actions{justify-content:flex-end;margin-top:6px}#paymentFilters input,#paymentFilters select{font-size:16px;padding:8px}.payment-search-by>span{font-size:10px}}
