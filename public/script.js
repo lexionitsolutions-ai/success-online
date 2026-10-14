@@ -119,26 +119,43 @@ async function loadViewData() {
 }
 
 function renderLogin() {
-  app.innerHTML = `<section class="login">
-    <button class="login-profile" onclick="focusSignIn()">${icon('profile')}<span>Sign in</span></button>
-    <div class="login-brand"><div class="mark">SO</div><div><strong>Success Online</strong><span>Operations workspace</span></div></div>
-    <form id="login" class="login-form">
-      <div><p class="eyebrow">Secure staff access</p><h1>Welcome back</h1><p class="muted">Manage customer cases, documents, payments, and delivery from one workspace.</p></div>
-      <label>Phone number or username<input name="username" required autocomplete="username" placeholder="Enter your staff login"></label>
-      <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
-      <button class="primary full">Sign in</button>
-    </form>
-    <p class="login-legal">Success Online is a private assistance business and is not a government portal.</p>
+  app.innerHTML = `<section class="login auth-page">
+    <div class="auth-shell">
+      <aside class="auth-intro">
+        <div class="login-brand"><div class="mark">SO</div><div><strong>Success Online</strong><span>Operations workspace</span></div></div>
+        <div class="auth-story"><span class="auth-overline">A simpler working day</span><h2>Every case.<br>A step forward.</h2><p>Your customers, documents, and payments. Together in one organised workspace.</p></div>
+        <div class="auth-art" aria-hidden="true"><div class="auth-orbit"></div><div class="auth-art-card"><span class="auth-art-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 3h7l4 4v14H7zM14 3v5h5M10 12h5M10 16h5"/></svg></span><span class="auth-art-lines"><i></i><i></i></span><span class="auth-art-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 12 4 4 8-8"/></svg></span></div><div class="auth-art-card auth-art-card-back"></div></div>
+        <p class="auth-intro-foot">Built for the way your team works.</p>
+      </aside>
+      <div class="auth-access">
+        <form id="login" class="login-form">
+          <div class="auth-welcome"><span class="auth-overline">Your workspace awaits</span><h1>Welcome back</h1><p>Sign in to your Success Online account.</p></div>
+          <label for="loginUsername">Phone number or username</label><div class="auth-input"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg><input id="loginUsername" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Enter phone number or username"></div>
+          <label for="loginPassword">Password</label><div class="auth-input"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><input id="loginPassword" name="password" type="password" required autocomplete="current-password" placeholder="Enter your password"><button class="auth-password-toggle" type="button" aria-label="Show password" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+          <p class="auth-error" role="alert" hidden></p>
+          <button class="primary full" type="submit">Sign in</button>
+          <p class="auth-help">Need access? Contact your administrator.</p>
+        </form>
+        <p class="auth-access-foot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6zM8 12l3 3 5-6"/></svg>Secure access for your team</p>
+      </div>
+    </div>
   </section>`;
+  document.querySelector('.auth-password-toggle').onclick = event => {
+    const input=document.querySelector('#loginPassword'), visible=input.type==='password';
+    input.type=visible ? 'text' : 'password';
+    event.currentTarget.setAttribute('aria-label',visible ? 'Hide password' : 'Show password');
+    event.currentTarget.setAttribute('aria-pressed',String(visible));
+  };
   document.querySelector('#login').onsubmit = async event => {
     event.preventDefault();
     const button=event.target.querySelector('button.primary');
     if(button.disabled) return;
+    const errorMessage=event.target.querySelector('.auth-error');errorMessage.hidden=true;
     button.disabled=true;button.textContent='Signing in…';
     try {
       me = (await api('/api/login', { method: 'POST', body: Object.fromEntries(new FormData(event.target)) })).user;
       await load();
-    } catch (error) { toast(error.message); }
+    } catch (error) { errorMessage.textContent=error.message;errorMessage.hidden=false; }
     finally {button.disabled=false;button.textContent='Sign in';}
   };
 }
