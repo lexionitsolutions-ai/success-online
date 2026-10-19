@@ -348,7 +348,7 @@ async function performDriveSync(caseId) {
     const claim=await run("INSERT INTO sync_jobs VALUES ($id,'drive-case',$case,'processing',1,NULL,$at,$at) ON CONFLICT(type,entity_id) DO UPDATE SET status='processing',attempts=sync_jobs.attempts+1,updated_at=$at WHERE sync_jobs.status!='processing' OR sync_jobs.updated_at<$cutoff",{$id:id('sync'),$case:caseId,$at:stamp,$cutoff:new Date(Date.now()-120000).toISOString()});
     if (!claim.changes) return;
     try {
-      const pending = await all("SELECT d.* FROM documents d JOIN sync_jobs j ON j.entity_id=d.id AND j.type='drive' WHERE d.case_id=$case AND j.status IN ('pending','failed') AND d.storage_path LIKE 'supabase://%' AND (d.drive_file_id IS NULL OR d.drive_file_id='')",{$case:caseId});
+      const pending = await all("SELECT d.* FROM documents d JOIN sync_jobs j ON j.entity_id=d.id AND j.type='drive' WHERE d.case_id=$case AND d.state='uploaded' AND j.status IN ('pending','failed') AND d.storage_path LIKE 'supabase://%' AND (d.drive_file_id IS NULL OR d.drive_file_id='')",{$case:caseId});
       if (!pending.length) return;
       let folders;
       for (const document of pending) {
@@ -513,6 +513,10 @@ async function recomputeCase(id, {sync=true} = {}) {
   if (sync) await syncCase(id);
 }
 function canSee(user, c) { return user.role === 'admin' || user.role === 'backoffice' || c.sales_user_id === user.id; }
+async function notifyCaseUpdate(c, actor, title, status = c.status) {
+  const recipients = await all("SELECT id FROM users WHERE active=1 AND id!=$actor AND (role='admin' OR id=$sales OR id=$backoffice OR (role='backoffice' AND $unassigned=1 AND $ready=1))",{$actor:actor.id,$sales:c.sales_user_id,$backoffice:c.backoffice_user_id || '',$unassigned:c.backoffice_user_id ? 0 : 1,$ready:status === 'Ready for Assignment' ? 1 : 0});
+  for (const recipient of recipients) await run('INSERT INTO notifications VALUES ($id,$user,$title,$body,NULL,$at)',{$id:id('notice'),$user:recipient.id,$title:title,$body:JSON.stringify({caseId:c.id,ref:c.ref,status,actor:actor.name}),$at:now()});
+}
 function publicDocument(document) {
   const { storage_path, drive_file_id, ...visible } = document;
   return { ...visible, download_url: `/api/documents/${encodeURIComponent(document.id)}/download` };
@@ -584,6 +588,17 @@ async function routeApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/logout') return send(res, 200, { ok: true }, { 'set-cookie': 'so_session=; Max-Age=0; Path=/' });
   const user = (await requireUser(req, res));
   if (!user) return;
+  if (req.method === 'GET' && url.pathname === '/api/notifications') {
+    const rows = await all('SELECT * FROM notifications WHERE user_id=$user AND read_at IS NULL ORDER BY created_at DESC LIMIT 500',{$user:user.id});
+    return send(res,200,{notifications:rows.map(row=>{let data={};try {data=JSON.parse(row.body);} catch {}return {id:row.id,title:row.title,...data,createdAt:row.created_at};})});
+  }
+  if (req.method === 'POST' && url.pathname === '/api/notifications/read') {
+    const b = await body(req);
+    if (!Array.isArray(b.ids) || b.ids.length>500 || b.ids.some(id=>typeof id!=='string')) return send(res,400,{error:'Choose valid notifications'});
+    const ids = [...new Set(b.ids)];
+    if (ids.length) await run(`UPDATE notifications SET read_at=$at WHERE user_id=$user AND read_at IS NULL AND id IN (${ids.map((_,index)=>`$notice${index}`).join(',')})`,{$at:now(),$user:user.id,...Object.fromEntries(ids.map((noticeId,index)=>[`$notice${index}`,noticeId]))});
+    return send(res,200,{ok:true});
+  }
   const documentMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/download$/);
   if (req.method === 'GET' && documentMatch) {
     const document = (await one('SELECT * FROM documents WHERE id=$id AND state!=$state', { $id: documentMatch[1], $state: 'replaced' }));
@@ -727,8 +742,14 @@ async function routeApi(req, res, url) {
     if (!b.customerId && (!String(b.customer?.name || '').trim() || !/^[6-9]\d{9}$/.test(b.customer?.mobile || ''))) return send(res, 400, { error: 'Customer name and a valid 10-digit Indian mobile number are required' });
     if (b.customerId && !(await one('SELECT id FROM customers WHERE id=$id AND ($admin=1 OR created_by=$user)', { $id: b.customerId, $admin: user.role === 'admin' ? 1 : 0, $user: user.id }))) return send(res, 404, { error: 'Customer not found' });
     const fields = json(variant, 'fields_json', []);
+    b.details ||= {};
     for (const field of fields) {
+      if (field.defaultWhen && b.details[field.defaultWhen.field] === field.defaultWhen.equals) b.details[field.label] = field.defaultWhen.value;
+    }
+    for (const field of fields) {
+      if (field.when && b.details?.[field.when.field] !== field.when.equals) continue;
       const value = String(b.details?.[field.label] ?? '').trim();
+      if (field.required && !value) return send(res, 400, { error: `Enter ${field.label}` });
       if (field.type === 'select' && !field.options.includes(value)) return send(res, 400, { error: `Choose ${field.label}` });
       if (value && field.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return send(res, 400, { error: `Invalid ${field.label}` });
       if (value && field.type === 'number' && (!Number.isFinite(Number(value)) || Number(value) < 0)) return send(res, 400, { error: `Invalid ${field.label}` });
@@ -740,7 +761,7 @@ async function routeApi(req, res, url) {
       customerId = id('cus');
       (await run('INSERT INTO customers VALUES ($id,$name,$mobile,$email,$address,$created_by,$created_at)', { $id: customerId, $name: b.customer.name, $mobile: b.customer.mobile, $email: b.customer.email || '', $address: b.customer.address || '', $created_by: user.id, $created_at: now() }));
     }
-    const allowedFields = new Set(json(variant, 'fields_json', []).map(field => field.label).filter(label => !/password/i.test(label)));
+    const allowedFields = new Set(fields.filter(field => !field.when || b.details?.[field.when.field] === field.when.equals || (field.defaultWhen && b.details?.[field.defaultWhen.field] === field.defaultWhen.equals)).map(field => field.label).filter(label => !/password/i.test(label)));
     const details = Object.fromEntries(Object.entries(b.details || {}).filter(([key, value]) => allowedFields.has(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')).map(([key, value]) => [key, String(value).slice(0, 500)]));
     const caseId = id('case');
     (await run(`INSERT INTO cases VALUES ($id,$ref,$customer_id,$service_id,$variant_id,$sales_user_id,NULL,'Draft','Normal',NULL,'SO-CONSENT-2026-01',$consent_at,$details,NULL,NULL,'missing','unpaid',NULL,NULL,$created_at,$updated_at,NULL,NULL)`,
@@ -774,9 +795,25 @@ async function routeApi(req, res, url) {
       return res.end(content);
     }
     if (req.method === 'GET' && !caseMatch[2]) return send(res, 200, { case: (await caseRow(c)), documents: (await all('SELECT * FROM documents WHERE case_id=$id ORDER BY created_at', { $id: c.id })).map(publicDocument), notes: (await all('SELECT n.*,u.name actor FROM notes n JOIN users u ON u.id=n.actor_id WHERE case_id=$id AND ($role!=$sales OR visibility=$sales) ORDER BY created_at', { $id: c.id, $role: user.role, $sales: 'sales' })) });
+    if (req.method === 'POST' && caseMatch[2] === 'remove-document') {
+      if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res,409,{error:'This case is closed for document changes'});
+      const b = await body(req);
+      if (typeof b.documentId !== 'string' || !b.documentId) return send(res,400,{error:'Choose a document to remove'});
+      const document = await one('SELECT * FROM documents WHERE id=$id AND case_id=$case',{$id:b.documentId,$case:c.id});
+      if (!document) return send(res,404,{error:'Document not found'});
+      if (document.doc_type === RECEIVED_DOCUMENT_TYPE && (!['backoffice','admin'].includes(user.role) || c.status !== 'Document Received')) return send(res,403,{error:'Only back office or admin can change the received document before submission'});
+      if (document.state !== 'replaced') {
+        await run("UPDATE documents SET state='replaced' WHERE id=$id",{$id:document.id});
+        await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:id('aud'),$actor:user.id,$action:'document.remove',$type:'document',$entity:document.id,$reason:`Removed ${document.doc_type} from case ${c.ref}`,$at:now()});
+        await recomputeCase(c.id);
+        await notifyCaseUpdate(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}),user,'Document removed');
+      }
+      return send(res,200,{ok:true,case:await caseRow(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}))});
+    }
     if (req.method === 'POST' && caseMatch[2] === 'finish-uploads') {
       deferredDrive.getStore()?.add(c.id);
       await recomputeCase(c.id);
+      await notifyCaseUpdate(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}),user,'Documents updated');
       return send(res,200,{ok:true});
     }
     if (req.method === 'POST' && caseMatch[2] === 'upload-url') {
@@ -797,13 +834,17 @@ async function routeApi(req, res, url) {
       if (b.uploadId) {
         intent = await one('SELECT * FROM upload_intents WHERE id=$id AND case_id=$case AND user_id=$user',{$id:b.uploadId,$case:c.id,$user:user.id});
         if (!intent) return send(res,404,{error:'Upload authorization not found.'});
-        if (intent.completed_at) return send(res,200,{ok:true,case:await caseRow(c)});
+        if (intent.completed_at) {
+          const saved = await one('SELECT id FROM documents WHERE storage_path=$path',{$path:`supabase://${intent.storage_path}`});
+          return send(res,200,{ok:true,documentId:saved?.id,case:await caseRow(c)});
+        }
         if (intent.expires_at < now()) return send(res,409,{error:'Upload authorization expired. Select the file again.'});
         Object.assign(b,{docType:intent.doc_type,fileName:intent.file_name,mimeType:intent.mime_type,size:intent.size});
       } else if (process.env.VERCEL) return send(res,400,{error:'Use the signed cloud upload flow for documents.'});
       if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res, 409, { error: 'This case is closed for uploads' });
       const variant = (await one('SELECT documents_json FROM variants WHERE id=$id', { $id: c.variant_id }));
       const allowed = json(variant, 'documents_json', []).map(d => d.label);
+      const multiple = json(variant, 'documents_json', []).some(d => d.label === b.docType && d.multiple);
       const isReceivedDocument = b.docType === RECEIVED_DOCUMENT_TYPE;
       if (isReceivedDocument && (!['backoffice','admin'].includes(user.role) || c.status !== 'Document Received')) {
         return send(res, 403, { error: 'The received document can only be uploaded by back office when the status is Document Received' });
@@ -813,7 +854,7 @@ async function routeApi(req, res, url) {
       if (!['image/jpeg','image/png','application/pdf'].includes(b.mimeType) || Number(b.size) > 10_000_000) return send(res, 400, { error: 'Only JPG, PNG, or PDF up to 10 MB is allowed' });
       const customer = (await one('SELECT * FROM customers WHERE id=$id', { $id: c.customer_id }));
       const service = (await one('SELECT * FROM services WHERE id=$id', { $id: c.service_id }));
-      const safeName = `${b.docType} - ${customer.name} - ${c.ref}${extname(b.fileName) || '.bin'}`.replace(/[\\/:*?"<>|]/g, '-');
+      const safeName = `${b.docType}${multiple ? ' - ' + randomUUID().slice(0,8) : ''} - ${customer.name} - ${c.ref}${extname(b.fileName) || '.bin'}`.replace(/[\\/:*?"<>|]/g, '-');
       const content = intent ? await readStorage(intent.storage_path) : Buffer.from(b.content || '', 'base64');
       if (!content.length || content.length > 10_000_000) return send(res, 400, { error: 'Uploaded file content is empty or exceeds 10 MB' });
       if (intent && content.length !== intent.size) return send(res,400,{error:'Upload size does not match the selected document.'});
@@ -847,7 +888,7 @@ async function routeApi(req, res, url) {
         driveFileId ||= '';
       }
       const old = (await one('SELECT MAX(version) v FROM documents WHERE case_id=$id AND doc_type=$t', { $id: c.id, $t: b.docType }))?.v || 0;
-      if (old) (await run('UPDATE documents SET state=$replaced WHERE case_id=$id AND doc_type=$t AND state!=$replaced', { $id: c.id, $t: b.docType, $replaced: 'replaced' }));
+      if (old && !multiple) (await run('UPDATE documents SET state=$replaced WHERE case_id=$id AND doc_type=$t AND state!=$replaced', { $id: c.id, $t: b.docType, $replaced: 'replaced' }));
       const documentId = id('doc');
       (await run('INSERT INTO documents VALUES ($id,$case_id,$doc_type,$file_name,$mime_type,$size,$storage,$drive,$state,$version,$created)', { $id: documentId, $case_id: c.id, $doc_type: b.docType, $file_name: safeName, $mime_type: b.mimeType, $size: content.length, $storage: storage, $drive: driveFileId, $state: 'uploaded', $version: old + 1, $created: now() }));
       if (storageEnabled() && process.env.DRIVE_MODE === 'live') {
@@ -857,10 +898,11 @@ async function routeApi(req, res, url) {
       }
       if (googleSyncError && googleSyncError!=='GOOGLE_SYNC_PENDING') await run('INSERT INTO sync_jobs VALUES ($id,$type,$entity,$status,1,$error,$at,$at)',{$id:id('sync'),$type:'drive',$entity:documentId,$status:'failed',$error:googleSyncError,$at:now()});
       if (intent) await run('UPDATE upload_intents SET completed_at=$at WHERE id=$id',{$id:intent.id,$at:now()});
-      if (intent) await run('UPDATE upload_intents SET expires_at=$at WHERE case_id=$case AND doc_type=$type AND completed_at IS NULL',{$at:now(),$case:c.id,$type:b.docType});
-      if (b.deferMirrors) return send(res,201,{ok:true,googleSyncPending:Boolean(googleSyncError)});
+      if (intent && !multiple) await run('UPDATE upload_intents SET expires_at=$at WHERE case_id=$case AND doc_type=$type AND completed_at IS NULL',{$at:now(),$case:c.id,$type:b.docType});
+      if (b.deferMirrors) return send(res,201,{ok:true,documentId,googleSyncPending:Boolean(googleSyncError)});
       await recomputeCase(c.id);
-      send(res, 201, { ok: true, googleSyncPending:Boolean(googleSyncError), case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
+      await notifyCaseUpdate(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}),user,'Document uploaded');
+      send(res, 201, { ok: true, documentId, googleSyncPending:Boolean(googleSyncError), case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
     });
     if (req.method === 'POST' && caseMatch[2] === 'payment-order') {
       if (!['sales','admin'].includes(user.role)) return send(res,403,{error:'Only sales or admin can open checkout'});
@@ -883,6 +925,7 @@ async function routeApi(req, res, url) {
       if (!(await processingGate(c,res))) return;
       const result = (await run("UPDATE cases SET backoffice_user_id=$u,status='Assigned',updated_at=$at WHERE id=$id AND backoffice_user_id IS NULL AND status='Ready for Assignment'", { $u: user.id, $at: now(), $id: c.id }));
       if (!result.changes) return send(res, 409, { error: 'Case was already claimed or is not ready' });
+      await notifyCaseUpdate({...c,backoffice_user_id:user.id},user,'Case assigned','Assigned');
       (await syncCase(c.id));
       return send(res, 200, { case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
     }
@@ -896,6 +939,7 @@ async function routeApi(req, res, url) {
       const at = now();
       (await run('UPDATE cases SET status=$status,completed_at=$at,updated_at=$at WHERE id=$id', { $status: 'Closed', $at: at, $id: c.id }));
       (await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)', { $id: id('note'), $case: c.id, $actor: user.id, $old: c.status, $new: 'Closed', $note: 'Received document submitted and request closed', $vis: 'sales', $next: '', $at: at }));
+      await notifyCaseUpdate(c,user,'Case completed','Closed');
       (await syncCase(c.id));
       return send(res, 200, { case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
     }
@@ -904,10 +948,11 @@ async function routeApi(req, res, url) {
       if (!transitions[c.status]?.includes(b.status)) return send(res, 400, { error: `Cannot move from ${c.status} to ${b.status}` });
       if (!['Awaiting Documents','Correction Required','Customer Action Required','Rejected','Cancelled'].includes(b.status) && !(await documentGate(c, res))) return;
       if (!['Awaiting Documents','Awaiting Payment','Correction Required','Customer Action Required','Rejected','Cancelled'].includes(b.status) && !(await processingGate(c,res))) return;
-      if (['Correction Required','Rejected','Cancelled'].includes(b.status) && !b.note) return send(res, 400, { error: 'A reason is required' });
+      if (['Correction Required','Rejected','Cancelled'].includes(b.status) && !String(b.note || '').trim()) return send(res, 400, { error: 'A reason is required' });
       (await run('UPDATE cases SET status=$s,follow_up_date=$f,official_reference=COALESCE($r,official_reference),completed_at=CASE WHEN $s IN ($delivered,$closed) THEN $at ELSE completed_at END,updated_at=$at WHERE id=$id', { $s: b.status, $f: b.followUpDate || null, $r: b.officialReference || null, $delivered: 'Delivered', $closed: 'Closed', $at: now(), $id: c.id }));
       const savedNote={id:id('note'),case_id:c.id,actor_id:user.id,actor:user.name,old_status:c.status,new_status:b.status,note:b.note || '',visibility:b.visibility || 'sales',next_action:b.nextAction || '',created_at:now()};
       (await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)', { $id:savedNote.id,$case:c.id,$actor:user.id,$old:c.status,$new:b.status,$note:savedNote.note,$vis:savedNote.visibility,$next:savedNote.next_action,$at:savedNote.created_at }));
+      await notifyCaseUpdate(c,user,b.status === 'Correction Required' ? 'Returned to sales for correction' : 'Case status updated',b.status);
       (await syncCase(c.id));
       send(res, 200, { note:savedNote, case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
     });
@@ -1031,7 +1076,7 @@ function staticFile(req, res, url) {
 }
 
 async function preserveServicePrices() {
-  for(const v of await all('SELECT * FROM variants')) await run('INSERT INTO service_prices(variant_id,price,original_price,original_config) VALUES ($id,$price,$price,$original) ON CONFLICT(variant_id) DO NOTHING',{$id:v.id,$price:v.service_charge,$original:JSON.stringify({serviceCharge:v.service_charge,officialFee:v.official_fee,taxRate:v.tax_rate})});
+  for(const v of await all('SELECT v.*,s.slug service_slug FROM variants v JOIN services s ON s.id=v.service_id')) await run('INSERT INTO service_prices(variant_id,price,original_price,original_config) VALUES ($id,$price,$price,$original) ON CONFLICT(variant_id) DO NOTHING',{$id:v.id,$price:v.service_charge,$original:JSON.stringify({serviceCharge:v.service_charge,officialFee:v.official_fee,taxRate:v.tax_rate,...(['income-certificate','domicile-certificate'].includes(v.service_slug) ? {testPricingExempt:true} : {})})});
 }
 let initialization;
 export async function initialize({setup = false} = {}) {

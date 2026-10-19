@@ -13,7 +13,7 @@ export function receiverActivation(confirmation, activation) {
   return {ready:false,basis:null};
 }
 export function priceAmounts(v, override, original) {
-  if (paymentConfig().testPricingMode) return { serviceCharge:100, officialFee:0, tax:0, total:100 };
+  if (paymentConfig().testPricingMode && !original?.testPricingExempt) return { serviceCharge:100, officialFee:0, tax:0, total:100 };
   const serviceCharge = override ?? v.service_charge ?? 0, officialFee = original?.officialFee ?? v.official_fee ?? 0;
   const tax = Math.round(serviceCharge * (original?.taxRate ?? v.tax_rate ?? 0) / 100);
   return {serviceCharge, officialFee, tax, total:serviceCharge + officialFee + tax};

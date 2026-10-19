@@ -19,6 +19,60 @@ function client() {
   return { context, run: source => vm.runInContext(source, context) };
 }
 
+test('pending cases and notification destinations follow current case status',()=>{
+  const {run}=client();
+  run("cases=[{id:'c1',status:'Correction Required'},{id:'c2',status:'Closed'},{id:'c3',status:'Assigned'}];caseNotifications=[{id:'n1',caseId:'c1',status:'Assigned'}];");
+  assert.equal(run("isPendingCase({status:'Awaiting Documents'})"),true);
+  assert.equal(run("isPendingCase({status:'Correction Required'})"),true);
+  assert.equal(run("isPendingCase({status:'Assigned'})"),false);
+  assert.equal(run("isPendingCase({status:'Closed'})"),false);
+  assert.equal(run("hasSectionUpdates('pending')"),true);
+  assert.equal(run("hasSectionUpdates('cases')"),false);
+  run("cases[0].status='Closed'");
+  assert.equal(run("hasSectionUpdates('completed')"),true);
+});
+
+test('opening one case acknowledges only its displayed notifications',async()=>{
+  const {run}=client();
+  run("caseNotifications=[{id:'n1',caseId:'c1'},{id:'n2',caseId:'c2'}];updateCaseIndicators=()=>{};let marked;api=async(path,options)=>{marked=options.body.ids;return {};};");
+  await run("markCaseUpdatesRead('c1')");
+  assert.equal(run('marked.join()'),'n1');
+  assert.equal(run('caseNotifications.map(notice=>notice.id).join()'),'n2');
+});
+
+test('returning a case to sales requires instructions and uses correction status',async()=>{
+  const {context,run}=client();
+  const note={value:' ',focus(){this.focused=true;}};
+  const status={value:'Ready to Submit'};
+  context.document.querySelector=selector=>selector==='#note'?note:selector==='#nextStatus'?status:null;
+  run("let returned;progress=async id=>{returned=id;};");
+  await run("returnCaseToSales('c1')");
+  assert.equal(run('returned'),undefined);
+  assert.equal(note.focused,true);
+  note.value='Please replace the blurry document';
+  await run("returnCaseToSales('c1')");
+  assert.equal(status.value,'Correction Required');
+  assert.equal(run('returned'),'c1');
+});
+
+test('background updates avoid unnecessary redraws and defer changed lists until forms close',async()=>{
+  const {context,run}=client();
+  let drawerOpen=false;
+  context.document.querySelector=selector=>selector.startsWith('#drawer') && drawerOpen ? {} : null;
+  run("me={id:'u1'};view='cases';cases=[];let redraws=0;updateCaseIndicators=()=>{};render=()=>{redraws++;caseListNeedsRender=false;};let incoming=[];api=async path=>path==='/api/cases'?{cases:incoming}:{notifications:[]};");
+  await run('refreshCaseUpdates()');
+  assert.equal(run('redraws'),0);
+  drawerOpen=true;
+  run("incoming=[{id:'c1',status:'Correction Required'}]");
+  await run('refreshCaseUpdates()');
+  assert.equal(run('redraws'),0);
+  drawerOpen=false;
+  await run('refreshCaseUpdates()');
+  assert.equal(run('redraws'),1);
+  await run('refreshCaseUpdates()');
+  assert.equal(run('redraws'),1);
+});
+
 
 test('admin verifies received payment with one button and no checklist or notes',async()=>{
   const {run}=client();
@@ -117,6 +171,53 @@ test('intake overlaps at most three uploads, finishes all workers, and offers an
   await run("submitCase('another')");
   assert.equal(run('peak'),3);assert.equal(run('completed'),6);assert.equal(run('active'),0);
   assert.equal(run('nextCases'),1);assert.equal(run('checkouts'),0);
+});
+
+test('report pages retry independently without duplicating already uploaded pages',async()=>{
+  const {run}=client();
+  run(`
+    draftMissing=()=>[];
+    draft.docs={'Talathi Report':{pages:[{content:'page1'},{content:'page2'},{content:'page3'}]}};
+    api=async()=>({case:{id:'case1',ref:'SO1'}});
+    let failed=false;
+    const pages=[];
+    uploadDocument=async(id,type,doc)=>{pages.push(doc.content);if(doc.content==='page2' && !failed){failed=true;throw Error('Interrupted');}};
+    pay=async()=>{};
+  `);
+  await run('submitCase()');
+  await run('submitCase()');
+  assert.equal(run("pages.filter(page=>page==='page1').length"),1);
+  assert.equal(run("pages.filter(page=>page==='page2').length"),2);
+  assert.equal(run("pages.filter(page=>page==='page3').length"),1);
+});
+
+test('removing a staged file after a partial save removes its saved copy and clears retry state',async()=>{
+  const {run}=client();
+  run(`
+    draft.docs={Photo:{content:'photo'}};
+    draft.createdCase={id:'c1'};draft.uploaded={Photo:'photo'};draft.uploadedIds={Photo:'d1'};
+    const removalCalls=[];
+    api=async(path,options)=>{removalCalls.push({path,body:options.body});return {};};
+  `);
+  await run("removeDraftDocument('Photo')");
+  assert.equal(run('draft.docs.Photo'),undefined);
+  assert.equal(run('draft.uploaded.Photo'),undefined);
+  assert.equal(run('draft.uploadedIds.Photo'),undefined);
+  assert.equal(run('removalCalls[0].path'),'/api/cases/c1/remove-document');
+  assert.equal(run('removalCalls[0].body.documentId'),'d1');
+});
+
+test('saved document removal controls cover intake and received files before case closure',()=>{
+  const {context,run}=client();
+  context.location={origin:'https://example.test'};
+  run("me={role:'sales'};const doc={id:'d1',doc_type:'Ration Card',download_url:'/file'};const item={id:'c1',ref:'SO1',customer:{name:'Client'},status:'Awaiting Documents'};");
+  assert.match(run('documentActions(item,doc)'),/removeSavedDocument/);
+  run("doc.doc_type='Received Document';item.status='Document Received'");
+  assert.doesNotMatch(run('documentActions(item,doc)'),/removeSavedDocument/);
+  run("me.role='backoffice'");
+  assert.match(run('documentActions(item,doc)'),/removeSavedDocument/);
+  run("item.status='Closed'");
+  assert.doesNotMatch(run('documentActions(item,doc)'),/removeSavedDocument/);
 });
 
 test('cloud intake waits for concurrent uploads before final mirror scheduling',async()=>{

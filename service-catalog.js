@@ -3,16 +3,16 @@ const field = (label, type = 'text', options) => ({ label, type, ...(options ? {
 
 export const serviceCatalog = [
   {
-    name: 'Income Certificate', slug: 'income-certificate', description: 'Income certificate application assistance.',
+    name: 'Income Certificate', slug: 'income-certificate', description: 'Income certificate application assistance.', serviceCharge: 20000,
     instructions: 'For white ration card holders, Form 16 or ITR is required. Talathi report is required for rural ration card holders.',
-    fields: [field('Certificate duration', 'select', ['1 year', '3 years']), field('Reason for certificate'), field('Ration card colour', 'select', ['White', 'Other']), field('Ration card area rural?', 'select', ['Yes', 'No'])],
-    documents: [doc('Aadhaar Card'), doc('Photo'), doc('Ration Card'), doc('Form 16 / ITR', 'Required for white ration card holders.', { field: 'Ration card colour', equals: 'White' }), doc('Talathi Report', 'Required for ration card holders in rural areas.', { field: 'Ration card area rural?', equals: 'Yes' })]
+    fields: [field('Years of Certificate Required', 'select', ['1 year', '3 years']), field('Reason for application', 'select', ['Banking', 'Ration Card', 'Government Schemes', 'Other']), { ...field('Other reason (please specify)'), required: true, when: { field: 'Reason for application', equals: 'Other' } }, field('Ration card colour', 'select', ['Yellow', 'Orange', 'White']), field('Ration card area', 'select', ['City', 'Village'])],
+    documents: [doc('Aadhaar Card'), doc('Photo'), doc('Ration Card'), doc('Form 16 / ITR', 'Required for white ration card holders.', { field: 'Ration card colour', equals: 'White' }), { ...doc('Talathi Report', 'Required for ration card holders in villages. Add a photo of each page, or upload a PDF.', { field: 'Ration card area', equals: 'Village' }), multiple: true }]
   },
   {
-    name: 'Age, Nationality & Domicile Certificate', slug: 'domicile-certificate', description: 'Age, nationality and domicile certificate assistance.',
+    name: 'Age, Nationality & Domicile Certificate', slug: 'domicile-certificate', description: 'Age, nationality and domicile certificate assistance.', serviceCharge: 20000,
     instructions: 'Applicants under 18 need Aadhaar cards for both the applicant and father. The family proof should be dated at least 15 years ago; school leaving certificate must show place and date of birth.',
-    fields: [field('Applicant under 18?', 'select', ['Yes', 'No']), field('Applicant birth date', 'date'), field('Applicant birth place'), field('Applicant or beneficiary')],
-    documents: [doc('Applicant Aadhaar Card', 'For applicants under 18, upload both applicant and father Aadhaar cards.'), doc('Photo'), doc('Ration Card'), doc('School Leaving Certificate', 'Must show place and date of birth.'), doc('Family Member Address Proof (15+ years old)', 'Electricity bill, gas passbook, driving licence, or voter ID belonging to a family member.')]
+    fields: [field('Applicant under 18?', 'select', ['Yes', 'No']), { ...field('Applicant', 'select', ['Father', 'Mother', 'Guardian']), when: { field: 'Applicant under 18?', equals: 'Yes' }, defaultWhen: { field: 'Applicant under 18?', equals: 'No', value: 'Self' } }, field('Applicant birth place')],
+    documents: [doc('Applicant Aadhaar Card', 'For applicants under 18, upload both applicant and father Aadhaar cards.'), doc('Father Aadhaar Card', 'Required for applicants under 18.', { field: 'Applicant under 18?', equals: 'Yes' }), doc('Photo', 'Photo of the beneficiary.'), doc('Ration Card'), doc('School Leaving Certificate', 'School Leaving Certificate of the beneficiary. Must show place and date of birth.'), doc('Family Member Address Proof (15+ years old)', 'Electricity bill, gas passbook, driving licence, or voter ID belonging to a family member.')]
   },
   {
     name: 'Caste Certificate', slug: 'caste-certificate', description: 'Caste certificate application assistance.',
@@ -84,7 +84,7 @@ export const serviceCatalog = [
 ];
 
 // Model conditional proofs as separate checklist items so each can be validated.
-for (const slug of ['domicile-certificate','caste-certificate','non-creamy-layer']) {
+for (const slug of ['caste-certificate','non-creamy-layer']) {
   serviceCatalog.find(service => service.slug === slug).documents.push(doc('Father Aadhaar Card', 'Required for applicants under 18.', { field:'Applicant under 18?', equals:'Yes' }));
 }
 const validity = serviceCatalog.find(service => service.slug === 'caste-validity');

@@ -78,7 +78,7 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const {services,cloudUploads} = (await request('/api/services',{cookie:accounts.sales})).data;
     assert.equal(cloudUploads,true);
     const variant = services.find(s=>s.slug==='income-certificate').variants[0];
-    const payload = {variantId:variant.id,customer:{name:'Cloud Trial',mobile:'9876543210'},details:{'Certificate duration':'1 year','Ration card colour':'Other','Ration card area rural?':'No'},consent:true};
+    const payload = {variantId:variant.id,customer:{name:'Cloud Trial',mobile:'9876543210'},details:{'Years of Certificate Required':'1 year','Reason for application':'Banking','Ration card colour':'Yellow','Ration card area':'City'},consent:true};
     const created = await request('/api/cases',{cookie:accounts.sales,body:payload});
     assert.equal(created.status,201,JSON.stringify(created.data));
     const path = '/api/cases/'+created.data.case.id;
@@ -132,6 +132,10 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     for (const status of ['Ready to Submit','Submitted to Official Portal','Document Received']) assert.equal((await request(path+'/progress',{cookie:accounts.backoffice,body:{status}})).status,200);
     assert.equal((await upload('Received Document',pdf,accounts.backoffice)).result.status,201);
     assert.equal((await request(path+'/submit-received-document',{cookie:accounts.backoffice,method:'POST'})).status,200);
+    const completedNotice = (await request('/api/notifications',{cookie:accounts.sales})).data.notifications.find(notice=>notice.caseId===created.data.case.id && notice.status==='Closed');
+    assert.ok(completedNotice,'Sales receives the back-office completion update');
+    assert.equal((await request('/api/notifications/read',{cookie:accounts.sales,body:{ids:[completedNotice.id]}})).status,200);
+    assert.equal((await request('/api/notifications',{cookie:accounts.sales})).data.notifications.some(notice=>notice.id===completedNotice.id),false);
     for (const period of ['week','month','quarter','year','all']) {
       const dashboard = await request('/api/admin/dashboard?period='+period,{cookie:admin});
       assert.equal(dashboard.status,200,JSON.stringify(dashboard.data)+' '+output);
@@ -142,12 +146,24 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const batchCases=await Promise.all(Array.from({length:2},()=>request('/api/cases',{cookie:accounts.sales,body:payload})));
     const combined=await request('/api/payments/batch',{cookie:accounts.sales,body:{caseIds:batchCases.map(r=>r.data.case.id)}});
     assert.equal(combined.status,201,JSON.stringify(combined.data));
-    assert.equal(combined.data.amount,200);
+    assert.equal(combined.data.amount,40000);
     const batchPath='/api/payments/'+combined.data.id;
     assert.equal((await request(batchPath+'/submit',{cookie:accounts.sales,body:{utr:'444444444444'}})).status,200);
     const batchConfirmations=await Promise.all(Array.from({length:2},()=>request(batchPath+'/verify',{cookie:admin,body:{}})));
     assert.deepEqual(batchConfirmations.map(r=>r.status),[200,200],'Concurrent combined verification is idempotent in PostgreSQL');
     assert.equal((await request(batchPath+'/receipt',{cookie:admin})).data.items.length,2);
+    const reportPath='/api/cases/'+concurrent[0].data.case.id;
+    const photo=Buffer.from([255,216,255,224,1]);
+    const pageUploads=await Promise.all(Array.from({length:4},(_,index)=>request(reportPath+'/upload-url',{cookie:accounts.sales,body:{docType:'Talathi Report',fileName:`page-${index+1}.jpg`,mimeType:'image/jpeg',size:photo.length}})));
+    for(const authorization of pageUploads) {
+      assert.equal(authorization.status,201);
+      assert.equal((await fetch(authorization.data.uploadUrl,{method:'PUT',headers:{'content-type':'image/jpeg'},body:photo})).status,200);
+      const finalized=await request(reportPath+'/documents',{cookie:accounts.sales,body:{uploadId:authorization.data.uploadId,deferMirrors:true}});
+      assert.equal(finalized.status,201,JSON.stringify(finalized.data));
+    }
+    const reportPages=(await request(reportPath,{cookie:accounts.sales})).data.documents.filter(doc=>doc.doc_type==='Talathi Report' && doc.state==='uploaded');
+    assert.equal(reportPages.length,4,'Every signed report-page upload stays active');
+    assert.equal(new Set(reportPages.map(doc=>doc.file_name)).size,4);
 
   } finally {child.kill();}
 });

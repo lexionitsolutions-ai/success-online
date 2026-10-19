@@ -3,6 +3,10 @@ const app = document.querySelector('#app');
 let me = null;
 let cases = [];
 let services = [];
+let caseNotifications = [];
+let updatesTimer = null;
+let updatesInFlight = false;
+let caseListNeedsRender = false;
 let testPricingMode = true;
 let cloudUploads = false;
 let googleStatus = null;
@@ -52,7 +56,7 @@ const dateTime = value => value ? new Date(value).toLocaleString('en-IN', { date
 const roleName = role => ({admin:'Administrator',sales:'Sales employee',backoffice:'Back office'}[role] || role);
 function icon(name) {
   const paths={dashboard:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',cases:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',completed:'<rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>',queue:'<path d="M4 5h16v14H4zM4 13h5l2 3h2l2-3h5M8 9h8"/>',payments:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',admin:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',employees:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',plus:'<path d="M12 5v14M5 12h14"/>',more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',logout:'<path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h12"/>',switch:'<path d="M4 7h15l-3-3M20 17H5l3 3M20 7v4M4 17v-4"/>'};
-  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]||paths.profile}</svg>`;
+  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name === 'pending' ? 'queue' : name]||paths.profile}</svg>`;
 }
 function labelTables() {
   document.querySelectorAll('.table').forEach(table=>{
@@ -79,6 +83,7 @@ async function api(path, options = {}) {
 }
 
 function toast(message) {
+  document.querySelectorAll('.toast').forEach(item => item.remove());
   const item = document.createElement('div');
   item.className = 'toast';
   item.textContent = message;
@@ -90,6 +95,7 @@ async function boot() {
   try {
     me = (await api('/api/me')).user;
     await load();
+    startCaseUpdatePolling();
     const googleResult = new URLSearchParams(location.search).get('google');
     if (googleResult) {
       history.replaceState({}, '', location.pathname);
@@ -101,8 +107,9 @@ async function boot() {
 }
 
 async function load() {
-  const requests = [api('/api/services'), api('/api/cases')];
-  const [serviceData, caseData] = await Promise.all(requests);
+  const requests = [api('/api/services'), api('/api/cases'), api('/api/notifications')];
+  const [serviceData, caseData, noticeData] = await Promise.all(requests);
+  caseNotifications = noticeData.notifications || [];
   services = serviceData.services;
   testPricingMode = serviceData.testPricingMode;
   cloudUploads = serviceData.cloudUploads === true;
@@ -155,22 +162,23 @@ function renderLogin() {
     try {
       me = (await api('/api/login', { method: 'POST', body: Object.fromEntries(new FormData(event.target)) })).user;
       await load();
+      startCaseUpdatePolling();
     } catch (error) { errorMessage.textContent=error.message;errorMessage.hidden=false; }
     finally {button.disabled=false;button.textContent='Sign in';}
   };
 }
 
-const navLabels = { dashboard: 'Overview', cases: 'Active Cases', completed: 'Completed Cases', payments: 'Payments', queue: 'Operations', admin: 'Business analytics', employees: 'Employees' };
+const navLabels = { dashboard: 'Overview', cases: 'Active Cases', pending: 'Pending Cases', completed: 'Completed Cases', payments: 'Payments', queue: 'Operations', admin: 'Business analytics', employees: 'Employees' };
 
 function shell(content) {
-  const links = ['dashboard','cases','completed','payments','queue','admin','employees']
+  const links = ['dashboard','cases','pending','completed','payments','queue','admin','employees']
     .filter(item => item !== 'queue' || me.role !== 'sales')
 
     .filter(item => !['admin','employees'].includes(item) || me.role === 'admin');
   const canCreate = ['sales','admin'].includes(me.role);
-  const primaryLinks=links.filter(item=>['dashboard','cases','completed','queue'].includes(item));
+  const primaryLinks=links.filter(item=>['dashboard','cases','pending','completed'].includes(item));
   const moreLinks=links.filter(item=>!primaryLinks.includes(item));
-  const navButton=(item,mobile=false)=>`<button class="${view===item?'active':''}" ${view===item?'aria-current="page"':''} onclick="setView('${item}')">${icon(item)}<span>${mobile?({dashboard:'Overview',cases:'Active',completed:'Completed',queue:'Operations'}[item]||navLabels[item]):navLabels[item]}</span></button>`;
+  const navButton=(item,mobile=false)=>`<button data-view="${item}" class="${view===item?'active':''}" ${view===item?'aria-current="page"':''} onclick="setView('${item}')">${icon(item)}<span>${mobile?({dashboard:'Overview',cases:'Active',pending:'Pending',completed:'Completed',queue:'Operations'}[item]||navLabels[item]):navLabels[item]}</span>${hasSectionUpdates(item) ? '<i class="nav-update-dot" title="Unread case updates" aria-hidden="true"></i>' : ''}</button>`;
   const initials=(me.name||me.username).trim().split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase();
   return `<div class="shell">
     <aside class="side">
@@ -191,7 +199,8 @@ function shell(content) {
 
 function render() {
   if (!me) return renderLogin();
-  const content = view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : renderDashboard();
+  caseListNeedsRender = false;
+  const content = view === 'pending' ? renderPendingCases() : view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : renderDashboard();
   app.innerHTML = shell(content);
   labelTables();
 }
@@ -215,6 +224,70 @@ function metricCard(label, value, detail, tone = '') {
 
 function counts() { return cases.reduce((result, item) => { result[item.status] = (result[item.status] || 0) + 1; return result; }, {}); }
 const isCompletedCase = item => ['Closed','Delivered'].includes(item.status);
+
+const pendingStatuses = ['Draft','Awaiting Documents','Awaiting Payment','Correction Required','Customer Action Required'];
+const isPendingCase = item => pendingStatuses.includes(item.status);
+function notificationSection(notice) {
+  const item = cases.find(item => item.id === notice.caseId) || {status:notice.status};
+  return isCompletedCase(item) ? 'completed' : isPendingCase(item) ? 'pending' : 'cases';
+}
+function hasSectionUpdates(section) { return caseNotifications.some(notice => notificationSection(notice) === section); }
+function updateCaseIndicators() {
+  document.querySelectorAll('[data-view]').forEach(button => {
+    const unread = hasSectionUpdates(button.dataset.view);
+    const dot = button.querySelector('.nav-update-dot');
+    if (unread && !dot) button.insertAdjacentHTML('beforeend','<i class="nav-update-dot" title="Unread case updates" aria-hidden="true"></i>');
+    if (!unread && dot) dot.remove();
+  });
+  document.querySelectorAll('[data-case-update]').forEach(dot => { dot.hidden = !caseNotifications.some(notice => notice.caseId === dot.dataset.caseUpdate); });
+}
+async function markCaseUpdatesRead(caseId) {
+  const ids = caseNotifications.filter(notice => notice.caseId === caseId).map(notice => notice.id);
+  if (!ids.length) return;
+  try {
+    await api('/api/notifications/read',{method:'POST',body:{ids}});
+    caseNotifications = caseNotifications.filter(notice => !ids.includes(notice.id));
+    updateCaseIndicators();
+  } catch { /* Keep unread indicators until acknowledgement succeeds. */ }
+}
+async function refreshCaseUpdates() {
+  if (!me || updatesInFlight || document.hidden) return;
+  const userId = me.id;
+  updatesInFlight = true;
+  try {
+    const [caseData,noticeData] = await Promise.all([api('/api/cases'),api('/api/notifications')]);
+    if (me?.id !== userId) return;
+    const casesChanged = JSON.stringify(cases) !== JSON.stringify(caseData.cases);
+    if (casesChanged) caseListNeedsRender = true;
+    cases = caseData.cases;
+    caseNotifications = noticeData.notifications || [];
+    updateCaseIndicators();
+    const editing = document.activeElement?.matches?.('input,select,textarea');
+    if (caseListNeedsRender && !document.querySelector('#drawer,.profile[open],.mobile-more[open]') && !editing && ['dashboard','cases','pending','completed','queue'].includes(view)) {
+      const search = document.querySelector('#caseSearch')?.value || '';
+      const serviceFilter = document.querySelector('#caseServiceFilter')?.value || '';
+      render();
+      if (search || serviceFilter) {
+        if (document.querySelector('#caseSearch')) document.querySelector('#caseSearch').value = search;
+        if (document.querySelector('#caseServiceFilter')) document.querySelector('#caseServiceFilter').value = serviceFilter;
+        filterCases(view === 'completed');
+      }
+    }
+  } catch { /* Retry automatically without disrupting an open form. */ }
+  finally { updatesInFlight = false; }
+}
+function startCaseUpdatePolling() {
+  clearTimeout(updatesTimer);
+  const tick = async () => {
+    await refreshCaseUpdates();
+    if (me) updatesTimer = setTimeout(tick,15000);
+  };
+  updatesTimer = setTimeout(tick,15000);
+}
+function renderPendingCases() {
+  const rows = cases.filter(isPendingCase).sort((a,b) => Number(b.status === 'Correction Required') - Number(a.status === 'Correction Required') || String(b.updated_at).localeCompare(String(a.updated_at)));
+  return `${pageHead('Pending Cases','Cases awaiting documents, payment, corrections, or customer action.')} ${caseToolbar(rows,false)}<div id="caseList" class="table-shell">${rows.length ? caseTable(rows) : empty('No pending cases. All caught up.')}</div>`;
+}
 
 function renderDashboard() {
   const c = counts();
@@ -247,12 +320,12 @@ function renderCompletedCases() {
 
 function caseToolbar(rows, completed) {
   const serviceFilter = me.role === 'admin' ? `<label class="service-filter"><span>Service</span><select id="caseServiceFilter" onchange="filterCases(${completed})"><option value="">All services</option>${services.map(service => `<option value="${h(service.id)}">${h(service.name)}</option>`).join('')}</select></label>` : '';
-  return `<div class="toolbar"><div class="toolbar-controls"><label class="search"><span>Search</span><input id="caseSearch" oninput="filterCases(${completed})" placeholder="Case ID, customer, service, phone"></label>${serviceFilter}</div><span id="caseListCount" class="count-label">${number(rows.length)} ${completed ? 'completed' : 'active'} cases</span></div>`;
+  return `<div class="toolbar"><div class="toolbar-controls"><label class="search"><span>Search</span><input id="caseSearch" oninput="filterCases(${completed})" placeholder="Case ID, customer, service, phone"></label>${serviceFilter}</div><span id="caseListCount" class="count-label">${number(rows.length)} ${view === 'pending' ? 'pending' : completed ? 'completed' : 'active'} cases</span></div>`;
 }
 
 function caseTable(rows) {
   return `<table class="table case-table"><thead><tr><th>Case</th><th>Customer</th><th>Service</th><th>Status</th><th>Payment</th><th>Owner</th><th>Updated</th></tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
-    <td><strong><button class="case-link" onclick="event.stopPropagation();openCase('${item.id}')" aria-label="Open case ${h(item.ref)}">${h(item.ref)}</button></strong><small>${h(item.priority)}</small></td>
+    <td><strong><button class="case-link" onclick="event.stopPropagation();openCase('${item.id}')" aria-label="Open case ${h(item.ref)}"><i class="case-update-dot" data-case-update="${item.id}" ${caseNotifications.some(notice => notice.caseId === item.id) ? '' : 'hidden'} title="Unread case update" aria-hidden="true"></i>${h(item.ref)}</button></strong><small>${h(item.priority)}</small></td>
     <td><strong>${h(item.customer.name)}</strong><small>${h(item.customer.mobile.replace(/\d(?=\d{4})/g, 'x'))}</small></td>
     <td>${h(item.service.name)}<small>${h(item.variant.name)}</small></td>
     <td>${statusBadge(item.status)}</td><td>${statusBadge(item.payment?.status || item.payment_state)}<small>${money(item.amounts.total)}</small><small>${h(item.payment?.gateway_order_id || '')}</small></td>
@@ -390,13 +463,13 @@ function filterCases(completed = null) {
   const value = (document.querySelector('#caseSearch')?.value || '').toLowerCase();
   const serviceId = document.querySelector('#caseServiceFilter')?.value || '';
   const filtered = cases
-    .filter(item => completed === null || isCompletedCase(item) === completed)
+    .filter(item => view === 'pending' ? isPendingCase(item) : completed === null || isCompletedCase(item) === completed)
     .filter(item => !serviceId || item.service.id === serviceId)
     .filter(item => [item.ref,item.customer.name,item.customer.mobile,item.service.name,item.status].join(' ').toLowerCase().includes(value));
   document.querySelector('#caseList').innerHTML = filtered.length ? caseTable(filtered) : empty('No cases match this search.');
   labelTables();
   const count = document.querySelector('#caseListCount');
-  if (count) count.textContent = `${number(filtered.length)} ${completed ? 'completed' : 'active'} cases`;
+  if (count) count.textContent = `${number(filtered.length)} ${view === 'pending' ? 'pending' : completed ? 'completed' : 'active'} cases`;
 }
 
 function startCase() { if (drawerBusy) return; closeDrawer(); draft = { step: 1, customer: {}, details: {}, docs: {} }; selectedCase = null; drawWizard(); }
@@ -408,42 +481,56 @@ function drawWizard() {
 }
 
 function wizardBody(service, variant) {
-  if (draft.step === 1) return `<div class="formgrid"><label>Mobile number<input id="mobile" type="tel" inputmode="numeric" maxlength="10" autocomplete="tel-national" placeholder="10-digit mobile number" value="${h(draft.customer.mobile || '')}"></label><label>Full name<input id="name" autocomplete="name" value="${h(draft.customer.name || '')}"></label><label>Email<input id="email" type="email" autocomplete="email" value="${h(draft.customer.email || '')}"></label><label>Address<input id="address" autocomplete="street-address" value="${h(draft.customer.address || '')}"></label></div><div class="form-actions"><button class="primary" onclick="saveStep1()">Continue</button></div>`;
-  if (draft.step === 2) return `<div class="formgrid"><label>Service<select id="service">${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label><label>Request type<select id="variant"></select></label></div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="primary" onclick="saveStep2()">Continue</button></div>`;
+  if (draft.step === 1) return `<div class="formgrid"><label>Full name<input id="name" autocomplete="name" value="${h(draft.customer.name || '')}"></label><label>Mobile number<input id="mobile" type="tel" inputmode="numeric" maxlength="10" pattern="[0-9]{10}" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" autocomplete="tel-national" placeholder="10-digit mobile number" value="${h(draft.customer.mobile || '')}"></label><label>Email<input id="email" type="email" autocomplete="email" value="${h(draft.customer.email || '')}"></label><label>Address<input id="address" autocomplete="street-address" value="${h(draft.customer.address || '')}"></label></div><div class="form-actions"><button class="primary" onclick="saveStep1()">Continue</button></div>`;
+  if (draft.step === 2) return `<div class="formgrid"><label>Service<select id="service">${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label></div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="primary" onclick="saveStep2()">Continue</button></div>`;
   if (draft.step === 3) {
     const docs = applicableDocuments(variant?.documents || [], draft.details);
     const missing = docs.filter(item => item.required && !draft.docs[item.label]);
-    return `<p class="muted">${docs.filter(item => item.required).length - missing.length} of ${docs.filter(item => item.required).length} required documents selected. Upload every required document to continue.</p><div class="upload-list">${docs.map(item => `<div class="doc"><span><strong>${h(item.label)}</strong><small>${h(item.note || (item.required ? 'Required document' : 'Optional supporting document'))}</small><em>${h(draft.docs[item.label]?.fileName || 'Not selected')}</em></span>${uploadControls(encodeURIComponent(item.label))}</div>`).join('')}</div><div class="form-actions"><button class="quiet" onclick="wizardBack(2)">Back</button><button class="primary" onclick="saveStep3()" ${missing.length ? 'disabled' : ''}>Continue</button></div>`;
+    return `<p class="muted">${docs.filter(item => item.required).length - missing.length} of ${docs.filter(item => item.required).length} required documents selected. Upload every required document to continue.</p><div class="upload-list">${docs.map(item => `<div class="doc"><span><strong>${h(item.label)}</strong><small>${h(item.note || (item.required ? 'Required document' : 'Optional supporting document'))}</small><em>${h(draft.docs[item.label]?.pages ? `${draft.docs[item.label].pages.length} pages selected` : draft.docs[item.label]?.fileName || 'Not selected')}</em></span>${uploadControls(encodeURIComponent(item.label), '', item.multiple)}${draft.docs[item.label] && !draft.docs[item.label].pages ? `<ul class="selected-pages"><li><span>${h(draft.docs[item.label].fileName)}</span><button type="button" class="quiet" onclick="removeDraftDocument('${encodeURIComponent(item.label)}')" aria-label="Remove ${h(item.label)}">Remove</button></li></ul>` : ''}${draft.docs[item.label]?.pages ? `<ul class="selected-pages">${draft.docs[item.label].pages.map((page,index) => `<li><span>Page ${index+1}: ${h(page.fileName)}</span><button type="button" class="quiet" onclick="removeDraftPage('${encodeURIComponent(item.label)}',${index})" aria-label="Remove page ${index+1}">Remove</button></li>`).join('')}</ul>` : ''}</div>`).join('')}</div><div class="form-actions"><button class="quiet" onclick="wizardBack(2)">Back</button><button class="primary" onclick="saveStep3()" ${missing.length ? 'disabled' : ''}>Continue</button></div>`;
   }
   const amount = variant?.amounts || { serviceCharge:0, officialFee:0, tax:0, total:0 };
-  const pricing = amount.total ? `<div class="price-row"><span>Service charge ${money(amount.serviceCharge)}</span><span>Official fee ${money(amount.officialFee)}</span><span>Tax ${money(amount.tax)}</span></div><div class="review-total"><span>Total payable</span><strong>${money(amount.total)}</strong></div>` : `<div class="review-total"><span>Price</span><strong>To be confirmed</strong><small>Confirm the service and official fees before collecting payment.</small></div>`;
-  return `<div class="review"><div><span>Customer</span><strong>${h(draft.customer.name)}</strong></div><div><span>Service</span><strong>${h(service.name)} · ${h(variant.name)}</strong></div>${pricing}${testPricingMode ? '<p>INR 1 test pricing is active. UPI payments transfer real money.</p>' : ''}<label class="check"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></div><div class="form-actions"><button class="primary" onclick="submitCase()">Create & pay</button><button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button></div>`;
+  const pages = Object.values(draft.docs).reduce((count,doc) => count + (doc.pages?.length || 1), 0);
+  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your case.</p></div></header><div class="intake-review-card"><div class="intake-review-service"><span>Selected service</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge</span><strong>${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div><div class="intake-review-total"><span>Total payable</span><strong>${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div><label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button><button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button></div>`;
 }
 
 function bindWizard() {
   if (draft.step !== 2) return;
   const serviceSelect = document.querySelector('#service');
-  const variantSelect = document.querySelector('#variant');
   const collectFields = () => document.querySelectorAll('#serviceFields [data-field]').forEach(input => { draft.details[decodeURIComponent(input.dataset.field)] = input.value; });
   const update = () => {
     const service = services.find(item => item.id === serviceSelect.value);
-    variantSelect.innerHTML = service.variants.map(item => `<option value="${item.id}" ${item.id === draft.variantId ? 'selected' : ''}>${h(item.name)}</option>`).join('');
-    const variant = service.variants.find(item => item.id === variantSelect.value) || service.variants[0];
-    document.querySelector('#serviceFields').innerHTML = (variant.fields || []).map(field => {
+    const variant = service.variants.find(item => item.id === draft.variantId) || service.variants[0];
+    draft.serviceId = service.id;
+    draft.variantId = variant.id;
+    for (const field of variant.fields || []) {
+      if (field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals) draft.details[field.label] = field.defaultWhen.value;
+    }
+    document.querySelector('#serviceFields').innerHTML = (variant.fields || []).filter(field => !field.when || draft.details[field.when.field] === field.when.equals || (field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals)).map(field => {
       const key = encodeURIComponent(field.label);
       const rawValue = draft.details[field.label] || '';
       const value = h(rawValue);
-      const control = field.type === 'select'
-        ? `<select data-field="${key}"><option value="">Choose…</option>${(field.options || []).map(option => `<option ${option === rawValue ? 'selected' : ''}>${h(option)}</option>`).join('')}</select>`
-        : `<input data-field="${key}" type="${['email','date','number','tel'].includes(field.type) ? field.type : 'text'}" value="${value}">`;
+      const automatic = field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals;
+      const control = automatic ? `<input data-field="${key}" value="${value}" readonly aria-readonly="true">` : field.type === 'select'
+        ? `<select data-field="${key}"><option value="">Choose…</option>${(field.options || []).map(option => `<option value="${h(option)}" ${option === rawValue ? 'selected' : ''}>${field.label === 'Ration card colour' ? ({ Yellow: '\u{1F7E1} ', Orange: '\u{1F7E0} ', White: '\u26AA ' }[option] || '') : ''}${h(option)}</option>`).join('')}</select>`
+        : `<input data-field="${key}" type="${['email','date','number','tel'].includes(field.type) ? field.type : 'text'}" value="${value}" ${field.required ? 'required' : ''} maxlength="500">`;
       return `<label>${h(field.label)}${control}</label>`;
     }).join('');
-    document.querySelector('#serviceFields').querySelectorAll('[data-field]').forEach(input => input.onchange = collectFields);
+    document.querySelector('#serviceFields').querySelectorAll('[data-field]').forEach(input => input.onchange = () => {
+      const label = decodeURIComponent(input.dataset.field);
+      const definition = variant.fields.find(field => field.label === label);
+      if (definition.when && draft.details[definition.when.field] !== definition.when.equals) return;
+      draft.details[label] = input.value;
+      if ((variant.fields || []).some(field => field.when?.field === label)) {
+        for (const field of variant.fields) {
+          if (field.when && draft.details[field.when.field] !== field.when.equals) delete draft.details[field.label];
+        }
+        update();
+      }
+    });
     const docs = applicableDocuments(variant.documents, draft.details);
     document.querySelector('#svcInfo').innerHTML = `<strong>${h(service.description)}</strong><p>${docs.map(item => h(item.label)).join(' · ')}</p><small>${h(variant.instructions || 'Confirm documents and fees before submission.')}</small><span>Fees to confirm before payment</span>`;
   };
   serviceSelect.onchange = () => { collectFields(); draft.details = {}; draft.variantId = ''; update(); };
-  variantSelect.onchange = () => { collectFields(); update(); };
   update();
 }
 
@@ -466,7 +553,6 @@ function saveStep2() {
   }
   document.querySelectorAll('#serviceFields [data-field]').forEach(input => { draft.details[decodeURIComponent(input.dataset.field)] = input.value; });
   draft.serviceId = document.querySelector('#service').value;
-  draft.variantId = document.querySelector('#variant').value;
   draft.step = 3;
   rerenderWizard();
 }
@@ -477,12 +563,13 @@ function draftMissing() {
 function saveStep3() {
   if (drawerBusy) return;
   if (draftMissing().length) return toast('Upload all required documents to continue');
+  document.querySelectorAll('.toast').forEach(item => item.remove());
   draft.step = 4; rerenderWizard();
 }
 function wizardBack(step) { draft.step = step; rerenderWizard(); }
-function uploadControls(encodedType, caseId = '') {
-  const handler = caseId ? `uploadCaseDocument('${caseId}','${encodedType}',this)` : `pickDoc('${encodedType}',this.files[0])`;
-  return `<span class="upload-options"><label class="file-action">Upload document<input type="file" accept="image/jpeg,image/png,application/pdf" onchange="${handler}"></label></span>`;
+function uploadControls(encodedType, caseId = '', multiple = false) {
+  const handler = caseId ? `uploadCaseDocument('${caseId}','${encodedType}',this)` : multiple ? `pickDocs('${encodedType}',this.files)` : `pickDoc('${encodedType}',this.files[0])`;
+  return `<span class="upload-options"><label class="file-action">${multiple ? 'Add report pages' : 'Upload document'}<input type="file" ${multiple ? 'multiple' : ''} accept="image/jpeg,image/png,application/pdf" onchange="${handler}"></label></span>`;
 }
 function validateFile(file) {
   if (!['image/jpeg','image/png','application/pdf'].includes(file.type) || !file.size || file.size > 10_000_000) throw new Error('Choose JPG, PNG, or PDF up to 10 MB');
@@ -498,6 +585,54 @@ async function pickDoc(encodedType, file) {
   } catch (error) { toast(error.message); }
   finally { setDrawerBusy(); rerenderWizard({keepScroll:true}); }
 }
+async function pickDocs(encodedType, files) {
+  if (!files?.length || drawerBusy) return;
+  const selected = Array.from(files);
+  try { selected.forEach(validateFile); } catch (error) { return toast(error.message); }
+  const type = decodeURIComponent(encodedType);
+  setDrawerBusy(`Preparing ${selected.length} report pages...`);
+  try {
+    const pages = [];
+    for (const file of selected) pages.push({fileName:file.name,mimeType:file.type,size:file.size,...(cloudUploads ? {file} : {content:await fileAsBase64(file)})});
+    const existing = draft.docs[type];
+    draft.docs[type] = {pages:[...(existing?.pages || (existing ? [existing] : [])),...pages]};
+    toast(`${pages.length} report pages added`);
+  } catch (error) { toast(error.message); }
+  finally { setDrawerBusy(); rerenderWizard({keepScroll:true}); }
+}
+function removeDraftPage(encodedType, index) { return removeDraftDocument(encodedType,index); }
+async function removeDraftDocument(encodedType, index = null) {
+  if (drawerBusy) return;
+  const type = decodeURIComponent(encodedType);
+  const group = draft.docs[type];
+  const doc = index === null ? group : group?.pages[index];
+  if (!doc) return;
+  const key = doc.uploadKey || (index === null ? type : `${type}:${index}`);
+  const documentId = draft.uploadedIds?.[key];
+  setDrawerBusy('Removing file...');
+  try {
+    if (documentId && draft.createdCase) await api(`/api/cases/${draft.createdCase.id}/remove-document`,{method:'POST',body:{documentId}});
+    if (index === null) delete draft.docs[type];
+    else {
+      group.pages.splice(index,1);
+      if (!group.pages.length) delete draft.docs[type];
+    }
+    if (draft.uploaded) delete draft.uploaded[key];
+    if (draft.uploadedIds) delete draft.uploadedIds[key];
+  } catch (error) { toast(error.message); }
+  finally { setDrawerBusy(); rerenderWizard({keepScroll:true}); }
+}
+async function removeSavedDocument(caseId, documentId) {
+  if (drawerBusy) return;
+  setDrawerBusy('Removing file...');
+  try {
+    await api(`/api/cases/${caseId}/remove-document`,{method:'POST',body:{documentId}});
+    toast('File removed');
+    setDrawerBusy(); closeDrawer();
+    await load(); await openCase(caseId);
+  } catch (error) { toast(error.message); }
+  finally { setDrawerBusy(); }
+}
 async function submitCase(nextAction='pay') {
   if (drawerBusy || draft.submitting) return;
   if (!document.querySelector('#consent').checked) return toast('Consent is required');
@@ -509,18 +644,26 @@ async function submitCase(nextAction='pay') {
     const created = draft.createdCase || (await api('/api/cases', { method:'POST', body:{ customer:draft.customer, variantId:draft.variantId, details:draft.details, consent:true } })).case;
     draft.createdCase = created;
     draft.uploaded ||= {};
+    draft.uploadedIds ||= {};
     let completed = 0;
-    const entries = Object.entries(draft.docs), total = entries.length;
+    const entries = Object.entries(draft.docs).flatMap(([type,doc]) => doc.pages ? doc.pages.map((page,index) => [type,page,page.uploadKey ||= `${type}:${Date.now()}:${index}`]) : [[type,doc,type]]), total = entries.length;
+    const uploadChains = new Map();
     let cursor=0, failure;
     // Three transfers can overlap without flooding a mobile connection.
     const worker=async()=>{
       while(cursor<entries.length && !failure) {
-        const [docType,document]=entries[cursor++], identity=document.file || document.content;
-        if(draft.uploaded[docType]===identity) {completed++;continue;}
+        const [docType,document,uploadKey]=entries[cursor++], identity=document.file || document.content;
+        if(draft.uploaded[uploadKey]===identity) {completed++;continue;}
         setDrawerBusy(`Uploading documents: ${completed} of ${total} complete...`);
         try {
-          await uploadDocument(created.id,docType,document,{deferMirrors:cloudUploads});
-          draft.uploaded[docType]=identity;
+          const transfer = (uploadChains.get(docType) || Promise.resolve()).then(() => {
+            if (failure) throw failure;
+            return uploadDocument(created.id,docType,document,{deferMirrors:cloudUploads});
+          });
+          uploadChains.set(docType,transfer);
+          const result = await transfer;
+          if (result?.documentId) draft.uploadedIds[uploadKey] = result.documentId;
+          draft.uploaded[uploadKey]=identity;
           completed++;
           setDrawerBusy(`Uploading documents: ${completed} of ${total} complete...`);
         } catch(error) {failure ||= error;}
@@ -551,16 +694,17 @@ async function openCase(caseId) {
   try {
     const data = await api(`/api/cases/${caseId}`);
     selectedCase = data;
+    void markCaseUpdatesRead(caseId);
     document.body.insertAdjacentHTML('beforeend', `<div class="drawer" id="drawer"><div class="panel case-panel">${caseDetail(data.case, data.documents, data.notes)}</div></div>`);
   } catch (error) { toast(error.message); }
 }
 
 function documentChecklist(item, documents) {
   const active = documents.filter(document => document.state !== 'replaced');
-  const byType = new Map(active.map(document => [document.doc_type, document]));
   return applicableDocuments(item.variant.documents || [], item.details || {}).map(requirement => {
-    const uploaded = byType.get(requirement.label);
-    return `<div class="doc"><span><strong>${h(requirement.label)}</strong><small>${uploaded ? `Uploaded version ${uploaded.version}` : requirement.required ? 'Required document missing' : 'Optional supporting document'}</small>${statusBadge(uploaded ? 'Uploaded' : requirement.required ? 'Missing' : 'Optional')}${uploaded ? documentActions(item, uploaded) : ''}</span>${!['Closed','Delivered','Cancelled'].includes(item.status) ? uploadControls(encodeURIComponent(requirement.label), item.id) : ''}</div>`;
+    const uploaded = active.filter(document => document.doc_type === requirement.label);
+    const multiple = requirement.multiple;
+    return `<div class="doc"><span><strong>${h(requirement.label)}</strong><small>${uploaded.length ? multiple ? `${uploaded.length} report pages uploaded` : `Uploaded version ${uploaded[0].version}` : requirement.required ? 'Required document missing' : 'Optional supporting document'}</small>${statusBadge(uploaded.length ? 'Uploaded' : requirement.required ? 'Missing' : 'Optional')}${uploaded.map((doc,index) => `${multiple ? `<small>Page ${index+1}</small>` : ''}${documentActions(item,doc)}`).join('')}</span>${!['Closed','Delivered','Cancelled'].includes(item.status) ? uploadControls(encodeURIComponent(requirement.label), item.id, multiple) : ''}</div>`;
   }).join('');
 }
 
@@ -569,7 +713,8 @@ function documentActions(item, document) {
   const message = `Document ready for ${item.ref} - ${item.customer.name}. Download ${document.doc_type}: ${url}`;
   const whatsapp = `https://wa.me/?text=${encodeURIComponent(message)}`;
   const ready = ['Ready to Submit','Submitted to Official Portal','Under Government Review','Approved','Delivered','Closed'].includes(item.status);
-  return `<span class="doc-actions"><a href="${h(document.download_url)}" target="_blank" rel="noopener">Download</a>${ready ? `<a href="${h(whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}</span>`;
+  const removable = !['Closed','Delivered','Cancelled'].includes(item.status) && (document.doc_type !== 'Received Document' || (['backoffice','admin'].includes(me.role) && item.status === 'Document Received'));
+  return `<span class="doc-actions"><a href="${h(document.download_url)}" target="_blank" rel="noopener">Download</a>${ready ? `<a href="${h(whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${removable ? `<button type="button" class="quiet" onclick="removeSavedDocument('${item.id}','${document.id}')" aria-label="Remove ${h(document.doc_type)} file">Remove</button>` : ''}</span>`;
 }
 
 function receivedDocumentPanel(item, documents) {
@@ -599,6 +744,7 @@ function caseDetail(item, documents, notes) {
   return `<div class="drawer-head"><div><p class="eyebrow">${h(item.ref)}</p><h2>${h(item.customer.name)}</h2><p>${h(item.service.name)} · ${h(item.variant.name)}</p></div><button class="quiet" onclick="closeDrawer()">Close</button></div>
     <div class="case-summary"><div><span>Status</span>${statusBadge(item.status)}</div><div><span>Payment</span>${statusBadge(item.payment_state)}</div><div><span>${priced ? 'Total' : 'Price'}</span><strong>${priced ? money(item.amounts.total) : 'To be confirmed'}</strong></div><div><span>Owner</span><strong>${h(item.backoffice?.name || 'Unassigned')}</strong></div></div>
     ${intakeDetails ? `<section class="detail-section"><div class="panel-title"><div><h3>Application details</h3><p>Information collected for this service request.</p></div></div><div class="review">${intakeDetails}</div></section>` : ''}
+    ${item.status === 'Correction Required' ? `<section class="correction-notice"><strong>Returned to sales for correction</strong><p>${h(notes.filter(note => note.new_status === 'Correction Required').at(-1)?.note || 'Review the case timeline and update the requested documents.')}</p></section>` : ''}
     ${casePaymentCard(item)}
     <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div>${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div><div class="upload-list">${documentChecklist(item, documents)}</div></section>
     ${receivedDocumentPanel(item, documents)}
@@ -617,7 +763,7 @@ function progressControls(item) {
   }[item.status] || [];
   const allowed = next.filter(status => (item.document_state === 'complete' || ['Awaiting Documents','Correction Required','Customer Action Required','Rejected','Cancelled'].includes(status)) && (!['Ready for Assignment','Assigned'].includes(status) || item.payment_state === 'paid'));
   if (!allowed.length) return '';
-  return `<section class="workflow-box"><div><p class="eyebrow">Workflow action</p><h3>Move case forward</h3>${item.document_state !== 'complete' ? '<p>Required documents are missing. Upload them to unlock progress.</p>' : ''}</div><select id="nextStatus">${allowed.map(status => `<option>${h(status)}</option>`).join('')}</select><textarea id="note" placeholder="Progress note or required reason"></textarea><button class="primary" onclick="progress('${item.id}')">Update status</button></section>`;
+  return `<section class="workflow-box"><div><p class="eyebrow">Workflow action</p><h3>Move case forward</h3>${item.document_state !== 'complete' ? '<p>Required documents are missing. Upload them to unlock progress.</p>' : ''}</div><select id="nextStatus">${allowed.map(status => `<option>${h(status)}</option>`).join('')}</select><textarea id="note" placeholder="Progress note or correction instructions"></textarea><div class="workflow-actions"><button class="primary" onclick="progress('${item.id}')">Update status</button>${allowed.includes('Correction Required') ? `<button class="return-to-sales" onclick="returnCaseToSales('${item.id}')">Return to sales</button>` : ''}</div></section>`;
 }
 
 async function downloadCaseFiles(caseId, button) {
@@ -665,15 +811,15 @@ async function uploadDocument(caseId, docType, document, {deferMirrors=false} = 
   return api(`/api/cases/${caseId}/documents`, {method:'POST',body:{uploadId:document.cloudAuthorization.uploadId,...(deferMirrors?{deferMirrors:true}:{})}});
 }
 async function uploadCaseDocument(caseId, encodedType, input) {
-  const file = input.files?.[0];
-  if (!file || drawerBusy) return;
-  try { validateFile(file); } catch (error) { input.value = ''; return toast(error.message); }
+  const files = Array.from(input.files || []);
+  if (!files.length || drawerBusy) return;
+  try { files.forEach(validateFile); } catch (error) { input.value = ''; return toast(error.message); }
   const docType = decodeURIComponent(encodedType);
   setDrawerBusy(`Uploading ${docType}… Please wait before moving this case forward.`);
   const badge = docType === 'Received Document' ? input.closest('.doc')?.querySelector('.badge') : null;
   if (badge) { badge.textContent = 'Uploading...'; badge.className = 'badge neutral'; }
   try {
-    await uploadDocument(caseId, docType, { fileName:file.name, mimeType:file.type, size:file.size, ...(cloudUploads ? {file} : {content:await fileAsBase64(file)}) });
+    for (const file of files) await uploadDocument(caseId, docType, { fileName:file.name, mimeType:file.type, size:file.size, ...(cloudUploads ? {file} : {content:await fileAsBase64(file)}) });
     setDrawerBusy(); closeDrawer(); await load(); await openCase(caseId); toast(`${docType} uploaded`);
   } catch (error) { input.value = ''; if (badge) { badge.textContent = 'Upload failed'; badge.className = 'badge danger'; } toast(error.message); }
   finally { setDrawerBusy(); }
@@ -693,6 +839,13 @@ function renderSavedCase(result) {
     }
   }
   render();
+}
+async function returnCaseToSales(caseId) {
+  if (drawerBusy) return;
+  const note = document.querySelector('#note');
+  if (!note.value.trim()) { note.focus(); return toast('Add correction instructions before returning the case to sales'); }
+  document.querySelector('#nextStatus').value = 'Correction Required';
+  await progress(caseId);
 }
 async function progress(caseId) {
   if(drawerBusy) return;
@@ -720,17 +873,18 @@ async function saveDriveRootFolder(button) {
 }
 async function activateGoogleSheets() { try { toast('Verifying workbook and syncing cases'); const result = await api('/api/google/sheets/activate', { method:'POST' }); await load(); toast(`Google Sheets live: ${result.syncedCases} cases synced`); } catch (error) { toast(error.message); } }
 async function setAnalyticsPeriod(period) { analyticsPeriod = period; adminAnalytics = await api(`/api/admin/dashboard?period=${period}`); render(); }
-async function logout() { if (drawerBusy) return; closeDrawer(); await api('/api/logout', { method:'POST' }); me = null;view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';renderLogin(); }
+async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/logout', { method:'POST' });clearTimeout(updatesTimer);caseNotifications=[]; me = null;view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';renderLogin(); }
 async function setView(next) {
   if(drawerBusy) return;
   closeDrawer();view=next;render();
+  await refreshCaseUpdates();
   if(next==='payments') {await refreshPayments();return;}
   if(me.role==='admin' && ['admin','employees'].includes(next)) {
     try {await loadViewData();if(view===next) render();} catch(error) {toast(error.message);}
   }
 }
 
-Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, uploadCaseDocument, submitCase, openCase, pay, claim, submitReceivedDocument, progress, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
+Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, uploadCaseDocument, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
 Object.assign(window, { downloadCaseFiles, wizardBack });
 Object.assign(window, { saveDriveRootFolder });
 Object.assign(window, { toggleEmployeeDates, applyEmployeePeriod, createEmployee });

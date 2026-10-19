@@ -58,12 +58,50 @@ test('real API: access, document gates, uploads, bundle and completion', async (
       const r = await request('/api/cases', { cookie:sales, body:{ variantId:v.id, customer:{ name:'Checklist Trial', mobile:'9876543210' }, details, consent:true } });
       assert.equal(r.status, 201, service.name);
       const order=await request(`/api/cases/${r.data.case.id}/payment-order`,{cookie:sales,method:'POST'});
-      assert.equal(order.status,201,service.name);assert.equal(order.data.amount,100);assert.equal(new URL(order.data.upiIntent).searchParams.get('am'),'1.00');
+      const expected = ['income-certificate','domicile-certificate'].includes(service.slug) ? 20000 : 100;
+      assert.equal(order.status,201,service.name);assert.equal(order.data.amount,expected);assert.equal(new URL(order.data.upiIntent).searchParams.get('am'),(expected/100).toFixed(2));
     }
     const variant = services.find(s => s.slug === 'income-certificate').variants[0];
-    const payload = { variantId:variant.id, customer:{ name:'Trial Customer', mobile:'9876543210' }, details:{ 'Certificate duration':'1 year', 'Ration card colour':'Other', 'Ration card area rural?':'No' }, consent:true };
+    const domicile = services.find(s => s.slug === 'domicile-certificate').variants[0];
+    assert.equal(domicile.documents[1].label,'Father Aadhaar Card');
+    assert.match(domicile.documents.find(doc=>doc.label==='Photo').note,/Photo of the beneficiary/);
+    assert.match(domicile.documents.find(doc=>doc.label==='School Leaving Certificate').note,/School Leaving Certificate of the beneficiary/);
+    assert.equal(domicile.amounts.total,20000);
+    const domicilePayload = {variantId:domicile.id,customer:{name:'Applicant Trial',mobile:'9876543210'},consent:true};
+    assert.equal((await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{'Applicant under 18?':'Yes'}}})).status,400);
+    for (const applicant of ['Father','Mother','Guardian']) {
+      const result = await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{'Applicant under 18?':'Yes',Applicant:applicant}}});
+      assert.equal(result.status,201);
+      assert.equal(result.data.case.details.Applicant,applicant);
+    }
+    const adult = await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{'Applicant under 18?':'No',Applicant:'Father','Applicant birth date':'2000-01-01','Applicant or beneficiary':'Old field'}}});
+    assert.equal(adult.status,201);
+    assert.equal(adult.data.case.details.Applicant,'Self');
+    assert.equal(adult.data.case.details['Applicant birth date'],undefined);
+    assert.equal(adult.data.case.details['Applicant or beneficiary'],undefined);
+    const payload = { variantId:variant.id, customer:{ name:'Trial Customer', mobile:'9876543210' }, details:{ 'Years of Certificate Required':'1 year','Reason for application':'Banking', 'Ration card colour':'Yellow', 'Ration card area':'City' }, consent:true };
     assert.equal((await request('/api/cases', { cookie:sales, body:{ ...payload, consent:false } })).status, 400);
     assert.equal((await request('/api/cases', { cookie:sales, body:{ ...payload, details:{} } })).status, 400);
+    const otherDetails = { ...payload.details, 'Reason for application':'Other' };
+    assert.equal((await request('/api/cases', { cookie:sales, body:{ ...payload, details:otherDetails } })).status, 400);
+    const other = await request('/api/cases', { cookie:sales, body:{ ...payload, details:{ ...otherDetails, 'Other reason (please specify)':'Education admission' } } });
+    assert.equal(other.status, 201);
+    assert.equal(other.data.case.details['Other reason (please specify)'], 'Education admission');
+    for (let page=1;page<=4;page++) {
+      const photo = Buffer.from([255,216,255,224,page]);
+      const uploaded = await request(`/api/cases/${other.data.case.id}/documents`, {cookie:sales,body:{docType:'Talathi Report',fileName:`page-${page}.jpg`,mimeType:'image/jpeg',size:photo.length,content:photo.toString('base64')}});
+      assert.equal(uploaded.status,201);
+    }
+    const report = await request(`/api/cases/${other.data.case.id}`, {cookie:sales});
+    const reportPages = report.data.documents.filter(doc => doc.doc_type === 'Talathi Report' && doc.state === 'uploaded');
+    assert.equal(reportPages.length,4);
+    assert.equal(new Set(reportPages.map(doc => doc.file_name)).size,4);
+    const reportPath = `/api/cases/${other.data.case.id}`;
+    assert.equal((await request(reportPath+'/remove-document',{cookie:otherSales,body:{documentId:reportPages[0].id}})).status,403);
+    assert.equal((await request(reportPath+'/remove-document',{cookie:sales,body:{documentId:reportPages[0].id}})).status,200);
+    assert.equal((await request(reportPath+'/remove-document',{cookie:sales,body:{documentId:reportPages[0].id}})).status,200);
+    assert.equal((await request(reportPages[0].download_url,{cookie:sales})).status,404);
+    assert.equal((await request(reportPath,{cookie:sales})).data.documents.filter(doc=>doc.doc_type==='Talathi Report' && doc.state==='uploaded').length,3);
     const created = await request('/api/cases', { cookie:sales, body:payload });
     assert.equal(created.status, 201);
     const caseId = created.data.case.id, path = `/api/cases/${caseId}`;
@@ -79,6 +117,13 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     let item = (await request(path, { cookie:sales })).data;
     assert.equal(item.case.document_state, 'complete');
     assert.equal(item.case.status, 'Awaiting Payment');
+    const photo = item.documents.find(doc=>doc.doc_type==='Photo');
+    assert.equal((await request(path+'/remove-document',{cookie:sales,body:{documentId:reportPages[1].id}})).status,404);
+    const removed = await request(path+'/remove-document',{cookie:sales,body:{documentId:photo.id}});
+    assert.equal(removed.status,200);
+    assert.equal(removed.data.case.document_state,'missing');
+    assert.equal(removed.data.case.status,'Awaiting Documents');
+    assert.equal((await request(path+'/documents',{cookie:sales,body:upload('Photo')})).status,201);
     assert.equal((await request(path + '/progress', { cookie:admin, body:{status:'Ready for Assignment'} })).status, 409);
     const firstDoc = item.documents[0];
     const download = await fetch(origin + firstDoc.download_url, { headers:{cookie:office} });
@@ -95,20 +140,36 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     await verifyTestOrder(request,admin,sales,order.id);
     assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 200);
     assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 409);
-    for (const status of ['Ready to Submit','Submitted to Official Portal','Document Received']) assert.equal((await request(path + '/progress', { cookie:office, body:{status} })).status, 200, status);
+    assert.equal((await request(path+'/progress',{cookie:office,body:{status:'Correction Required',note:'   '}})).status,400);
+    const correction = await request(path+'/progress',{cookie:office,body:{status:'Correction Required',note:'Replace the blurry Ration Card photo'}});
+    assert.equal(correction.status,200);
+    assert.equal(correction.data.case.status,'Correction Required');
+    const correctionNotice = (await request('/api/notifications',{cookie:sales})).data.notifications.find(notice=>notice.caseId===caseId && notice.status==='Correction Required');
+    assert.ok(correctionNotice);
+    assert.match(correctionNotice.title,/Returned to sales/);
+    assert.equal((await request('/api/notifications',{cookie:otherSales})).data.notifications.some(notice=>notice.caseId===caseId),false);
+    assert.equal((await request('/api/notifications',{cookie:office})).data.notifications.some(notice=>notice.id===correctionNotice.id),false);
+    assert.equal((await request('/api/notifications/read',{cookie:otherSales,body:{ids:[correctionNotice.id]}})).status,200);
+    assert.ok((await request('/api/notifications',{cookie:sales})).data.notifications.some(notice=>notice.id===correctionNotice.id));
+    assert.equal((await request('/api/notifications/read',{cookie:sales,body:{ids:[correctionNotice.id]}})).status,200);
+    assert.equal((await request('/api/notifications',{cookie:sales})).data.notifications.some(notice=>notice.id===correctionNotice.id),false);
+    assert.equal((await request(path,{cookie:sales})).data.notes.at(-1).note,'Replace the blurry Ration Card photo');
+    for (const status of ['Document Review','Ready to Submit','Submitted to Official Portal','Document Received']) assert.equal((await request(path + '/progress', { cookie:office, body:{status} })).status, 200, status);
     assert.equal((await request(path + '/submit-received-document', { cookie:office, method:'POST' })).status, 400);
     assert.equal((await request(path + '/documents', { cookie:office, body:upload('Received Document') })).status, 201);
     item = (await request(path, { cookie:office })).data;
     const received = item.documents.find(d => d.doc_type === 'Received Document');
+    assert.equal((await request(path+'/remove-document',{cookie:sales,body:{documentId:received.id}})).status,403);
     assert.equal((await request(received.download_url, { cookie:sales })).status, 403);
     assert.equal((await request(path + '/submit-received-document', { cookie:office, method:'POST' })).status, 200);
     assert.equal((await request(received.download_url, { cookie:sales })).status, 200);
     assert.equal((await request(path + '/documents', { cookie:office, body:upload('Photo') })).status, 409);
+    assert.equal((await request(path+'/remove-document',{cookie:office,body:{documentId:received.id}})).status,409);
     assert.equal((await request('/api/not-found', { cookie:admin })).status, 404);
     const mirror = JSON.parse(readFileSync(join(root, 'docs', 'Success Online Operations.json')));
     assert.equal(mirror.allCases[created.data.case.ref].status, 'Closed');
     assert.deepEqual(mirror.allCases[created.data.case.ref].missingDocuments, []);
-    assert.equal(mirror.documents[created.data.case.ref].length, 4);
+    assert.equal(mirror.documents[created.data.case.ref].length, 5);
     // Force an incomplete already-assigned legacy record: API must still prevent progression.
     const db = new DatabaseSync(join(root, 'test.sqlite'));
     // Completion/collection events count even when the case was opened earlier.
