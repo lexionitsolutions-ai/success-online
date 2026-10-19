@@ -216,7 +216,8 @@ function statusClass(status) {
   if (/Rejected|Cancelled|failed/i.test(status)) return 'danger';
   return 'neutral';
 }
-function statusBadge(status) { const label=({paid:'Paid',unpaid:'Unpaid',missing:'Missing',complete:'Complete'})[status]||status;return `<span class="badge ${statusClass(status)}">${h(label)}</span>`; }
+function statusLabel(status) { return status === 'Awaiting Payment' ? 'Unpaid Payment' : status; }
+function statusBadge(status) { const label=({paid:'Paid',unpaid:'Unpaid',missing:'Missing',complete:'Complete'})[status]||status;return `<span class="badge ${statusClass(status)}">${h(statusLabel(label))}</span>`; }
 
 function metricCard(label, value, detail, tone = '') {
   return `<article class="metric-card ${tone}"><span>${h(label)}</span><strong>${value}</strong><small>${h(detail)}</small></article>`;
@@ -348,7 +349,7 @@ function periodControl() {
 
 function horizontalBars(rows, valueKey, formatter = number) {
   const max = Math.max(1, ...rows.map(item => Number(item[valueKey] || 0)));
-  return rows.length ? `<div class="bar-list">${rows.map(item => `<div class="bar-row"><div><span>${h(item.name || item.status)}</span><strong>${formatter(item[valueKey])}</strong></div><div class="bar-track"><i style="width:${Math.max(3, Number(item[valueKey] || 0) / max * 100)}%"></i></div></div>`).join('')}</div>` : empty('No data for this period.');
+  return rows.length ? `<div class="bar-list">${rows.map(item => `<div class="bar-row"><div><span>${h(item.name || statusLabel(item.status))}</span><strong>${formatter(item[valueKey])}</strong></div><div class="bar-track"><i style="width:${Math.max(3, Number(item[valueKey] || 0) / max * 100)}%"></i></div></div>`).join('')}</div>` : empty('No data for this period.');
 }
 
 function trendChart(rows) {
@@ -465,7 +466,7 @@ function filterCases(completed = null) {
   const filtered = cases
     .filter(item => view === 'pending' ? isPendingCase(item) : completed === null || isCompletedCase(item) === completed)
     .filter(item => !serviceId || item.service.id === serviceId)
-    .filter(item => [item.ref,item.customer.name,item.customer.mobile,item.service.name,item.status].join(' ').toLowerCase().includes(value));
+    .filter(item => [item.ref,item.customer.name,item.customer.mobile,item.service.name,item.status,statusLabel(item.status)].join(' ').toLowerCase().includes(value));
   document.querySelector('#caseList').innerHTML = filtered.length ? caseTable(filtered) : empty('No cases match this search.');
   labelTables();
   const count = document.querySelector('#caseListCount');
@@ -845,8 +846,8 @@ function casePaymentCard(item) {
   const payment=item.payment, raw=payment?.status || item.payment_state;
   const paid=['PAID','paid','verified','offline_approved'].includes(raw) && payment?.gateway!=='demo';
   const review=raw==='AWAITING_VERIFICATION';
-  const labels={PENDING:'Awaiting payment',INITIATED:'Awaiting payment',unpaid:'Awaiting payment',AWAITING_VERIFICATION:'Under review',FAILED:'Claim rejected',CANCELLED:'Cancelled',EXPIRED:'Expired',REFUNDED:'Refunded'};
-  const label=paid ? 'Verified' : labels[raw] || 'Awaiting payment';
+  const labels={PENDING:'Unpaid Payment',INITIATED:'Unpaid Payment',unpaid:'Unpaid Payment',AWAITING_VERIFICATION:'Under review',FAILED:'Claim rejected',CANCELLED:'Cancelled',EXPIRED:'Expired',REFUNDED:'Refunded'};
+  const label=paid ? 'Verified' : labels[raw] || 'Unpaid Payment';
   return `<section class="detail-section case-payment"><header class="case-payment-heading"><span class="case-payment-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/></svg></span><div><h3>Payment</h3><p>${paid ? 'Payment received and verified' : review ? 'Our team is checking the bank record' : 'Pay securely with your UPI app'}</p></div><span class="case-payment-badge ${paid ? 'is-paid' : review ? 'is-review' : ''}"><i></i>${h(label)}</span></header><div class="case-payment-content"><div class="case-payment-total"><span>${paid ? 'Amount paid' : 'Amount payable'}</span><strong>${money(payment?.amount ?? item.amounts.total)}</strong></div>${['sales','admin'].includes(me.role) ? `<button class="case-payment-button" onclick="pay('${item.id}')">${paid ? 'View receipt' : review ? 'Review payment' : 'Open UPI checkout'}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>` : ''}</div>${payment ? `<details class="case-payment-details"><summary>Payment details</summary><dl><dt>Order reference</dt><dd>${h(payment.gateway_order_id)}</dd>${payment.transaction_id ? `<dt>UTR</dt><dd>${h(payment.transaction_id)}</dd>` : ''}${payment.verified_at ? `<dt>Verified on</dt><dd>${dateTime(payment.verified_at)}</dd>` : ''}</dl></details>` : ''}${me.role==='admin' && !paid ? `<details class="case-payment-exception"><summary>Processing exception</summary><p>Allow this case to proceed before payment verification. A reason is required.</p><label>Exception reason<input id="exceptionReason" maxlength="1000" placeholder="Explain why processing should proceed"></label><button onclick="approvePaymentException('${item.id}')">Record exception</button></details>` : ''}</section>`;
 }
 
@@ -860,7 +861,7 @@ function caseDetail(item, documents, notes) {
     ${casePaymentCard(item)}
     <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div>${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div><div class="upload-list">${documentChecklist(item, documents)}</div></section>
     ${receivedDocumentPanel(item, documents)}
-    <section class="detail-section"><div class="panel-title"><div><h3>Timeline</h3><p>Recorded status changes and internal notes.</p></div></div><div class="timeline">${notes.length ? notes.map(note => `<div><i></i><span><strong>${h(note.new_status)}</strong><p>${h(note.note || 'Status updated')}</p><small>${h(note.actor)} · ${dateTime(note.created_at)}</small></span></div>`).join('') : empty('No updates yet.')}</div></section>
+    <section class="detail-section"><div class="panel-title"><div><h3>Timeline</h3><p>Recorded status changes and internal notes.</p></div></div><div class="timeline">${notes.length ? notes.map(note => `<div><i></i><span><strong>${h(statusLabel(note.new_status))}</strong><p>${h(note.note || 'Status updated')}</p><small>${h(note.actor)} · ${dateTime(note.created_at)}</small></span></div>`).join('') : empty('No updates yet.')}</div></section>
     ${me.role === 'backoffice' && item.status === 'Ready for Assignment' ? `<div class="sticky-actions"><button class="primary" onclick="claim('${item.id}')">Claim case</button></div>` : ''}
     ${['backoffice','admin'].includes(me.role) ? progressControls(item) : ''}`;
 }
@@ -875,7 +876,7 @@ function progressControls(item) {
   }[item.status] || [];
   const allowed = next.filter(status => (item.document_state === 'complete' || ['Awaiting Documents','Correction Required','Customer Action Required','Rejected','Cancelled'].includes(status)) && (!['Ready for Assignment','Assigned'].includes(status) || item.payment_state === 'paid'));
   if (!allowed.length) return '';
-  return `<section class="workflow-box"><div><p class="eyebrow">Workflow action</p><h3>Move case forward</h3>${item.document_state !== 'complete' ? '<p>Required documents are missing. Upload them to unlock progress.</p>' : ''}</div><select id="nextStatus">${allowed.map(status => `<option>${h(status)}</option>`).join('')}</select><textarea id="note" placeholder="Progress note or correction instructions"></textarea><div class="workflow-actions"><button class="primary" onclick="progress('${item.id}')">Update status</button>${allowed.includes('Correction Required') ? `<button class="return-to-sales" onclick="returnCaseToSales('${item.id}')">Return to sales</button>` : ''}</div></section>`;
+  return `<section class="workflow-box"><div><p class="eyebrow">Workflow action</p><h3>Move case forward</h3>${item.document_state !== 'complete' ? '<p>Required documents are missing. Upload them to unlock progress.</p>' : ''}</div><select id="nextStatus">${allowed.map(status => `<option value="${h(status)}">${h(statusLabel(status))}</option>`).join('')}</select><textarea id="note" placeholder="Progress note or correction instructions"></textarea><div class="workflow-actions"><button class="primary" onclick="progress('${item.id}')">Update status</button>${allowed.includes('Correction Required') ? `<button class="return-to-sales" onclick="returnCaseToSales('${item.id}')">Return to sales</button>` : ''}</div></section>`;
 }
 
 async function downloadCaseFiles(caseId, button) {
@@ -1089,7 +1090,7 @@ async function showPayment(pid,payment=null) {
 function checkoutHTML(p) {
   const active=!!p.upiIntent, editable=['sales','admin'].includes(me.role), verified=p.status==='PAID';
   const compact=(window.innerWidth || 1280)<701;
-  const labels={PENDING:'Awaiting payment',INITIATED:'Awaiting payment',AWAITING_VERIFICATION:'Under review',PAID:'Verified',FAILED:'Claim rejected',CANCELLED:'Cancelled',EXPIRED:'Expired',REFUNDED:'Refunded'};
+  const labels={PENDING:'Unpaid Payment',INITIATED:'Unpaid Payment',AWAITING_VERIFICATION:'Under review',PAID:'Verified',FAILED:'Claim rejected',CANCELLED:'Cancelled',EXPIRED:'Expired',REFUNDED:'Refunded'};
   const receiverChanged=p.receiverChanged && ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status);
   const inactive=['EXPIRED','CANCELLED','FAILED'].includes(p.status) || receiverChanged;
   const glyph=(name)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{close:'<path d="m6 6 12 12M18 6 6 18"/>',arrow:'<path d="m9 5 7 7-7 7"/>',download:'<path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/>',check:'<path d="m5 12 4 4L19 6"/>',qr:'<path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h3v3h-3zM21 15v6h-6"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'}[name]}</svg>`;

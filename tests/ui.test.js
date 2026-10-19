@@ -19,6 +19,16 @@ function client() {
   return { context, run: source => vm.runInContext(source, context) };
 }
 
+test('unpaid payment label preserves existing workflow values and warning styling',()=>{
+  const {run}=client();
+  assert.match(run("statusBadge('Awaiting Payment')"),/Unpaid Payment/);
+  assert.match(run("statusBadge('Awaiting Payment')"),/badge warning/);
+  run("me={role:'backoffice'};const paymentItem={id:'c1',status:'Draft',document_state:'complete',payment_state:'unpaid'};");
+  assert.match(run('progressControls(paymentItem)'),/<option value="Awaiting Payment">Unpaid Payment<\/option>/);
+  assert.doesNotMatch(run('progressControls(paymentItem)'),/>Awaiting Payment</);
+  assert.match(run("horizontalBars([{status:'Awaiting Payment',count:1}],'count')"),/Unpaid Payment/);
+});
+
 test('pending cases and notification destinations follow current case status',()=>{
   const {run}=client();
   run("cases=[{id:'c1',status:'Correction Required'},{id:'c2',status:'Closed'},{id:'c3',status:'Assigned'}];caseNotifications=[{id:'n1',caseId:'c1',status:'Assigned'}];");
