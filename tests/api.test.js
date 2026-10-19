@@ -79,7 +79,8 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal(adult.data.case.details.Applicant,'Self');
     assert.equal(adult.data.case.details['Applicant birth date'],undefined);
     assert.equal(adult.data.case.details['Applicant or beneficiary'],undefined);
-    const payload = { variantId:variant.id, customer:{ name:'Trial Customer', mobile:'9876543210' }, details:{ 'Years of Certificate Required':'1 year','Reason for application':'Banking', 'Ration card colour':'Yellow', 'Ration card area':'City' }, consent:true };
+    const payload = { variantId:variant.id, customer:{ name:'Trial Customer', mobile:'9876543210' }, details:{ 'Years of Certificate Required':'1 year','Reason for application':'Banking', 'Income amount required on certificate (₹)':'150000', 'Ration card colour':'Yellow', 'Ration card area':'City' }, consent:true };
+    for (const amount of ['-1','not a number']) assert.equal((await request('/api/cases',{cookie:sales,body:{...payload,details:{...payload.details,'Income amount required on certificate (₹)':amount}}})).status,400);
     assert.equal((await request('/api/cases', { cookie:sales, body:{ ...payload, consent:false } })).status, 400);
     assert.equal((await request('/api/cases', { cookie:sales, body:{ ...payload, details:{} } })).status, 400);
     const otherDetails = { ...payload.details, 'Reason for application':'Other' };
@@ -105,6 +106,8 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal((await request(reportPath,{cookie:sales})).data.documents.filter(doc=>doc.doc_type==='Talathi Report' && doc.state==='uploaded').length,3);
     const created = await request('/api/cases', { cookie:sales, body:payload });
     assert.equal(created.status, 201);
+    assert.equal(created.data.case.details['Income amount required on certificate (₹)'],'150000');
+    assert.equal(created.data.case.amounts.serviceCharge,20000);
     const caseId = created.data.case.id, path = `/api/cases/${caseId}`;
     assert.equal((await request(path, { cookie:otherSales })).status, 403);
     const forged = 'so_session=' + Buffer.from(`${created.data.case.sales.id}|invalid`).toString('base64url');

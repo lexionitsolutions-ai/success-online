@@ -206,6 +206,9 @@ try {
       assert.deepEqual(colourOptions.slice(1),['\u{1F7E1} Yellow','\u{1F7E0} Orange','\u26AA White']);
       assert.deepEqual(await page.locator('[data-field="Ration%20card%20area"]').locator('option').allTextContents(),['Choose…','City','Village']);
       const selectors=page.locator('#serviceFields select');
+      const incomeAmount=page.getByLabel('Income amount required on certificate (₹)',{exact:true});
+      assert.equal(await incomeAmount.getAttribute('inputmode'),'decimal');
+      await incomeAmount.fill('150000');
       for(let index=0;index<await selectors.count();index++) await selectors.nth(index).selectOption({index:1});
       await page.locator('[data-field="Ration%20card%20area"]').selectOption('Village');
       await page.locator('#drawer').getByRole('button',{name:'Continue',exact:true}).click();
@@ -240,6 +243,7 @@ try {
         await page.locator('#consent').waitFor();
         assert.equal(await page.locator('.toast').count(),0,'Upload messages must not cover the review actions');
         assert.match(await page.locator('.intake-review-total').innerText(),/200/);
+        assert.match(await page.locator('.intake-review-details').innerText(),/150000/);
         assert.doesNotMatch(await page.locator('.intake-review').innerText(),/Official fee|Tax|test pricing|real money/i);
         assert.ok(await page.locator('.panel').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'Review must fit');
         const buttons=await page.locator('.intake-review-actions button').evaluateAll(elements=>elements.map(el=>{const r=el.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom};}));

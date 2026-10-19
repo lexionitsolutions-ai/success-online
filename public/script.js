@@ -512,7 +512,7 @@ function bindWizard() {
       const automatic = field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals;
       const control = automatic ? `<input data-field="${key}" value="${value}" readonly aria-readonly="true">` : field.type === 'select'
         ? `<select data-field="${key}"><option value="">Choose…</option>${(field.options || []).map(option => `<option value="${h(option)}" ${option === rawValue ? 'selected' : ''}>${field.label === 'Ration card colour' ? ({ Yellow: '\u{1F7E1} ', Orange: '\u{1F7E0} ', White: '\u26AA ' }[option] || '') : ''}${h(option)}</option>`).join('')}</select>`
-        : `<input data-field="${key}" type="${['email','date','number','tel'].includes(field.type) ? field.type : 'text'}" value="${value}" ${field.required ? 'required' : ''} maxlength="500">`;
+        : `<input data-field="${key}" type="${['email','date','number','tel'].includes(field.type) ? field.type : 'text'}" value="${value}" ${field.required ? 'required' : ''} ${field.min !== undefined ? `min="${h(field.min)}"` : ''} ${field.step ? `step="${h(field.step)}"` : ''} ${field.inputMode ? `inputmode="${h(field.inputMode)}"` : ''} ${field.placeholder ? `placeholder="${h(field.placeholder)}"` : ''} maxlength="500">`;
       return `<label>${h(field.label)}${control}</label>`;
     }).join('');
     document.querySelector('#serviceFields').querySelectorAll('[data-field]').forEach(input => input.onchange = () => {
@@ -521,6 +521,7 @@ function bindWizard() {
       if (definition.when && draft.details[definition.when.field] !== definition.when.equals) return;
       draft.details[label] = input.value;
       if ((variant.fields || []).some(field => field.when?.field === label)) {
+        collectFields();
         for (const field of variant.fields) {
           if (field.when && draft.details[field.when.field] !== field.when.equals) delete draft.details[field.label];
         }

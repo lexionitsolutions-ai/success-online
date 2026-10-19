@@ -5,7 +5,7 @@ export const serviceCatalog = [
   {
     name: 'Income Certificate', slug: 'income-certificate', description: 'Income certificate application assistance.', serviceCharge: 20000,
     instructions: 'For white ration card holders, Form 16 or ITR is required. Talathi report is required for rural ration card holders.',
-    fields: [field('Years of Certificate Required', 'select', ['1 year', '3 years']), field('Reason for application', 'select', ['Banking', 'Ration Card', 'Government Schemes', 'Other']), { ...field('Other reason (please specify)'), required: true, when: { field: 'Reason for application', equals: 'Other' } }, field('Ration card colour', 'select', ['Yellow', 'Orange', 'White']), field('Ration card area', 'select', ['City', 'Village'])],
+    fields: [field('Years of Certificate Required', 'select', ['1 year', '3 years']), { ...field('Income amount required on certificate (₹)', 'number'), min: 0, step: '0.01', inputMode: 'decimal', placeholder: 'e.g. 150000' }, field('Reason for application', 'select', ['Banking', 'Ration Card', 'Government Schemes', 'Other']), { ...field('Other reason (please specify)'), required: true, when: { field: 'Reason for application', equals: 'Other' } }, field('Ration card colour', 'select', ['Yellow', 'Orange', 'White']), field('Ration card area', 'select', ['City', 'Village'])],
     documents: [doc('Aadhaar Card'), doc('Photo'), doc('Ration Card'), doc('Form 16 / ITR', 'Required for white ration card holders.', { field: 'Ration card colour', equals: 'White' }), { ...doc('Talathi Report', 'Required for ration card holders in villages. Add a photo of each page, or upload a PDF.', { field: 'Ration card area', equals: 'Village' }), multiple: true }]
   },
   {
