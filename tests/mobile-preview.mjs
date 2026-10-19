@@ -10,6 +10,14 @@ const root='deliverables/mobile-preview';mkdirSync(root,{recursive:true});
 const amounts={serviceCharge:0,officialFee:0,tax:0,total:0};
 const services=serviceCatalog.map((s,index)=>({...s,id:'svc'+index,variants:[{id:'var'+index,name:'Application',fields:s.fields,documents:s.documents,amounts:index===0?{serviceCharge:20000,officialFee:0,tax:0,total:20000}:amounts}]}));
 const employee=role=>({id:role,username:role+'.demo',name:({admin:'Workspace Admin',sales:'Sales Employee',backoffice:'Operations Employee'})[role],role});
+const previewPhoto=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aSU8AAAAASUVORK5CYII=','base64');
+const previewText='BT /F1 18 Tf 30 150 Td (Document preview test) Tj ET';
+const previewText2='BT /F1 18 Tf 30 150 Td (Second document page) Tj ET';
+const previewObjects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',`<< /Length ${previewText.length} >>\nstream\n${previewText}\nendstream`,'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 7 0 R >>',`<< /Length ${previewText2.length} >>\nstream\n${previewText2}\nendstream`];
+let previewPDF='%PDF-1.4\n';const previewOffsets=[0];
+for(const [index,object] of previewObjects.entries()) {previewOffsets.push(Buffer.byteLength(previewPDF));previewPDF+=`${index+1} 0 obj\n${object}\nendobj\n`;}
+const previewXref=Buffer.byteLength(previewPDF);
+previewPDF+=`xref\n0 ${previewObjects.length+1}\n0000000000 65535 f \n${previewOffsets.slice(1).map(offset=>String(offset).padStart(10,'0')+' 00000 n \n').join('')}trailer\n<< /Size ${previewObjects.length+1} /Root 1 0 R >>\nstartxref\n${previewXref}\n%%EOF`;
 const cases=[{id:'case1',ref:'SO-2026-000128',customer:{name:'Aarav Mehta',mobile:'9876543210'},service:{id:'svc0',name:'Income Certificate'},variant:services[0].variants[0],sales:employee('sales'),backoffice:employee('backoffice'),status:'Awaiting Documents',document_state:'missing',payment_state:'unpaid',priority:'Normal',created_at:'2026-10-12T03:30:00Z',updated_at:'2026-10-12T04:30:00Z',amounts,details:{}},{id:'case2',ref:'SO-2026-000127',customer:{name:'Priya Sharma',mobile:'9876543211'},service:{id:'svc1',name:'Age, Nationality & Domicile Certificate'},variant:services[1].variants[0],sales:employee('sales'),backoffice:null,status:'Ready for Assignment',document_state:'complete',payment_state:'paid',priority:'Normal',created_at:'2026-10-11T03:30:00Z',updated_at:'2026-10-12T02:30:00Z',amounts,details:{}}];
 try {
   for(const width of (process.env.PREVIEW_WIDTHS||'320,390,430,768,1280').split(',').map(Number)) for(const role of (process.env.PREVIEW_ROLES||'sales,backoffice,admin').split(',')) {
@@ -17,6 +25,8 @@ try {
     let signedIn=true;
     const contextCases=structuredClone(cases);
     let contextNotices=[];
+    let previewFailure=false;
+    const previewDocuments=['backoffice','admin'].includes(role)?[{id:'preview-photo',doc_type:'Photo',file_name:'beneficiary.png',mime_type:'image/png',state:'uploaded',version:1,download_url:'/api/documents/preview-photo/download'},{id:'preview-pdf',doc_type:'Ration Card',file_name:'ration-card.pdf',mime_type:'application/pdf',state:'uploaded',version:1,download_url:'/api/documents/preview-pdf/download'}]:[];
     await context.route('**/*',async route=>{
       const path=new URL(route.request().url()).pathname;
       const json=(data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
@@ -27,11 +37,15 @@ try {
       if(path==='/api/notifications/read') {const ids=route.request().postDataJSON().ids;contextNotices=contextNotices.filter(notice=>!ids.includes(notice.id));return json({ok:true});}
       if(path==='/api/services') return json({services,demoPayments:true,cloudUploads:false});
       if(path==='/api/cases') return json({cases:contextCases});
-      if(path==='/api/cases/case1') return json({case:contextCases[0],documents:[],notes:contextCases[0].status==='Correction Required'?[{new_status:'Correction Required',note:'Replace the blurry Ration Card photo',actor:'Operations'}]:[]});
+      if(path==='/api/cases/case1') return json({case:contextCases[0],documents:previewDocuments,notes:contextCases[0].status==='Correction Required'?[{new_status:'Correction Required',note:'Replace the blurry Ration Card photo',actor:'Operations'}]:[]});
+      if(path==='/api/documents/preview-photo/preview' || path==='/api/documents/preview-pdf/preview') {if(previewFailure) return json({error:'Document preview temporarily unavailable'},502);const pdf=path.includes('preview-pdf');return json({url:pdf?'/fixtures/preview.pdf':'/fixtures/preview.png',mimeType:pdf?'application/pdf':'image/png',fileName:pdf?'ration-card.pdf':'beneficiary.png'});}
+      if(path==='/fixtures/preview.png') return route.fulfill({contentType:'image/png',body:previewPhoto});
+      if(path==='/fixtures/preview.pdf') return route.fulfill({contentType:'application/pdf',headers:{'content-disposition':'inline'},body:previewPDF});
       if(path==='/api/cases/case1/progress') {const body=route.request().postDataJSON();contextCases[0].status=body.status;return json({case:contextCases[0],note:{id:'note1',new_status:body.status,note:body.note,actor:'Operations'}});}
       if(path==='/api/admin/employees') return json({employees:['sales','backoffice'].map(role=>({...employee(role),active:1,cases:12,collected:500000,handled:8,completed:7,activeCases:3,overdue:1,turnaround:2.4}))});
       if(path==='/api/admin/dashboard') return json({metrics:{collected:500000,payments:12,businessRevenue:200000,newCases:15,completed:9,outstanding:150000},operations:{active:12,ready:3,missingDocuments:4,unpaid:5,followUpsDue:1,syncFailures:0},trend:[],statusBreakdown:[],servicePerformance:[],staffPerformance:{sales:[{...employee('sales'),cases:12,completed:7,collected:500000}],backoffice:[{...employee('backoffice'),assigned:8,completed:7,active:3}]},recentPayments:[]});
       if(path.startsWith('/api/google')) return json({configured:false,connected:false,live:false});
+      if(path.startsWith('/vendor/pdfjs/') && !path.includes('..')) return route.fulfill({contentType:path.endsWith('.mjs')?'application/javascript':path.endsWith('.wasm')?'application/wasm':'application/octet-stream',body:readFileSync(join('public',path.slice(1)))});
       const file={'/':'index.html','/script.js':'script.js','/styles.css':'styles.css','/mobile.css':'mobile.css'}[path];
       if(file) return route.fulfill({contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:readFileSync(join('public',file),'utf8')});
       return route.abort();
@@ -84,6 +98,42 @@ try {
     await page.locator('#drawer').waitFor();
     if(width===390) await page.screenshot({path:join(root,role+'-documents.png')});
     assert.ok(await page.locator('.panel').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'Drawer overflows');
+    if(['backoffice','admin'].includes(role)) {
+      let downloads=0;page.on('download',()=>downloads++);
+      const photoButton=page.getByRole('button',{name:'Preview Photo',exact:true});
+      await photoButton.click();
+      await page.locator('#documentPreview img').waitFor();
+      await page.waitForFunction(()=>document.querySelector('#documentPreview img')?.naturalWidth>0);
+      assert.ok(await page.locator('#documentPreview').evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight && el.scrollWidth<=el.clientWidth+1;}),'Photo preview must fit the viewport');
+      assert.equal(await page.locator('#documentPreview').getByRole('link',{name:'Download',exact:true}).count(),1);
+      await page.screenshot({path:join(root,`${role}-photo-preview-${width}.png`)});
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('#documentPreview').count(),0);
+      assert.equal(await photoButton.evaluate(el=>el===document.activeElement),true,'Closing preview restores focus');
+      await page.getByRole('button',{name:'Preview Ration Card',exact:true}).click();
+      await page.locator('#documentPreview canvas[data-rendered="1"]').waitFor();
+      assert.match(await page.locator('#previewPageCount').innerText(),/Page 1 of 2/);
+      await page.getByRole('button',{name:'Next PDF page',exact:true}).click();
+      await page.locator('#documentPreview canvas[data-rendered="2"]').waitFor();
+      await page.getByRole('button',{name:'Previous PDF page',exact:true}).click();
+      await page.locator('#documentPreview canvas[data-rendered="1"]').waitFor();
+      await page.getByRole('button',{name:'Zoom in',exact:true}).click();
+      await page.waitForFunction(()=>document.querySelector('#previewZoomLabel')?.textContent==='125%');
+      assert.ok(await page.locator('#documentPreview').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'Zoom must scroll within the viewer');
+      assert.ok((await page.locator('#documentPreview canvas').boundingBox()).height>100,'PDF viewer has usable height');
+      await page.locator('#documentPreview').getByRole('link',{name:'Open full-size preview',exact:true}).waitFor();
+      await page.screenshot({path:join(root,`${role}-pdf-preview-${width}.png`)});
+      await page.getByRole('button',{name:'Close preview',exact:true}).click();
+      previewFailure=true;
+      await photoButton.click();
+      await page.locator('#documentPreview [role=alert]').waitFor();
+      previewFailure=false;
+      await page.getByRole('button',{name:'Retry preview',exact:true}).click();
+      await page.locator('#documentPreview img').waitFor();
+      await page.getByRole('button',{name:'Close preview',exact:true}).click();
+      assert.equal(downloads,0,'Preview never triggers a download');
+      assert.equal(await page.locator('#drawer').count(),1,'Preview keeps the case open');
+    }
     if(role==='backoffice') {
       await page.locator('#note').fill('Replace the blurry Ration Card photo');
       const returnButton=page.getByRole('button',{name:'Return to sales',exact:true});

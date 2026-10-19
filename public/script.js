@@ -714,7 +714,118 @@ function documentActions(item, document) {
   const whatsapp = `https://wa.me/?text=${encodeURIComponent(message)}`;
   const ready = ['Ready to Submit','Submitted to Official Portal','Under Government Review','Approved','Delivered','Closed'].includes(item.status);
   const removable = !['Closed','Delivered','Cancelled'].includes(item.status) && (document.doc_type !== 'Received Document' || (['backoffice','admin'].includes(me.role) && item.status === 'Document Received'));
-  return `<span class="doc-actions"><a href="${h(document.download_url)}" target="_blank" rel="noopener">Download</a>${ready ? `<a href="${h(whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${removable ? `<button type="button" class="quiet" onclick="removeSavedDocument('${item.id}','${document.id}')" aria-label="Remove ${h(document.doc_type)} file">Remove</button>` : ''}</span>`;
+  const previewable = ['backoffice','admin'].includes(me.role) && ['image/jpeg','image/png','application/pdf'].includes(document.mime_type);
+  return `<span class="doc-actions">${previewable ? `<button type="button" class="quiet preview-document-button" onclick="previewDocument('${document.id}')" aria-label="Preview ${h(document.doc_type)}">Preview</button>` : ''}<a href="${h(document.download_url)}" target="_blank" rel="noopener">Download</a>${ready ? `<a href="${h(whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${removable ? `<button type="button" class="quiet" onclick="removeSavedDocument('${item.id}','${document.id}')" aria-label="Remove ${h(document.doc_type)} file">Remove</button>` : ''}</span>`;
+}
+
+let documentPreviewGeneration = 0;
+let documentPreviewTrigger = null;
+let documentPreviewLoading = null;
+let documentPreviewPDF = null;
+let documentPreviewRender = null;
+let documentPreviewPage = 1;
+let documentPreviewZoom = 1;
+let documentPreviewBusy = false;
+async function previewDocument(documentId) {
+  if (drawerBusy) return;
+  closeDocumentPreview();
+  documentPreviewTrigger = document.activeElement;
+  const generation = ++documentPreviewGeneration;
+  const saved = selectedCase?.documents.find(document => document.id === documentId);
+  const dialog = document.createElement('dialog');
+  dialog.id = 'documentPreview';
+  dialog.className = 'document-preview';
+  dialog.setAttribute('aria-labelledby','documentPreviewTitle');
+  dialog.innerHTML = `<header class="document-preview-header"><div><p class="eyebrow">Document preview</p><h2 id="documentPreviewTitle">${h(saved?.doc_type || 'Uploaded document')}</h2><p id="documentPreviewName">${h(saved?.file_name || '')}</p></div><button type="button" class="quiet" onclick="closeDocumentPreview()" aria-label="Close preview">Close</button></header><div class="document-preview-body" id="documentPreviewBody"><p role="status">Loading preview...</p></div><footer class="document-preview-footer"><p>Check the document before downloading.</p><div id="documentPreviewActions"></div></footer>`;
+  dialog.addEventListener('cancel',event=>{event.preventDefault();closeDocumentPreview();});
+  dialog.addEventListener('click',event=>{if(event.target===dialog) {const bounds=dialog.getBoundingClientRect();if(event.clientX<bounds.left || event.clientX>bounds.right || event.clientY<bounds.top || event.clientY>bounds.bottom) closeDocumentPreview();}});
+  document.body.append(dialog);
+  dialog.showModal();
+  try {
+    const preview = await api(`/api/documents/${encodeURIComponent(documentId)}/preview`);
+    if (generation !== documentPreviewGeneration || !dialog.isConnected) return;
+    dialog.querySelector('#documentPreviewName').textContent = preview.fileName;
+    const body = dialog.querySelector('#documentPreviewBody');
+    dialog.querySelector('#documentPreviewActions').innerHTML = `<button type="button" class="quiet" onclick="previewDocument('${documentId}')">Reload preview</button><a class="document-preview-open" href="${h(preview.url)}" target="_blank" rel="noopener">Open full-size preview</a><a class="document-preview-download" href="/api/documents/${encodeURIComponent(documentId)}/download" target="_blank" rel="noopener">Download</a>`;
+    if (preview.mimeType === 'application/pdf') {
+      const pdfjs = await import('/vendor/pdfjs/pdf.mjs');
+      if (generation !== documentPreviewGeneration) return;
+      pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.mjs';
+      documentPreviewLoading = pdfjs.getDocument({url:preview.url,cMapUrl:'/vendor/pdfjs/cmaps/',cMapPacked:true,standardFontDataUrl:'/vendor/pdfjs/standard_fonts/',wasmUrl:'/vendor/pdfjs/wasm/',iccUrl:'/vendor/pdfjs/iccs/',isEvalSupported:false});
+      const pdf = await documentPreviewLoading.promise;
+      if (generation !== documentPreviewGeneration) {void pdf.destroy();return;}
+      documentPreviewPDF = pdf;
+      documentPreviewPage = 1;documentPreviewZoom = 1;
+      body.classList.add('document-preview-pdf');
+      body.innerHTML = `<div class="pdf-preview-toolbar"><button type="button" class="quiet" id="previewPrevious" onclick="changePreviewPage(-1)" aria-label="Previous PDF page">Previous</button><span id="previewPageCount" role="status"></span><button type="button" class="quiet" id="previewNext" onclick="changePreviewPage(1)" aria-label="Next PDF page">Next</button><button type="button" class="quiet" id="previewZoomOut" onclick="zoomDocumentPreview(-0.25)" aria-label="Zoom out">-</button><span id="previewZoomLabel"></span><button type="button" class="quiet" id="previewZoomIn" onclick="zoomDocumentPreview(0.25)" aria-label="Zoom in">+</button></div><div class="pdf-preview-page"><canvas id="documentPreviewCanvas" role="img" aria-label="PDF page 1"></canvas></div>`;
+      await renderPDFPreview();
+    } else {
+      body.innerHTML = `<img class="document-preview-image" src="${h(preview.url)}" alt="Preview of ${h(preview.fileName)}">`;
+      body.querySelector('img').onerror = () => { if(generation === documentPreviewGeneration) body.innerHTML='<p role="alert">The preview could not load. Use Reload preview to try again.</p>'; };
+    }
+  } catch (error) {
+    if (generation !== documentPreviewGeneration || !dialog.isConnected) return;
+    dialog.querySelector('#documentPreviewBody').innerHTML = `<div class="document-preview-error" role="alert"><p>${h(error.message)}</p><button type="button" class="quiet" onclick="previewDocument('${documentId}')">Retry preview</button></div>`;
+  }
+}
+async function renderPDFPreview() {
+  const generation = documentPreviewGeneration;
+  const dialog = document.querySelector('#documentPreview');
+  if (!dialog || !documentPreviewPDF || documentPreviewBusy) return;
+  documentPreviewBusy = true;
+  dialog.querySelectorAll('.pdf-preview-toolbar button').forEach(button=>{button.disabled=true;});
+  try {
+    const page = await documentPreviewPDF.getPage(documentPreviewPage);
+    if (generation !== documentPreviewGeneration) return;
+    const stage = dialog.querySelector('.pdf-preview-page');
+    const canvas = dialog.querySelector('canvas');
+    const scale = Math.max(0.1,(stage.clientWidth-32)/page.getViewport({scale:1}).width) * documentPreviewZoom;
+    const viewport = page.getViewport({scale});
+    const density = Math.min(window.devicePixelRatio || 1,2);
+    canvas.width = Math.ceil(viewport.width*density);canvas.height = Math.ceil(viewport.height*density);
+    canvas.style.width = `${viewport.width}px`;canvas.style.height = `${viewport.height}px`;
+    canvas.setAttribute('aria-label',`PDF page ${documentPreviewPage}`);
+    dialog.querySelector('#previewPageCount').textContent = `Page ${documentPreviewPage} of ${documentPreviewPDF.numPages}`;
+    dialog.querySelector('#previewZoomLabel').textContent = `${Math.round(documentPreviewZoom*100)}%`;
+    documentPreviewRender = page.render({canvas,viewport,transform:density===1?null:[density,0,0,density,0,0]});
+    await documentPreviewRender.promise;
+    canvas.dataset.rendered = String(documentPreviewPage);
+    stage.scrollTo(0,0);
+  } catch (error) {
+    if (generation === documentPreviewGeneration) {
+      dialog.querySelector('#documentPreviewBody').innerHTML = '<p role="alert">This PDF could not be displayed. Try Reload preview or Open full-size preview.</p>';
+    }
+  } finally {
+    if (generation === documentPreviewGeneration) {
+      documentPreviewBusy = false;documentPreviewRender = null;
+      const setDisabled=(id,disabled)=>{const button=dialog.querySelector(id);if(button) button.disabled=disabled;};
+      setDisabled('#previewPrevious',documentPreviewPage<=1);
+      setDisabled('#previewNext',documentPreviewPage>=documentPreviewPDF.numPages);
+      setDisabled('#previewZoomOut',documentPreviewZoom<=0.5);
+      setDisabled('#previewZoomIn',documentPreviewZoom>=3);
+    }
+  }
+}
+async function changePreviewPage(delta) {
+  if (!documentPreviewPDF || documentPreviewBusy) return;
+  documentPreviewPage = Math.max(1,Math.min(documentPreviewPDF.numPages,documentPreviewPage+delta));
+  await renderPDFPreview();
+}
+async function zoomDocumentPreview(delta) {
+  if (!documentPreviewPDF || documentPreviewBusy) return;
+  documentPreviewZoom = Math.max(0.5,Math.min(3,documentPreviewZoom+delta));
+  await renderPDFPreview();
+}
+
+function closeDocumentPreview() {
+  documentPreviewGeneration++;
+  documentPreviewRender?.cancel();documentPreviewRender = null;
+  if (documentPreviewLoading) void documentPreviewLoading.destroy().catch(()=>{});
+  documentPreviewLoading = documentPreviewPDF = null;documentPreviewBusy = false;
+  const dialog = document.querySelector('#documentPreview');
+  if (dialog) { dialog.close();dialog.remove(); }
+  if (documentPreviewTrigger?.isConnected) documentPreviewTrigger.focus();
+  documentPreviewTrigger = null;
 }
 
 function receivedDocumentPanel(item, documents) {
@@ -861,6 +972,7 @@ async function progress(caseId) {
 
 function closeDrawer() {
   if(drawerBusy) return;
+  closeDocumentPreview();
   document.querySelector('#drawer')?.remove();
   document.body?.classList?.remove('payment-open');
 }
@@ -884,7 +996,7 @@ async function setView(next) {
   }
 }
 
-Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, uploadCaseDocument, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
+Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, previewDocument, closeDocumentPreview, changePreviewPage, zoomDocumentPreview, uploadCaseDocument, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
 Object.assign(window, { downloadCaseFiles, wizardBack });
 Object.assign(window, { saveDriveRootFolder });
 Object.assign(window, { toggleEmployeeDates, applyEmployeePeriod, createEmployee });

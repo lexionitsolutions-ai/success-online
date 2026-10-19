@@ -98,6 +98,15 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     assert.ok(first.elapsed<1500,`Upload must return before the delayed Google mirror (${first.elapsed} ms)`);
     const stats=await (await fetch(`http://localhost:${port+1}/test/storage-stats`)).json();
     assert.equal(stats.uploadWrites,1);assert.equal(stats.copyWrites,0,'The signed upload must not be copied into storage a second time');
+    const storedDocument=(await request(path,{cookie:accounts.backoffice})).data.documents[0];
+    const preview=await request(`/api/documents/${storedDocument.id}/preview`,{cookie:accounts.backoffice});
+    assert.equal(preview.status,200);
+    assert.equal(preview.data.mimeType,'application/pdf');
+    assert.equal(new URL(preview.data.url).searchParams.has('download'),false,'Preview uses an inline signed URL');
+    const previewContent=await fetch(preview.data.url);
+    assert.equal(previewContent.status,200);
+    assert.deepEqual(Buffer.from(await previewContent.arrayBuffer()),pdf);
+    assert.equal((await request(`/api/documents/${storedDocument.id}/preview`,{cookie:accounts.sales})).status,403);
     const checkoutStarted=performance.now();
     assert.equal((await request(path+'/payment-order',{cookie:accounts.sales,method:'POST'})).status,201);
     assert.ok(performance.now()-checkoutStarted<1500,'Checkout must not wait on the in-flight Google mirror');

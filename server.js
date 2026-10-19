@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { waitUntil } from '@vercel/functions';
-import { storage, storageEnabled, signedDownload, readStorage, writeStorage, downloadFileLimit } from './storage.js';
+import { storage, storageEnabled, signedDownload, signedPreview, readStorage, writeStorage, downloadFileLimit } from './storage.js';
 import { serviceCatalog } from './service-catalog.js';
 import { sheetHeaders, serviceTabs } from './operations-schema.js';
 import { createPayments, paymentSchema, paymentConfig, priceAmounts } from './payments.js';
@@ -599,8 +599,10 @@ async function routeApi(req, res, url) {
     if (ids.length) await run(`UPDATE notifications SET read_at=$at WHERE user_id=$user AND read_at IS NULL AND id IN (${ids.map((_,index)=>`$notice${index}`).join(',')})`,{$at:now(),$user:user.id,...Object.fromEntries(ids.map((noticeId,index)=>[`$notice${index}`,noticeId]))});
     return send(res,200,{ok:true});
   }
-  const documentMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/download$/);
+  const documentMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/(download|preview|view)$/);
   if (req.method === 'GET' && documentMatch) {
+    const preview = documentMatch[2] !== 'download';
+    if (preview && !['backoffice','admin'].includes(user.role)) return send(res,403,{error:'Only back office or admin can preview documents'});
     const document = (await one('SELECT * FROM documents WHERE id=$id AND state!=$state', { $id: documentMatch[1], $state: 'replaced' }));
     if (!document) return send(res, 404, { error: 'Document not found' });
     const c = (await one('SELECT * FROM cases WHERE id=$id', { $id: document.case_id }));
@@ -608,17 +610,20 @@ async function routeApi(req, res, url) {
     if (document.doc_type === RECEIVED_DOCUMENT_TYPE && user.role === 'sales' && !['Closed','Delivered'].includes(c.status)) {
       return send(res, 403, { error: 'The received document has not been submitted yet' });
     }
-    if (document.storage_path?.startsWith('supabase://')) return redirect(res, await signedDownload(document.storage_path.slice(11), document.file_name));
+    if (preview && !['image/jpeg','image/png','application/pdf'].includes(document.mime_type)) return send(res,415,{error:'Preview supports JPG, PNG, and PDF documents'});
+    const previewResult = url => documentMatch[2] === 'preview' ? send(res,200,{url,mimeType:document.mime_type,fileName:document.file_name}) : redirect(res,url);
+    if (document.storage_path?.startsWith('supabase://')) return preview ? previewResult(await signedPreview(document.storage_path.slice(11))) : redirect(res, await signedDownload(document.storage_path.slice(11), document.file_name));
+    if (documentMatch[2] === 'preview' && !process.env.VERCEL) return previewResult(`/api/documents/${encodeURIComponent(document.id)}/view`);
     const content = await readDocument(document);
     if (process.env.VERCEL && storageEnabled()) {
       const path = `downloads/${randomUUID()}/${safeFileName(document.file_name)}`;
       await writeStorage(path,content,document.mime_type);
-      return redirect(res,await signedDownload(path,document.file_name));
+      return preview ? previewResult(await signedPreview(path)) : redirect(res,await signedDownload(path,document.file_name));
     }
     res.writeHead(200, {
       'content-type': document.mime_type || 'application/octet-stream',
       'content-length': content.length,
-      'content-disposition': `attachment; filename="document${extname(document.file_name)}"; filename*=UTF-8''${encodeURIComponent(document.file_name)}`
+      'content-disposition': `${preview ? 'inline' : 'attachment'}; filename="document${extname(document.file_name)}"; filename*=UTF-8''${encodeURIComponent(document.file_name)}`
     });
     return res.end(content);
   }
@@ -1070,7 +1075,7 @@ function staticFile(req, res, url) {
   const path = resolve('public', url.pathname === '/' ? 'index.html' : '.' + decodeURIComponent(url.pathname));
   if (!path.startsWith(resolve('public') + '/') && !path.startsWith(resolve('public') + '\\')) { res.writeHead(403).end(); return; }
   if (!existsSync(path)) { res.writeHead(404).end('Not found'); return; }
-  const types = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml' };
+  const types = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm', '.ttf': 'font/ttf', '.svg': 'image/svg+xml' };
   res.writeHead(200, { 'content-type': types[extname(path)] || 'application/octet-stream' });
   res.end(readFileSync(path));
 }

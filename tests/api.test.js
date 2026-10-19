@@ -101,6 +101,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal((await request(reportPath+'/remove-document',{cookie:sales,body:{documentId:reportPages[0].id}})).status,200);
     assert.equal((await request(reportPath+'/remove-document',{cookie:sales,body:{documentId:reportPages[0].id}})).status,200);
     assert.equal((await request(reportPages[0].download_url,{cookie:sales})).status,404);
+    assert.equal((await request(reportPages[0].download_url.replace('/download','/preview'),{cookie:office})).status,404);
     assert.equal((await request(reportPath,{cookie:sales})).data.documents.filter(doc=>doc.doc_type==='Talathi Report' && doc.state==='uploaded').length,3);
     const created = await request('/api/cases', { cookie:sales, body:payload });
     assert.equal(created.status, 201);
@@ -126,6 +127,18 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal((await request(path+'/documents',{cookie:sales,body:upload('Photo')})).status,201);
     assert.equal((await request(path + '/progress', { cookie:admin, body:{status:'Ready for Assignment'} })).status, 409);
     const firstDoc = item.documents[0];
+    const previewPath=firstDoc.download_url.replace('/download','/preview');
+    assert.equal((await request(previewPath,{cookie:sales})).status,403);
+    assert.equal((await request(previewPath,{cookie:otherSales})).status,403);
+    const preview=await request(previewPath,{cookie:office});
+    assert.equal(preview.status,200);
+    assert.equal(preview.data.mimeType,'application/pdf');
+    const inline=await fetch(origin+preview.data.url,{headers:{cookie:office}});
+    assert.equal(inline.status,200);
+    assert.match(inline.headers.get('content-disposition'),/^inline;/);
+    assert.deepEqual(Buffer.from(await inline.arrayBuffer()),pdf);
+    assert.equal((await request(preview.data.url,{cookie:sales})).status,403);
+    assert.equal((await request(previewPath,{cookie:admin})).status,200);
     const download = await fetch(origin + firstDoc.download_url, { headers:{cookie:office} });
     assert.equal(download.status, 200); assert.deepEqual(Buffer.from(await download.arrayBuffer()), pdf);
     assert.equal((await request(firstDoc.download_url, { cookie:otherSales })).status, 403);

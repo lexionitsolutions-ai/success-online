@@ -15,7 +15,9 @@
     "test:mobile": "node tests/mobile-preview.mjs",
     "build": "node scripts/check.js",
     "package": "npm run build && node scripts/package.js",
-    "check:payments-release": "node scripts/check-payment-release.js"
+    "check:payments-release": "node scripts/check-payment-release.js",
+    "prestart": "node scripts/vendor-pdfjs.js",
+    "predev": "node scripts/vendor-pdfjs.js"
   },
   "engines": {
     "node": ">=24"
@@ -23,6 +25,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",
     "@vercel/functions": "^3.9.11",
+    "pdfjs-dist": "6.4.299",
     "pg": "^8.23.1",
     "qrcode": "^1.5.4"
   },

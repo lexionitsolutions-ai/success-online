@@ -3,6 +3,8 @@ WORKDIR /app
 COPY package.json package-lock.json server.js database.js storage.js service-catalog.js archive.js operations-schema.js ./
 RUN npm ci --omit=dev
 COPY public ./public
+COPY scripts/vendor-pdfjs.js ./scripts/vendor-pdfjs.js
+RUN node scripts/vendor-pdfjs.js
 COPY supabase ./supabase
 RUN mkdir -p /app/storage && chown -R node:node /app
 USER node

@@ -73,6 +73,18 @@ test('background updates avoid unnecessary redraws and defer changed lists until
   assert.equal(run('redraws'),1);
 });
 
+test('backoffice and admin get document preview actions while sales keeps existing actions',()=>{
+  const {context,run}=client();
+  context.location={origin:'https://example.test'};
+  run("me={role:'backoffice'};const previewDoc={id:'d1',doc_type:'Photo',mime_type:'image/png',download_url:'/api/documents/d1/download'};const previewCase={id:'c1',ref:'SO1',status:'Assigned',customer:{name:'Client'}};");
+  assert.match(run('documentActions(previewCase,previewDoc)'),/previewDocument\('d1'\)/);
+  run("me.role='admin';previewDoc.mime_type='application/pdf'");
+  assert.match(run('documentActions(previewCase,previewDoc)'),/Preview/);
+  run("me.role='sales'");
+  assert.doesNotMatch(run('documentActions(previewCase,previewDoc)'),/previewDocument/);
+  assert.match(run('documentActions(previewCase,previewDoc)'),/Download/);
+});
+
 
 test('admin verifies received payment with one button and no checklist or notes',async()=>{
   const {run}=client();

@@ -18,6 +18,11 @@ export async function signedDownload(path, name) {
   if (error) throw Object.assign(new Error('Could not prepare a private document download.'), {status:502});
   return data.signedUrl;
 }
+export async function signedPreview(path) {
+  const { data, error } = await storage(path).createSignedUrl(path, 120);
+  if (error) throw Object.assign(new Error('Could not prepare a private document preview.'), {status:502});
+  return data.signedUrl;
+}
 export async function readStorage(path) {
   const { data, error } = await storage(path).download(path);
   if (error) throw Object.assign(new Error('Stored document could not be read.'), {status:502});
