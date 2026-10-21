@@ -1198,7 +1198,7 @@ async function pay(caseId) {
   if(drawerBusy) return;
   setDrawerBusy('Opening checkout…');
   try {
-    const p=await api(`/api/cases/${caseId}/payment-order`,{method:'POST'});
+    const p=await api(`/api/cases/${caseId}/payment-order`,{method:'POST',body:{individual:true}});
     setDrawerBusy();await showPayment(p.id,p);
   } catch(e) {toast(e.message);} finally {setDrawerBusy();}
 }
@@ -1293,7 +1293,7 @@ Object.assign(window,{showPayment,pay,launchUPI,startManualUPI,revealPaymentUTR,
 
 function batchEligible(p) {
   const rows=paymentData?.payments || [];
-  return ['sales','admin'].includes(me.role) && (!p.batch_id || ['EXPIRED','CANCELLED','FAILED'].includes(p.batch_status || p.status)) && !['Cancelled','Closed','Delivered'].includes(p.case_status) &&
+  return ['sales','admin'].includes(me.role) && !p.case_payment_locked && !['Cancelled','Closed','Delivered'].includes(p.case_status) &&
     ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) &&
     rows.find(row=>row.case_id===p.case_id)?.id===p.id &&
     !rows.some(row=>row.case_id===p.case_id && ['PAID','AWAITING_VERIFICATION'].includes(row.status));

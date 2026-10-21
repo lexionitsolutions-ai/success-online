@@ -67,6 +67,14 @@ try {
     assert.ok(await page.locator('.panel').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
     await page.screenshot({path:`${root}/combined-${width}.png`,fullPage:true});
     for(let attempt=0;attempt<2;attempt++) {
+      await page.locator('.checkout-close').click();
+      await page.waitForFunction(()=>document.querySelectorAll('input[type=checkbox]').length===2);
+      await page.getByRole('checkbox').nth(0).check();await page.getByRole('checkbox').nth(1).check();
+      await page.getByRole('button',{name:'Pay selected cases',exact:true}).click();
+      await page.locator('.checkout-amount').waitFor();
+      assert.match(await page.locator('.checkout-summary').textContent(),/Included work orders/);
+    }
+    for(let attempt=0;attempt<2;attempt++) {
       await page.getByRole('button',{name:'Cancel',exact:true}).click();
       await page.getByRole('button',{name:'Reopen checkout',exact:true}).waitFor();
       await page.locator('.checkout-close').click();

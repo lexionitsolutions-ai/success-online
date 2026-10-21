@@ -24,14 +24,16 @@ export function createBatchPayments({db,send,body,createOrder,recomputeCase,rece
     }
     const receiver=config(), ready=await receiverReady();
     const receiverChanged=batch.upi_id!==receiver.upiId || batch.payee_name!==receiver.payeeName;
-    const active=ready && !receiverChanged && ['PENDING','INITIATED'].includes(batch.status) && items.every(p=>p.case_status!=='Cancelled');
+    const conflicts=await all("SELECT p.status FROM payments p WHERE p.gateway='direct_upi' AND p.status IN ('PAID','AWAITING_VERIFICATION') AND p.case_id IN (SELECT case_id FROM payments WHERE id IN (SELECT payment_id FROM payment_batch_items WHERE batch_id=$id)) AND p.id NOT IN (SELECT payment_id FROM payment_batch_items WHERE batch_id=$id)",{$id:id});
+    const otherClaimPending=conflicts.some(p=>p.status==='AWAITING_VERIFICATION'),otherPaymentVerified=conflicts.some(p=>p.status==='PAID');
+    const active=ready && !conflicts.length && !receiverChanged && ['PENDING','INITIATED'].includes(batch.status) && items.every(p=>p.case_status!=='Cancelled');
     const names=[...new Set(items.map(p=>p.customer_name))];
     const intent=active ? generateURL({upiId:batch.upi_id,payeeName:batch.payee_name,amount:batch.amount,orderId:batch.id,customerName:names.length===1?names[0]:`${names[0]} +${names.length-1}`,serviceName:`${items.length} work orders`}) : null;
-    return {...batch,batch:true,batch_id:id,case_id:items[0]?.case_id,gateway_order_id:id,orderId:id,customer_name:names.join(', '),service_name:`${items.length} work orders`,items,receiverReady:ready,receiverChanged,upiIntent:intent,qrDataUrl:intent?await QRCode.toDataURL(intent,{width:360,margin:4,errorCorrectionLevel:'M'}):null,attempts:await all('SELECT a.* FROM payment_attempts a WHERE a.payment_id=(SELECT payment_id FROM payment_batch_items WHERE batch_id=$id ORDER BY payment_id LIMIT 1) ORDER BY a.created_at',{$id:id})};
+    return {...batch,otherClaimPending,otherPaymentVerified,batch:true,batch_id:id,case_id:items[0]?.case_id,gateway_order_id:id,orderId:id,customer_name:names.join(', '),service_name:`${items.length} work orders`,items,receiverReady:ready,receiverChanged,upiIntent:intent,qrDataUrl:intent?await QRCode.toDataURL(intent,{width:360,margin:4,errorCorrectionLevel:'M'}):null,attempts:await all('SELECT a.* FROM payment_attempts a WHERE a.payment_id=(SELECT payment_id FROM payment_batch_items WHERE batch_id=$id ORDER BY payment_id LIMIT 1) ORDER BY a.created_at',{$id:id})};
   }
-  async function create(caseIds,user) {
+  async function prepareSelection(caseIds,user,{allowSingle=false,reuse=true}={}) {
     if(!['sales','admin'].includes(user.role)) fail(403,'Only sales or admin can combine payments');
-    if(!Array.isArray(caseIds) || caseIds.length<2 || caseIds.length>50 || caseIds.some(id=>typeof id!=='string') || new Set(caseIds).size!==caseIds.length) fail(400,'Select between 2 and 50 different unpaid cases');
+    if(!Array.isArray(caseIds) || caseIds.length<(allowSingle?1:2) || caseIds.length>50 || caseIds.some(id=>typeof id!=='string') || new Set(caseIds).size!==caseIds.length) fail(400,'Select between 2 and 50 different unpaid cases');
     const selected=[];
     for(const id of [...caseIds].sort()) {
       const c=await one('SELECT * FROM cases WHERE id=$id'+(db.cloud?' FOR UPDATE':''),{$id:id});
@@ -40,6 +42,32 @@ export function createBatchPayments({db,send,body,createOrder,recomputeCase,rece
       selected.push(c);
     }
     if(new Set(selected.map(c=>c.sales_user_id)).size!==1) fail(400,'Select cases belonging to one salesperson');
+    // A checkout is provisional until a transfer is submitted for verification.
+    // Validate the entire selection before releasing any previous group.
+    const groups=new Set();
+    for(const c of selected) {
+      if(await one("SELECT id FROM payments WHERE case_id=$id AND gateway='direct_upi' AND status IN ('PAID','AWAITING_VERIFICATION')",{$id:c.id})) fail(409,'A selected case is paid or awaiting payment verification');
+      for(const row of await all("SELECT b.id FROM payment_batches b JOIN payment_batch_items i ON i.batch_id=b.id JOIN payments p ON p.id=i.payment_id WHERE p.case_id=$id AND b.status IN ('PENDING','INITIATED')",{$id:c.id})) groups.add(row.id);
+    }
+    if(reuse && groups.size===1) {
+      const existing=await detail([...groups][0],user);
+      if(existing.upiIntent && existing.items.length===selected.length && existing.items.every(p=>caseIds.includes(p.case_id))) return {selected,existing};
+    }
+    for(const id of groups) {
+      const previous=await detail(id,user);
+      if(!['PENDING','INITIATED'].includes(previous.status)) continue;
+      await run("UPDATE payment_batches SET status='CANCELLED' WHERE id=$id",{$id:id});
+      for(const item of previous.items) {
+        await run("UPDATE payments SET status='CANCELLED' WHERE id=$id AND status IN ('PENDING','INITIATED')",{$id:item.id});
+        await event(item,user,'supersede',{notes:'Unsubmitted combined checkout replaced by a new payment selection. Any late transfer remains reconcilable.'});
+        await recomputeCase(item.case_id);
+      }
+    }
+    return {selected};
+  }
+  async function create(caseIds,user) {
+    const {selected,existing}=await prepareSelection(caseIds,user);
+    if(existing) return existing;
     const orders=[];
     for(const c of selected) {
       const payment=await createOrder(c,user);
@@ -84,6 +112,7 @@ export function createBatchPayments({db,send,body,createOrder,recomputeCase,rece
       status='INITIATED';
     } else if(action==='submit') {
       if(['PAID','REFUNDED'].includes(p.status)) fail(409,'This combined payment is already verified');
+      if(p.otherClaimPending || p.otherPaymentVerified) fail(409,'A selected case is already paid or awaiting payment verification');
       transaction=utr(b.utr);
       const assigned=await one('SELECT payment_id FROM verified_upi_refs WHERE utr=$utr',{$utr:transaction});
       if(assigned) fail(409,'This UTR is already assigned to a verified payment');
@@ -91,6 +120,7 @@ export function createBatchPayments({db,send,body,createOrder,recomputeCase,rece
     } else if(action==='verify') {
       if(p.status==='PAID') {send(res,200,{ok:true,payment:p});return true;}
       if(p.status!=='AWAITING_VERIFICATION') fail(409,'A submitted UTR is required');
+      if(p.otherClaimPending || p.otherPaymentVerified) fail(409,'A selected case has another payment under verification or already paid');
       if(p.items.reduce((sum,item)=>sum+item.amount,0)!==p.amount) fail(409,'Combined payment allocations do not match the total');
       if(!(await receiverReady())) fail(409,'Confirm the receiving account first');
       for(const item of p.items) if(await one("SELECT id FROM payments WHERE case_id=$case AND status='PAID' AND gateway='direct_upi'",{$case:item.case_id})) fail(409,'A selected case already has a verified payment');
@@ -115,5 +145,5 @@ export function createBatchPayments({db,send,body,createOrder,recomputeCase,rece
     }
     send(res,200,{ok:true,payment:await detail(p.id,user)});return true;
   }
-  return {handle,detail,membership};
+  return {handle,detail,membership,prepareSelection};
 }

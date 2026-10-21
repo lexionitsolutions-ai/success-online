@@ -166,7 +166,15 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const combined=await request('/api/payments/batch',{cookie:accounts.sales,body:{caseIds:batchCases.map(r=>r.data.case.id)}});
     assert.equal(combined.status,201,JSON.stringify(combined.data));
     assert.equal(combined.data.amount,40000);
-    const batchPath='/api/payments/'+combined.data.id;
+    const sameGroup=await request('/api/payments/batch',{cookie:accounts.sales,body:{caseIds:batchCases.map(r=>r.data.case.id).reverse()}});
+    assert.equal(sameGroup.data.id,combined.data.id,'PostgreSQL reuses an unsubmitted group after scanner close');
+    const singleCheckout=await request('/api/cases/'+batchCases[0].data.case.id+'/payment-order',{cookie:accounts.sales,body:{individual:true}});
+    assert.equal(singleCheckout.status,201,JSON.stringify(singleCheckout.data));
+    assert.equal(singleCheckout.data.batch,undefined);
+    assert.equal((await request('/api/payments/'+combined.data.id,{cookie:accounts.sales})).data.status,'CANCELLED');
+    const regroup=await request('/api/payments/batch',{cookie:accounts.sales,body:{caseIds:batchCases.map(r=>r.data.case.id)}});
+    assert.equal(regroup.status,201,JSON.stringify(regroup.data));
+    const batchPath='/api/payments/'+regroup.data.id;
     assert.equal((await request(batchPath+'/submit',{cookie:accounts.sales,body:{utr:'444444444444'}})).status,200);
     const batchConfirmations=await Promise.all(Array.from({length:2},()=>request(batchPath+'/verify',{cookie:admin,body:{}})));
     assert.deepEqual(batchConfirmations.map(r=>r.status),[200,200],'Concurrent combined verification is idempotent in PostgreSQL');

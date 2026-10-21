@@ -32,7 +32,7 @@ test('combined checkout allocates one verified transfer across cases and protect
     assert.equal((await request(base,other)).status,403);
     assert.equal((await request('/api/payments/'+a.payment.id,sales)).data.id,p.id,'Opening a case payment shows its combined checkout');
     assert.equal((await request(`/api/cases/${a.id}/payment-order`,sales,{})).data.id,p.id);
-    assert.equal((await request('/api/payments/batch',sales,{caseIds:[a.id,c.id]})).status,409);
+    assert.equal((await request('/api/payments/batch',sales,{caseIds:[b.id,a.id]})).data.id,p.id,'Closing and reselecting the same unpaid cases reuses checkout');
     assert.equal((await request(base+'/verify',admin,{})).status,409);
     assert.equal((await request(base+'/initiate',sales,{method:'Google Pay'})).data.payment.status,'INITIATED');
     assert.equal((await request(base+'/submit',sales,{utr:'bad'})).status,400);
@@ -83,5 +83,29 @@ test('combined checkout allocates one verified transfer across cases and protect
     const reopened=await request('/api/payments/'+second.id+'/reopen',sales,{});
     assert.equal(reopened.status,201,JSON.stringify(reopened.data));
     assert.notEqual(reopened.data.payment.id,second.id);assert.equal(reopened.data.payment.amount,200);
+    const [f,g,h]=await Promise.all([create(),create(),create()]);
+    const fg=(await request('/api/payments/batch',sales,{caseIds:[f.id,g.id]})).data;
+    await request('/api/payments/'+fg.id+'/initiate',sales,{method:'QR'});
+    assert.equal((await request('/api/payments/batch',sales,{caseIds:[g.id,f.id]})).data.id,fg.id,'Initiating the scanner must not lock selection');
+    const fh=await request('/api/payments/batch',sales,{caseIds:[f.id,h.id]});
+    assert.equal(fh.status,201,JSON.stringify(fh.data));
+    assert.equal((await request('/api/payments/'+fg.id,sales)).data.status,'CANCELLED');
+    const individual=await request('/api/cases/'+f.id+'/payment-order',sales,{individual:true});
+    assert.equal(individual.status,201,JSON.stringify(individual.data));
+    assert.equal(individual.data.batch,undefined,'An unpaid group can be changed to individual payment');
+    assert.equal((await request('/api/payments/'+fh.data.id,sales)).data.status,'CANCELLED');
+    const fgh=await request('/api/payments/batch',sales,{caseIds:[f.id,g.id,h.id]});
+    assert.equal(fgh.status,201,JSON.stringify(fgh.data));
+    assert.equal(fgh.data.amount,300);
+    assert.equal((await request('/api/payments/'+fgh.data.id+'/submit',sales,{utr:'444444444444'})).status,200);
+    assert.equal((await request('/api/payments/batch',sales,{caseIds:[f.id,g.id]})).status,409,'Submitted transfers remain locked for verification');
+    assert.equal((await request('/api/cases/'+f.id+'/payment-order',sales,{individual:true})).data.id,fgh.data.id);
+    assert.equal((await request('/api/payments/'+fg.id+'/submit',sales,{utr:'555555555555'})).status,409,'An old scanner cannot submit a competing claim');
+    assert.equal((await request('/api/payments/'+individual.data.id,sales)).data.id,fgh.data.id,'An order reused by the current group opens that group');
+    const locked=(await request('/api/payments?status=CANCELLED',sales)).data.payments.filter(p=>[f.id,g.id,h.id].includes(p.case_id));
+    assert.ok(locked.length && locked.every(p=>p.case_payment_locked),'Filtered history also carries the authoritative verification lock');
+    assert.equal((await request('/api/payments/'+fgh.data.id+'/verify',admin,{})).status,200);
+    assert.equal((await request('/api/payments/batch',sales,{caseIds:[f.id,g.id]})).status,409,'Paid cases cannot be regrouped');
+
   } finally {child.kill();}
 });

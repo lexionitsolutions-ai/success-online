@@ -116,15 +116,20 @@ test('sales, backoffice and admin get saved document preview actions',()=>{
   assert.match(run('documentActions(previewCase,previewDoc)'),/Download/);
 });
 
-test('cancelled combined checkouts can be selected again, with one case or several', async () => {
+test('unsubmitted combined checkouts remain selectable, with one case or several', async () => {
   const { run } = client();
   run(`me={role:'sales'};paymentData={payments:[
     {id:'p1',case_id:'c1',batch_id:'old',batch_status:'CANCELLED',status:'CANCELLED'},
     {id:'p2',case_id:'c2',batch_id:'old',batch_status:'CANCELLED',status:'CANCELLED'}
   ]};`);
   assert.equal(run('paymentData.payments.every(batchEligible)'), true);
-  run("paymentData.payments[0].batch_status='PENDING'");
+  run("paymentData.payments[0].batch_status='PENDING';paymentData.payments[0].status='PENDING'");
+  assert.equal(run('batchEligible(paymentData.payments[0])'), true);
+  run("paymentData.payments[0].status='INITIATED'");
+  assert.equal(run('batchEligible(paymentData.payments[0])'), true);
+  run("paymentData.payments[0].case_payment_locked=true");
   assert.equal(run('batchEligible(paymentData.payments[0])'), false);
+  run("paymentData.payments[0].case_payment_locked=false");
   run("paymentData.payments[0].batch_status='CANCELLED';paymentData.payments.push({id:'paid',case_id:'c1',status:'PAID'})");
   assert.equal(run('batchEligible(paymentData.payments[0])'), false);
   run("paymentData.payments.pop();selectedPaymentCases.add('c2');let paidCase;pay=async id=>{paidCase=id;}");
@@ -207,6 +212,7 @@ test('case creation waits for all uploads and retries without duplicating the ca
     let creates = 0, uploads = [], failed = false;
     api = async (path, options) => {
       if (path === '/api/cases') { creates++; return {case:{id:'case1',ref:'SO1'}}; }
+      if(path.endsWith('/payment-order')) return {};
       uploads.push(options.body.docType);
       if (options.body.docType === 'Photo' && !failed) { failed = true; throw new Error('Upload interrupted'); }
       return {};

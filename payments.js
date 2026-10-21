@@ -63,14 +63,14 @@ export function createPayments({db, recomputeCase, send, body}) {
     if(caseId) {params.$case=caseId;filters.push('p.case_id=$case');}
     if(user.role==='sales') {params.$user=user.id;filters.push('c.sales_user_id=$user');}
     if(paymentId) {params.$payment=paymentId;filters.push('p.id=$payment');}
-    return all(`SELECT p.*,o.*,bi.batch_id,pb.status batch_status,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id LEFT JOIN payment_batch_items bi ON bi.payment_id=p.id LEFT JOIN payment_batches pb ON pb.id=bi.batch_id JOIN cases c ON c.id=p.case_id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${filters.length ? 'WHERE '+filters.join(' AND ') : ''} ORDER BY p.created_at DESC,p.id`,params);
+    return all(`SELECT p.*,o.*,bi.batch_id,pb.status batch_status,EXISTS (SELECT 1 FROM payments locked WHERE locked.case_id=p.case_id AND locked.gateway='direct_upi' AND locked.status IN ('PAID','AWAITING_VERIFICATION')) case_payment_locked,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id LEFT JOIN payment_batch_items bi ON bi.payment_id=p.id LEFT JOIN payment_batches pb ON pb.id=bi.batch_id JOIN cases c ON c.id=p.case_id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${filters.length ? 'WHERE '+filters.join(' AND ') : ''} ORDER BY p.created_at DESC,p.id`,params);
   }
-  async function createOrder(c,user) {
+  async function createOrder(c,user,{individual=false}={}) {
     if (c.status === 'Cancelled') fail(409,'The service request is cancelled');
     const receiver=paymentConfig();
     // Most cases already have an order. Reuse it with one read, without
     // issuing expiry/receiver updates when nothing has changed.
-    const current=await one(`SELECT p.* FROM payments p JOIN upi_orders o ON o.payment_id=p.id
+    const current=await one(`SELECT p.*,bi.batch_id selection_batch_id FROM payments p JOIN upi_orders o ON o.payment_id=p.id
       LEFT JOIN payment_batch_items bi ON bi.payment_id=p.id LEFT JOIN payment_batches b ON b.id=bi.batch_id
       WHERE p.case_id=$case AND p.gateway='direct_upi' AND (
         p.status IN ('PAID','AWAITING_VERIFICATION') OR
@@ -78,7 +78,8 @@ export function createPayments({db, recomputeCase, send, body}) {
           AND (bi.batch_id IS NULL OR (b.status IN ('PENDING','INITIATED') AND b.expires_at>=$at))))
       ORDER BY CASE WHEN p.status='PAID' THEN 0 WHEN p.status='AWAITING_VERIFICATION' THEN 1 ELSE 2 END,p.created_at DESC LIMIT 1`,
       {$case:c.id,$upi:receiver.upiId,$name:receiver.payeeName,$at:at()});
-    if(current) return current;
+    if(current && (!individual || !current.selection_batch_id || ['PAID','AWAITING_VERIFICATION'].includes(current.status))) return current;
+    if(individual) await batches.prepareSelection([c.id],user,{allowSingle:true,reuse:false});
     const grouped=await one("SELECT p.* FROM payments p JOIN payment_batch_items i ON i.payment_id=p.id JOIN payment_batches b ON b.id=i.batch_id WHERE p.case_id=$id AND b.status IN ('PENDING','INITIATED','AWAITING_VERIFICATION','PAID') LIMIT 1",{$id:c.id});
     if(grouped) return grouped;
     const superseded=await all("SELECT p.* FROM payments p JOIN upi_orders o ON o.payment_id=p.id WHERE p.case_id=$case AND p.gateway='direct_upi' AND p.status IN ('PENDING','INITIATED') AND (o.upi_id!=$upi OR o.payee_name!=$name)",{$case:c.id,$upi:receiver.upiId,$name:receiver.payeeName});
@@ -116,7 +117,7 @@ export function createPayments({db, recomputeCase, send, body}) {
     const config=paymentConfig(),receiverChanged=p.upi_id!==config.upiId || p.payee_name!==config.payeeName;
     const active = ready && !receiverChanged && !otherPaid && !otherClaim && p.case_status!=='Cancelled' && ['PENDING','INITIATED'].includes(p.status);
     const upiIntent = active ? generateUPIPaymentURL({upiId:p.upi_id,payeeName:p.payee_name,amount:p.amount,orderId:p.gateway_order_id,serviceName:p.service_name,customerName:p.customer_name}) : null;
-    return {...p,orderId:p.gateway_order_id,receiverReady:ready,receiverChanged,otherClaimPending:!!otherClaim,receiverAccountType:receiverChanged ? 'previous_receiver' : config.accountType,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
+    return {...p,orderId:p.gateway_order_id,receiverReady:ready,receiverChanged,otherClaimPending:!!otherClaim,otherPaymentVerified:!!otherPaid,receiverAccountType:receiverChanged ? 'previous_receiver' : config.accountType,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
   }
   async function event(p,user,action,b) {
     await run('UPDATE upi_orders SET updated_at=$at WHERE payment_id=$id',{$at:at(),$id:p.id});
@@ -199,6 +200,7 @@ export function createPayments({db, recomputeCase, send, body}) {
       await run('UPDATE upi_orders SET payment_method=$method,initiated_at=$at,updated_at=$at WHERE payment_id=$id',{$id:p.id,$method:b.method,$at:at()});
     } else if(action==='submit') {
       if(['PAID','REFUNDED'].includes(p.status)) fail(409,'This payment is already verified');
+      if(p.otherClaimPending || p.otherPaymentVerified) fail(409,'This case is already paid or awaiting payment verification');
       b.utr=normalizeUTR(b.utr);
       const used=await one('SELECT payment_id FROM verified_upi_refs WHERE utr=$utr',{$utr:b.utr});
       if(used && used.payment_id!==p.id) fail(409,'This UTR is already assigned to a verified payment');

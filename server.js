@@ -960,7 +960,7 @@ async function routeApi(req, res, url) {
     });
     if (req.method === 'POST' && caseMatch[2] === 'payment-order') {
       if (!['sales','admin'].includes(user.role)) return send(res,403,{error:'Only sales or admin can open checkout'});
-      const p = await paymentSystem.createOrder(c,user);
+      const p = await paymentSystem.createOrder(c,user,{individual:(await body(req)).individual===true});
       await recomputeCase(c.id);
       return send(res,201,await paymentSystem.detail(p.id,user));
     }
