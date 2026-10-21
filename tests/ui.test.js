@@ -323,6 +323,35 @@ test('status update saves once, refreshes the open case in place and skips full 
   assert.equal(panel.innerHTML,'Ready to Submit');assert.equal(run('drawerBusy'),false);
 });
 
+test('submitting corrections saves once and refreshes documents and timeline in place',async()=>{
+  const {context,run}=client();
+  const panel={scrollTop:120,innerHTML:''};
+  context.document.querySelector=selector=>selector==='#drawer .case-panel'?panel:null;
+  run(`
+    cases=[{id:'c1',status:'Correction Required'}];selectedCase={case:cases[0],documents:[{id:'old'}],notes:[]};
+    let saves=0;setDrawerBusy=message=>{drawerBusy=!!message;};render=()=>{};caseDetail=item=>item.status;
+    api=async path=>{saves++;if(path!=='/api/cases/c1/submit-reupload') throw Error('Wrong endpoint');await new Promise(resolve=>setTimeout(resolve,10));return {case:{id:'c1',status:'Document Review',reupload:{pending:false,submittedDocumentIds:['new']}},documents:[{id:'new'}],notes:[{id:'submitted'}]};};
+  `);
+  const pending=run("submitReupload('c1')");
+  await run("submitReupload('c1')");await pending;
+  assert.equal(run('saves'),1);
+  assert.equal(run('selectedCase.documents[0].id'),'new');
+  assert.equal(run('selectedCase.notes[0].id'),'submitted');
+  assert.equal(panel.scrollTop,120);
+  assert.equal(run('drawerBusy'),false);
+});
+
+test('failed correction submission keeps the documents and shows the error beside Submit',async()=>{
+  const {context,run}=client();
+  const message={textContent:''};
+  context.document.querySelector=selector=>selector==='#reuploadSubmitResult'?message:null;
+  run("selectedCase={documents:[{id:'replacement'}]};setDrawerBusy=message=>{drawerBusy=!!message;};api=async()=>{throw Error('Connection lost');};");
+  await run("submitReupload('c1')");
+  assert.equal(message.textContent,'Connection lost');
+  assert.equal(run('selectedCase.documents[0].id'),'replacement');
+  assert.equal(run('drawerBusy'),false);
+});
+
 test('failed status save keeps the form and saved state unchanged and unlocks retry',async()=>{
   const {context,run}=client();
   context.document.querySelector=selector=>({'#nextStatus':{value:'Ready to Submit'},'#note':{value:'My note'}}[selector] || null);

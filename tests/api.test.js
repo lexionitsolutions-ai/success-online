@@ -194,7 +194,37 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal((await request('/api/notifications/read',{cookie:sales,body:{ids:[correctionNotice.id]}})).status,200);
     assert.equal((await request('/api/notifications',{cookie:sales})).data.notifications.some(notice=>notice.id===correctionNotice.id),false);
     assert.equal((await request(path,{cookie:sales})).data.notes.at(-1).note,'Replace the blurry Ration Card photo');
-    for (const status of ['Document Review','Ready to Submit','Submitted to Official Portal','Document Received']) assert.equal((await request(path + '/progress', { cookie:office, body:{status} })).status, 200, status);
+    assert.equal((await request(path+'/submit-reupload',{cookie:sales,body:{}})).status,400);
+    assert.equal((await request(path+'/submit-reupload',{cookie:office,body:{}})).status,403);
+    assert.equal((await request(path+'/submit-reupload',{cookie:otherSales,body:{}})).status,403);
+    assert.equal((await request(path+'/request-reupload',{cookie:sales,body:{documentTypes:['Ration Card'],reason:'Replace scan'}})).status,403);
+    assert.equal((await request(path+'/request-reupload',{cookie:office,body:{documentTypes:['Unknown'],reason:'Replace scan'}})).status,400);
+    assert.equal((await request(path+'/documents',{cookie:sales,body:upload('Photo')})).status,201);
+    const requested=await request(path+'/request-reupload',{cookie:office,body:{documentTypes:['Ration Card'],reason:'Upload a clear scan showing all details'}});
+    assert.equal(requested.status,200);
+    assert.deepEqual(requested.data.case.reupload.missingTypes,['Ration Card']);
+    assert.equal((await request(path+'/submit-reupload',{cookie:sales,body:{}})).status,400);
+    assert.equal((await request(path+'/documents',{cookie:sales,body:upload('Ration Card')})).status,201);
+    const ready=(await request(path,{cookie:sales})).data;
+    assert.equal(ready.case.status,'Correction Required','Uploading does not submit the corrections automatically');
+    assert.equal(ready.case.reupload.canSubmit,true);
+    assert.equal(ready.case.reupload.pendingDocumentIds.length,2);
+    const submitted=await request(path+'/submit-reupload',{cookie:sales,body:{}});
+    assert.equal(submitted.status,200);
+    assert.equal(submitted.data.case.status,'Document Review');
+    assert.equal(submitted.data.case.reupload.pending,false);
+    assert.equal(submitted.data.case.reupload.submittedDocumentIds.length,2);
+    const officeReview=(await request(path,{cookie:office})).data;
+    assert.deepEqual(officeReview.case.reupload.submittedDocumentIds,submitted.data.case.reupload.submittedDocumentIds);
+    assert.ok((await request('/api/notifications',{cookie:office})).data.notifications.some(notice=>notice.caseId===caseId && /Corrected documents submitted/.test(notice.title)));
+    assert.equal((await request(path+'/submit-reupload',{cookie:sales,body:{}})).data.notes.length,submitted.data.notes.length,'A repeated submission is idempotent');
+    const again=await request(path+'/request-reupload',{cookie:office,body:{documentTypes:['Photo'],reason:'The photo needs a plain background'}});
+    assert.equal(again.data.case.reupload.canSubmit,false,'A new correction needs a new replacement');
+    assert.equal((await request(path+'/documents',{cookie:sales,body:upload('Photo')})).status,201);
+    const secondSubmission=await request(path+'/submit-reupload',{cookie:sales,body:{}});
+    assert.equal(secondSubmission.status,200);
+    assert.equal(secondSubmission.data.case.reupload.submittedDocumentIds.length,1);
+    for (const status of ['Ready to Submit','Submitted to Official Portal','Document Received']) assert.equal((await request(path + '/progress', { cookie:office, body:{status} })).status, 200, status);
     assert.equal((await request(path + '/submit-received-document', { cookie:office, method:'POST' })).status, 400);
     assert.equal((await request(path + '/documents', { cookie:office, body:upload('Received Document') })).status, 201);
     item = (await request(path, { cookie:office })).data;
@@ -209,7 +239,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const mirror = JSON.parse(readFileSync(join(root, 'docs', 'Success Online Operations.json')));
     assert.equal(mirror.allCases[created.data.case.ref].status, 'Closed');
     assert.deepEqual(mirror.allCases[created.data.case.ref].missingDocuments, []);
-    assert.equal(mirror.documents[created.data.case.ref].length, 5);
+    assert.equal(mirror.documents[created.data.case.ref].length, 8, 'The mirror retains all three replacement versions in the document history');
     // Force an incomplete already-assigned legacy record: API must still prevent progression.
     const db = new DatabaseSync(join(root, 'test.sqlite'));
     // Completion/collection events count even when the case was opened earlier.

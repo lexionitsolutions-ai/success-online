@@ -15,6 +15,7 @@ try {
       const path=new URL(route.request().url()).pathname;
       const json=data=>route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
       if(path==='/api/me') return json({user:employee});
+      if(path==='/api/notifications') return json({notifications:[]});
       if(path==='/api/services') {reads++;return json({services:[],cloudUploads:true});}
       if(path==='/api/cases') {reads++;return json({cases:[item]});}
       if(path==='/api/cases/case1') {reads++;return json({case:item,documents:[],notes:[]});}

@@ -138,6 +138,16 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const duplicateResults=await Promise.all(duplicates.map(pid=>request('/api/payments/'+pid+'/verify',{cookie:admin,body:confirmations})));
     assert.deepEqual(duplicateResults.map(r=>r.status).sort(),[200,409],'Database uniqueness arbitrates competing UTR verification');
     assert.equal((await request(path+'/claim',{cookie:accounts.backoffice,method:'POST'})).status,200);
+    const reuploadRequest=await request(path+'/request-reupload',{cookie:accounts.backoffice,body:{documentTypes:['Ration Card'],reason:'Replace the unclear card scan'}});
+    assert.equal(reuploadRequest.status,200);
+    assert.deepEqual(reuploadRequest.data.case.reupload.missingTypes,['Ration Card']);
+    assert.equal((await request(path+'/submit-reupload',{cookie:accounts.sales,body:{}})).status,400);
+    assert.equal((await upload('Ration Card')).result.status,201);
+    const corrected=await request(path+'/submit-reupload',{cookie:accounts.sales,body:{}});
+    assert.equal(corrected.status,200,JSON.stringify(corrected.data));
+    assert.equal(corrected.data.case.status,'Document Review');
+    assert.equal(corrected.data.case.reupload.submittedDocumentIds.length,1);
+    assert.deepEqual((await request(path,{cookie:accounts.backoffice})).data.case.reupload.submittedDocumentIds,corrected.data.case.reupload.submittedDocumentIds);
     for (const status of ['Ready to Submit','Submitted to Official Portal','Document Received']) assert.equal((await request(path+'/progress',{cookie:accounts.backoffice,body:{status}})).status,200);
     assert.equal((await upload('Received Document',pdf,accounts.backoffice)).result.status,201);
     assert.equal((await request(path+'/submit-received-document',{cookie:accounts.backoffice,method:'POST'})).status,200);

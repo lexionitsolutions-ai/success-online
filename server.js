@@ -13,6 +13,7 @@ import { storage, storageEnabled, signedDownload, signedPreview, readStorage, wr
 import { serviceCatalog } from './service-catalog.js';
 import { sheetHeaders, serviceTabs } from './operations-schema.js';
 import { createPayments, paymentSchema, paymentConfig, priceAmounts } from './payments.js';
+import { correctionStatuses, reuploadState } from './reuploads.js';
 
 if (existsSync('.env')) loadEnvFile('.env');
 
@@ -481,6 +482,15 @@ async function caseRows(rows) {
   });
 }
 function amounts(v) { const p=servicePrices.get(v.id);return priceAmounts(v,p?.price,p?.original); }
+async function caseDetailData(c, user) {
+  const [item, documents, notes] = await Promise.all([
+    caseRow(c),
+    all('SELECT * FROM documents WHERE case_id=$id ORDER BY created_at', { $id:c.id }),
+    all('SELECT n.*,u.name actor FROM notes n JOIN users u ON u.id=n.actor_id WHERE case_id=$id ORDER BY created_at', { $id:c.id })
+  ]);
+  item.reupload = reuploadState(item, documents, notes);
+  return { case:item, documents:documents.map(publicDocument), notes:user.role==='sales' ? notes.filter(note=>note.visibility==='sales') : notes };
+}
 function analyticsPeriod(key) {
   const valid = new Set(['week','month','quarter','year','all']);
   const period = valid.has(key) ? key : 'month';
@@ -800,7 +810,45 @@ async function routeApi(req, res, url) {
       res.writeHead(200, { 'content-type': 'application/zip', 'content-length': content.length, 'content-disposition': `attachment; filename="case-files.zip"; filename*=UTF-8''${encodeURIComponent(folder + '.zip')}` });
       return res.end(content);
     }
-    if (req.method === 'GET' && !caseMatch[2]) return send(res, 200, { case: (await caseRow(c)), documents: (await all('SELECT * FROM documents WHERE case_id=$id ORDER BY created_at', { $id: c.id })).map(publicDocument), notes: (await all('SELECT n.*,u.name actor FROM notes n JOIN users u ON u.id=n.actor_id WHERE case_id=$id AND ($role!=$sales OR visibility=$sales) ORDER BY created_at', { $id: c.id, $role: user.role, $sales: 'sales' })) });
+    if (req.method === 'GET' && !caseMatch[2]) return send(res, 200, await caseDetailData(c,user));
+    if (req.method === 'POST' && caseMatch[2] === 'request-reupload') return body(req).then(async b => {
+      if (!['backoffice','admin'].includes(user.role)) return send(res,403,{error:'Only back office or admin can request a reupload'});
+      if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res,409,{error:'This case is closed for corrections'});
+      const variant=await one('SELECT documents_json FROM variants WHERE id=$id',{$id:c.variant_id});
+      const allowed=json(variant,'documents_json',[]).map(doc=>doc.label);
+      if (!Array.isArray(b.documentTypes) || !b.documentTypes.length || b.documentTypes.some(type=>!allowed.includes(type))) return send(res,400,{error:'Select valid checklist documents to reupload'});
+      const reason=String(b.reason || '').trim();
+      if (!reason || reason.length>1000) return send(res,400,{error:'Enter reupload instructions, up to 1000 characters'});
+      const documents=await all("SELECT id FROM documents WHERE case_id=$id AND state='uploaded'",{$id:c.id});
+      const stamp=now();
+      await run("UPDATE cases SET status='Correction Required',updated_at=$at WHERE id=$id",{$id:c.id,$at:stamp});
+      await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)',{$id:id('note'),$case:c.id,$actor:user.id,$old:c.status,$new:'Correction Required',$note:`Reupload requested: ${b.documentTypes.join(', ')}. ${reason}`,$vis:'sales',$next:JSON.stringify({type:'reupload_request',documentTypes:[...new Set(b.documentTypes)],baselineDocumentIds:documents.map(doc=>doc.id)}),$at:stamp});
+      await notifyCaseUpdate(c,user,'Document reupload requested','Correction Required');
+      await syncCase(c.id);
+      return send(res,200,await caseDetailData({...c,status:'Correction Required',updated_at:stamp},user));
+    });
+    if (req.method === 'POST' && caseMatch[2] === 'submit-reupload') {
+      if (!['sales','admin'].includes(user.role)) return send(res,403,{error:'Only sales or admin can submit corrected documents'});
+      const detail=await caseDetailData(c,user), state=detail.case.reupload;
+      if (!state.pending) {
+        if (['Document Review','Ready for Assignment'].includes(c.status) && state.submittedDocumentIds.length) return send(res,200,detail);
+        return send(res,409,{error:'This case is not awaiting a correction submission'});
+      }
+      if (!state.pendingDocumentIds.length) return send(res,400,{error:'Reupload the corrected documents before submitting'});
+      if (state.missingTypes.length) return send(res,400,{error:`Reupload requested documents: ${state.missingTypes.join(', ')}`});
+      if (detail.case.document_state!=='complete') return send(res,409,{error:'Upload every required document before submitting the corrections'});
+      if (!(await processingGate(c,res))) return;
+      const status=c.backoffice_user_id ? 'Document Review' : 'Ready for Assignment', stamp=now();
+      await run('UPDATE cases SET status=$status,updated_at=$at WHERE id=$id',{$id:c.id,$status:status,$at:stamp});
+      const savedNote={id:id('note'),case_id:c.id,actor_id:user.id,actor:user.name,old_status:c.status,new_status:status,note:`Sales submitted ${state.pendingDocumentIds.length} corrected document(s) for review.`,visibility:'sales',next_action:JSON.stringify({type:'reupload_submission',requestIds:state.requestIds,documentIds:state.pendingDocumentIds}),created_at:stamp};
+      await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)',{$id:savedNote.id,$case:c.id,$actor:user.id,$old:c.status,$new:status,$note:savedNote.note,$vis:'sales',$next:savedNote.next_action,$at:stamp});
+      await notifyCaseUpdate(c,user,'Corrected documents submitted for review',status);
+      await syncCase(c.id);
+      detail.notes.push(savedNote);
+      detail.case={...detail.case,status,updated_at:stamp};
+      detail.case.reupload=reuploadState(detail.case,detail.documents,detail.notes);
+      return send(res,200,detail);
+    }
     if (req.method === 'POST' && caseMatch[2] === 'remove-document') {
       if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res,409,{error:'This case is closed for document changes'});
       const b = await body(req);
@@ -956,11 +1004,18 @@ async function routeApi(req, res, url) {
       if (!['Awaiting Documents','Awaiting Payment','Correction Required','Customer Action Required','Rejected','Cancelled'].includes(b.status) && !(await processingGate(c,res))) return;
       if (['Correction Required','Rejected','Cancelled'].includes(b.status) && !String(b.note || '').trim()) return send(res, 400, { error: 'A reason is required' });
       (await run('UPDATE cases SET status=$s,follow_up_date=$f,official_reference=COALESCE($r,official_reference),completed_at=CASE WHEN $s IN ($delivered,$closed) THEN $at ELSE completed_at END,updated_at=$at WHERE id=$id', { $s: b.status, $f: b.followUpDate || null, $r: b.officialReference || null, $delivered: 'Delivered', $closed: 'Closed', $at: now(), $id: c.id }));
-      const savedNote={id:id('note'),case_id:c.id,actor_id:user.id,actor:user.name,old_status:c.status,new_status:b.status,note:b.note || '',visibility:b.visibility || 'sales',next_action:b.nextAction || '',created_at:now()};
+      let nextAction=b.nextAction || '';
+      if (correctionStatuses.includes(b.status) && (b.status==='Correction Required' || !correctionStatuses.includes(c.status))) {
+        const baseline=await all("SELECT id FROM documents WHERE case_id=$id AND state='uploaded'",{$id:c.id});
+        nextAction=JSON.stringify({type:'reupload_request',documentTypes:[],baselineDocumentIds:baseline.map(doc=>doc.id),instructions:nextAction});
+      }
+      const savedNote={id:id('note'),case_id:c.id,actor_id:user.id,actor:user.name,old_status:c.status,new_status:b.status,note:b.note || '',visibility:correctionStatuses.includes(b.status)?'sales':b.visibility || 'sales',next_action:nextAction,created_at:now()};
       (await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)', { $id:savedNote.id,$case:c.id,$actor:user.id,$old:c.status,$new:b.status,$note:savedNote.note,$vis:savedNote.visibility,$next:savedNote.next_action,$at:savedNote.created_at }));
       await notifyCaseUpdate(c,user,b.status === 'Correction Required' ? 'Returned to sales for correction' : 'Case status updated',b.status);
       (await syncCase(c.id));
-      send(res, 200, { note:savedNote, case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
+      const item=await caseRow(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}));
+      if (correctionStatuses.includes(b.status)) item.reupload=reuploadState(item,await all('SELECT * FROM documents WHERE case_id=$id',{$id:c.id}),await all('SELECT * FROM notes WHERE case_id=$id ORDER BY created_at',{$id:c.id}));
+      send(res, 200, { note:savedNote, case:item });
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/admin/dashboard') {
@@ -1124,7 +1179,7 @@ export async function handler(req, res) {
     };
     const sheetsJobs = new Set(), driveJobs = new Set();
     const documentRequest = req.method==='POST' && (url.pathname==='/api/cases' || /\/api\/cases\/[^/]+\/(documents|finish-uploads)$/.test(url.pathname));
-    const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|submit-received-document)$/.test(url.pathname);
+    const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|submit-received-document|request-reupload|submit-reupload)$/.test(url.pathname);
     const paymentRequest = /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/payment-order$/.test(url.pathname);
     const readOnly = (req.method === 'GET' && (
       ['/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments'].includes(url.pathname) ||

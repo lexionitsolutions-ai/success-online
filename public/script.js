@@ -750,11 +750,59 @@ async function openCase(caseId) {
 
 function documentChecklist(item, documents) {
   const active = documents.filter(document => document.state !== 'replaced');
+  const reupload = item.reupload || {};
   return applicableDocuments(item.variant.documents || [], item.details || {}).map(requirement => {
     const uploaded = active.filter(document => document.doc_type === requirement.label);
-    const multiple = requirement.multiple;
-    return `<div class="doc"><span><strong>${h(requirement.label)}</strong><small>${uploaded.length ? multiple ? `${uploaded.length} report pages uploaded` : `Uploaded version ${uploaded[0].version}` : requirement.required ? 'Required document missing' : 'Optional supporting document'}</small>${statusBadge(uploaded.length ? 'Uploaded' : requirement.required ? 'Missing' : 'Optional')}${uploaded.map((doc,index) => `${multiple ? `<small>Page ${index+1}</small>` : ''}${documentActions(item,doc)}`).join('')}</span>${!['Closed','Delivered','Cancelled'].includes(item.status) ? uploadControls(encodeURIComponent(requirement.label), item.id, multiple) : ''}</div>`;
+    const requested = reupload.pending && reupload.requestedTypes?.includes(requirement.label);
+    const pending = uploaded.some(doc => reupload.pendingDocumentIds?.includes(doc.id));
+    const submitted = uploaded.some(doc => reupload.submittedDocumentIds?.includes(doc.id) || (!reupload.pending && doc.version > 1));
+    const editable = !['Closed','Delivered','Cancelled'].includes(item.status);
+    const highlight = pending ? 'doc-reuploaded-pending' : requested ? 'doc-reupload-requested' : submitted ? 'doc-reuploaded-submitted' : '';
+    return `<div class="doc ${highlight}"><span><strong>${h(requirement.label)}</strong><small>${uploaded.length ? requirement.multiple ? `${uploaded.length} report pages uploaded` : `Uploaded version ${uploaded[0].version}` : requirement.required ? 'Required document missing' : 'Optional supporting document'}</small>${requested && !pending ? '<span class="reupload-tag is-requested">Reupload requested</span>' : ''}${statusBadge(uploaded.length ? 'Uploaded' : requirement.required ? 'Missing' : 'Optional')}${uploaded.map((doc,index) => {
+      const isPending = reupload.pendingDocumentIds?.includes(doc.id);
+      const isSubmitted = reupload.submittedDocumentIds?.includes(doc.id) && !(requested && !isPending);
+      return `<span class="document-file" data-document-id="${h(doc.id)}">${requirement.multiple ? `<small>Page ${index+1}</small>` : ''}<span class="document-file-name">${h(doc.file_name || requirement.label)}</span>${isPending ? '<span class="reupload-tag is-pending">Reuploaded &middot; not submitted</span>' : isSubmitted ? '<span class="reupload-tag is-submitted">Reuploaded &middot; submitted for review</span>' : doc.version > 1 && !reupload.pending ? '<span class="reupload-tag is-submitted">Reuploaded document</span>' : ''}${documentActions(item,doc)}</span>`;
+    }).join('')}</span>${editable ? `<span class="document-upload-actions">${uploadControls(encodeURIComponent(requirement.label), item.id, requirement.multiple)}${['backoffice','admin'].includes(me.role) ? `<button type="button" class="quiet request-reupload-button" onclick="showReuploadRequest('${item.id}','${encodeURIComponent(requirement.label)}',this)">Request reupload</button>` : ''}</span>` : ''}</div>`;
   }).join('');
+}
+function reuploadSubmissionPanel(item) {
+  const state = item.reupload;
+  if (!state?.pending) return state?.submittedDocumentIds?.length ? '<section class="reupload-submission is-submitted"><strong>Corrected documents submitted for review</strong><p>The highlighted documents are the latest replacements submitted by sales.</p></section>' : '';
+  const sales = ['sales','admin'].includes(me.role);
+  return `<section class="reupload-submission"><div><strong>${sales ? 'Submit corrected documents' : 'Awaiting corrected documents from sales'}</strong><p>${sales ? 'Reupload and preview the corrected files, then submit them to back office for review.' : 'Replacement files stay highlighted while sales prepares and submits the corrections.'}</p><small>${state.pendingDocumentIds.length} corrected file(s) ready${state.missingTypes.length ? `. Still requested: ${h(state.missingTypes.join(', '))}` : ''}</small></div>${sales ? `<button id="submitReupload" type="button" class="primary" onclick="submitReupload('${item.id}')" ${!state.canSubmit?'disabled':''}>Submit reupload</button>` : '<span class="reupload-tag is-pending">Awaiting sales submission</span>'}<p id="reuploadSubmitResult" role="status"></p></section>`;
+}
+function showReuploadRequest(caseId, encodedType, button) {
+  if (drawerBusy) return;
+  const card = button.closest('.doc');
+  const existing = card.querySelector('.reupload-request-form');
+  if (existing) { existing.querySelector('textarea').focus(); return; }
+  const form = document.createElement('form');
+  form.className = 'reupload-request-form';
+  form.innerHTML = `<label>What needs correcting in ${h(decodeURIComponent(encodedType))}?<textarea name="reason" required maxlength="1000" placeholder="Explain what sales needs to reupload"></textarea></label><div><button type="button" class="quiet">Cancel</button><button type="submit" class="primary">Send reupload request</button></div><p role="status"></p>`;
+  form.querySelector('button[type=button]').onclick = () => form.remove();
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (!form.reportValidity() || drawerBusy) return;
+    setDrawerBusy('Sending reupload request...');
+    try {
+      const result = await api(`/api/cases/${caseId}/request-reupload`, {method:'POST',body:{documentTypes:[decodeURIComponent(encodedType)],reason:form.elements.reason.value}});
+      setDrawerBusy();renderSavedCase(result);toast('Reupload requested from sales');
+    } catch (error) {form.querySelector('[role=status]').textContent=error.message;}
+    finally {setDrawerBusy();}
+  };
+  card.append(form);form.querySelector('textarea').focus();
+}
+async function submitReupload(caseId) {
+  if (drawerBusy) return;
+  setDrawerBusy('Submitting corrected documents...');
+  try {
+    const result = await api(`/api/cases/${caseId}/submit-reupload`, {method:'POST',body:{}});
+    setDrawerBusy();renderSavedCase(result);toast('Corrected documents submitted for review');
+  } catch (error) {
+    const message=document.querySelector('#reuploadSubmitResult');
+    if (message) message.textContent=error.message;
+    else toast(error.message);
+  } finally {setDrawerBusy();}
 }
 
 function documentActions(item, document) {
@@ -920,7 +968,7 @@ function caseDetail(item, documents, notes) {
     ${intakeDetails ? `<section class="detail-section"><div class="panel-title"><div><h3>Application details</h3><p>Information collected for this service request.</p></div></div><div class="review">${intakeDetails}</div></section>` : ''}
     ${item.status === 'Correction Required' ? `<section class="correction-notice"><strong>Returned to sales for correction</strong><p>${h(notes.filter(note => note.new_status === 'Correction Required').at(-1)?.note || 'Review the case timeline and update the requested documents.')}</p></section>` : ''}
     ${casePaymentCard(item)}
-    <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div>${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div><div class="upload-list">${documentChecklist(item, documents)}</div></section>
+    <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div>${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div><div class="upload-list">${documentChecklist(item, documents)}</div>${reuploadSubmissionPanel(item)}</section>
     ${receivedDocumentPanel(item, documents)}
     <section class="detail-section"><div class="panel-title"><div><h3>Timeline</h3><p>Recorded status changes and internal notes.</p></div></div><div class="timeline">${notes.length ? notes.map(note => `<div><i></i><span><strong>${h(statusLabel(note.new_status))}</strong><p>${h(note.note || 'Status updated')}</p><small>${h(note.actor)} · ${dateTime(note.created_at)}</small></span></div>`).join('') : empty('No updates yet.')}</div></section>
     ${me.role === 'backoffice' && item.status === 'Ready for Assignment' ? `<div class="sticky-actions"><button class="primary" onclick="claim('${item.id}')">Claim case</button></div>` : ''}
@@ -994,7 +1042,9 @@ async function uploadCaseDocument(caseId, encodedType, input) {
   if (badge) { badge.textContent = 'Uploading...'; badge.className = 'badge neutral'; }
   try {
     for (const file of files) await uploadDocument(caseId, docType, { fileName:file.name, mimeType:file.type, size:file.size, ...(cloudUploads ? {file} : {content:await fileAsBase64(file)}) });
-    setDrawerBusy(); closeDrawer(); await load(); await openCase(caseId); toast(`${docType} uploaded`);
+    const result=await api(`/api/cases/${caseId}`);
+    setDrawerBusy();renderSavedCase(result);
+    if (!result.case.reupload?.pending) toast(`${docType} uploaded`);
   } catch (error) { input.value = ''; if (badge) { badge.textContent = 'Upload failed'; badge.className = 'badge danger'; } toast(error.message); }
   finally { setDrawerBusy(); }
 }
@@ -1002,9 +1052,10 @@ async function uploadCaseDocument(caseId, encodedType, input) {
 async function claim(caseId) { try { await api(`/api/cases/${caseId}/claim`, { method:'POST' }); closeDrawer(); await load(); openCase(caseId); toast('Case assigned to you'); } catch (error) { toast(error.message); } }
 async function submitReceivedDocument(caseId, button) { try { button.disabled = true; button.textContent = 'Submitting...'; await api(`/api/cases/${caseId}/submit-received-document`, { method:'POST' }); closeDrawer(); await load(); setView('completed'); toast('Document submitted. Request closed'); } catch (error) { button.disabled = false; button.textContent = 'Submit'; toast(error.message); } }
 function renderSavedCase(result) {
+  if (!result.case.reupload && selectedCase?.case.id===result.case.id && !selectedCase.case.reupload?.pending && selectedCase.case.reupload) result.case={...result.case,reupload:selectedCase.case.reupload};
   cases=cases.map(item=>item.id===result.case.id?result.case:item);
   if(selectedCase?.case.id===result.case.id) {
-    selectedCase={...selectedCase,case:result.case,notes:[...selectedCase.notes,...(result.note?[result.note]:[])]};
+    selectedCase={...selectedCase,case:result.case,documents:result.documents || selectedCase.documents,notes:result.notes || [...selectedCase.notes,...(result.note?[result.note]:[])]};
     const panel=document.querySelector('#drawer .case-panel');
     if(panel) {
       const scroll=panel.scrollTop;
@@ -1059,7 +1110,7 @@ async function setView(next) {
   }
 }
 
-Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, previewDraftDocument, previewDocument, closeDocumentPreview, changePreviewPage, zoomDocumentPreview, uploadCaseDocument, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
+Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, previewDraftDocument, previewDocument, closeDocumentPreview, changePreviewPage, zoomDocumentPreview, uploadCaseDocument, showReuploadRequest, submitReupload, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
 Object.assign(window, { downloadCaseFiles, wizardBack, removeNameNumbers });
 Object.assign(window, { saveDriveRootFolder });
 Object.assign(window, { toggleEmployeeDates, applyEmployeePeriod, createEmployee });
