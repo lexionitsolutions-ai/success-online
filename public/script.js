@@ -1125,6 +1125,17 @@ const paymentSearchFields={all:'All fields',customer:'Customer',utr:'UTR',mobile
 async function loadPayments() {
   [paymentData,paymentSettings] = await Promise.all([api('/api/payments'+paymentFilters),me.role==='admin' ? api('/api/payment-settings') : null]);
 }
+function paymentCaseRows() {
+  const cases=new Map();
+  const priority=p=>p.status==='PAID'?2:p.status==='AWAITING_VERIFICATION'?1:0;
+  // The API keeps checkout attempts for reconciliation. Display each case once,
+  // preferring its verified or submitted transfer over an unused checkout.
+  for(const payment of paymentData?.payments || []) {
+    const current=cases.get(payment.case_id);
+    if(!current || priority(payment)>priority(current)) cases.set(payment.case_id,payment);
+  }
+  return [...cases.values()];
+}
 function paymentTableRow(p) {
   const payable = batchEligible(p);
   const review = me.role === 'admin' && p.status === 'AWAITING_VERIFICATION';
@@ -1144,19 +1155,19 @@ function paymentTableRow(p) {
 function renderPayments() {
   if (!paymentData) return empty('Loading payments...');
   const m = paymentData.metrics;
-  const latest = paymentData.payments.filter((p,index,rows) => rows.findIndex(row => row.case_id === p.case_id) === index);
+  const latest = paymentCaseRows();
   const unpaid = latest.filter(p => ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) && !['Cancelled','Closed','Delivered'].includes(p.case_status) && !paymentData.payments.some(row => row.case_id === p.case_id && ['PAID','AWAITING_VERIFICATION'].includes(row.status))).length;
   const selected = selectablePaymentCases().filter(p => selectedPaymentCases.has(p.case_id)).length;
   return `<section class="payments-workspace">${pageHead('Payments', 'A clear view of your collections, checkouts, and payment activity.')}
     ${me.role==='admin' ? `<section class="metric-grid compact payment-metrics">${metricCard('Verified collections',money(m.collected),'Confirmed in the receiving account','green')}${metricCard('Collected today',money(m.today),'Verified today','green')}${metricCard('Unpaid cases',number(unpaid),'Ready for payment','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting verification','amber')}${metricCard('Failed / cancelled',number(m.failed),'Checkout history')}${metricCard('Verified transfers',number(m.verified),'Individual and combined transfers','green')}</section>${paymentSettingsPanel()}` : `<section class="metric-grid payment-metrics">${metricCard('Unpaid cases',number(unpaid),'Individual or combined checkout','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting payment verification','amber')}${metricCard('Verified collections',money(m.collected),'Confirmed payments','green')}</section>`}
     ${['sales','admin'].includes(me.role) ? `<section class="payment-selection-panel"><div class="payment-selection-intro"><span class="payment-selection-icon">${icon('payments')}</span><div><h2>One payment. Multiple cases.</h2><p>Select one case to pay individually, or choose several to pay together.</p></div></div><div class="payment-selection-checkout"><p id="combinedPaymentTotal" aria-live="polite">${combinedPaymentSummary()}</p><button id="paySelectedButton" type="button" class="primary" onclick="paySelectedCases(this)" ${!selected?'disabled':''}>Pay selected cases <span aria-hidden="true">&rarr;</span></button></div></section>` : ''}
-    <section class="payment-activity" aria-labelledby="paymentActivityTitle"><div class="payment-activity-heading"><div><h2 id="paymentActivityTitle">Payment activity</h2><p>Search a payment, review its details, or open a checkout.</p></div><span class="payment-record-count">${number(paymentData.payments.length)} ${paymentData.payments.length===1?'record':'records'}</span></div>
+    <section class="payment-activity" aria-labelledby="paymentActivityTitle"><div class="payment-activity-heading"><div><h2 id="paymentActivityTitle">Payment activity</h2><p>Search a payment, review its details, or open a checkout.</p></div><span class="payment-record-count">${number(latest.length)} ${latest.length===1?'case':'cases'}</span></div>
     <div class="payment-list-tools"><form id="paymentFilters" class="payment-search" role="search" aria-label="Search payments" onsubmit="filterPayments(event)">
       <label class="payment-search-by"><span>Search by</span><select name="searchBy" onchange="updatePaymentSearch(this.value)">${Object.entries(paymentSearchFields).map(([key,label])=>`<option value="${key}" ${key===(new URLSearchParams(paymentFilters).get('searchBy') || 'all')?'selected':''}>${label}</option>`).join('')}</select></label>
       <input id="paymentSearchInput" name="q" type="${['from','to'].includes(new URLSearchParams(paymentFilters).get('searchBy'))?'date':'search'}" aria-label="Search value" placeholder="Search payments" value="${h(new URLSearchParams(paymentFilters).get('q') || '')}">
       <button class="primary payment-search-submit" aria-label="Search payments" title="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
     </form><div class="payment-search-actions">${paymentFilters?'<button type="button" class="quiet" onclick="resetPaymentFilters()">Clear search</button>':''}<button type="button" class="quiet payment-export-button" onclick="exportPayments()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>Export report</button></div></div>
-    <div class="table-shell payment-table-shell">${paymentData.payments.length ? `<table class="table payment-table"><thead><tr><th><span class="visually-hidden">Select</span></th><th>Customer / case</th><th>Service</th><th>Amount</th><th>Method / UTR</th><th>Status</th><th>Employee / date</th><th>Actions</th></tr></thead><tbody>${paymentData.payments.map(paymentTableRow).join('')}</tbody></table>` : '<div class="payment-empty"><span>'+icon('payments')+'</span><h3>No payments found</h3><p>Try another search or create a customer case to get started.</p></div>'}</div></section></section>`;
+    <div class="table-shell payment-table-shell">${latest.length ? `<table class="table payment-table"><thead><tr><th><span class="visually-hidden">Select</span></th><th>Customer / case</th><th>Service</th><th>Amount</th><th>Method / UTR</th><th>Status</th><th>Employee / date</th><th>Actions</th></tr></thead><tbody>${latest.map(paymentTableRow).join('')}</tbody></table>` : '<div class="payment-empty"><span>'+icon('payments')+'</span><h3>No payments found</h3><p>Try another search or create a customer case to get started.</p></div>'}</div></section></section>`;
 }
 function paymentSettingsPanel() {
   const c=paymentSettings;
@@ -1189,7 +1200,7 @@ async function retryPaymentSync() {try {await api('/api/payments-sync',{method:'
 function exportPayments() {
   const columns=['id','gateway_order_id','customer_name','customer_mobile','service_name','amount','payment_method','transaction_id','employee_name','status','created_at','verified_by','verified_at'];
   const cell=value=>'"'+String(value??'').replace(/^[=+\-@\t\r]/,"'$&").replace(/"/g,'""')+'"';
-  const csv=[columns.join(','),...paymentData.payments.map(p=>columns.map(k=>cell(k==='amount' ? (p.amount/100).toFixed(2) : p[k])).join(','))].join('\r\n');
+  const csv=[columns.join(','),...paymentCaseRows().map(p=>columns.map(k=>cell(k==='amount' ? (p.amount/100).toFixed(2) : p[k])).join(','))].join('\r\n');
   downloadPaymentAsset(URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'})),'payments.csv',true);
 }
 function downloadPaymentAsset(url,name,revoke=false) {const a=document.createElement('a');a.href=url;a.download=name;a.click();if(revoke) setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -1298,11 +1309,7 @@ function batchEligible(p) {
     !rows.some(row=>row.case_id===p.case_id && ['PAID','AWAITING_VERIFICATION'].includes(row.status));
 }
 function selectablePaymentCases() {
-  const seen=new Set();
-  return (paymentData?.payments || []).filter(p=>{
-    if(!batchEligible(p) || seen.has(p.case_id)) return false;
-    seen.add(p.case_id);return true;
-  });
+  return paymentCaseRows().filter(batchEligible);
 }
 function combinedPaymentSummary() {
   const rows=selectablePaymentCases().filter(p=>selectedPaymentCases.has(p.case_id));

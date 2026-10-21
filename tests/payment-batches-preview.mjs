@@ -18,7 +18,7 @@ try {
       if(path==='/api/services') return json({services:[],cloudUploads:true});
       if(path==='/api/notifications') return json({notifications:[]});
       if(path==='/api/cases') return json({cases:[]});
-      if(path==='/api/payments') {const q=new URL(route.request().url()).searchParams.get('q') || '';return json({payments:payments.filter(p=>p.customer_name.toLowerCase().includes(q.toLowerCase())),metrics:{}});}
+      if(path==='/api/payments') {const q=new URL(route.request().url()).searchParams.get('q') || '';return json({payments:payments.filter(p=>p.customer_name.toLowerCase().includes(q.toLowerCase())).flatMap(p=>[p,{...p,id:p.id+'-old-cancelled',status:'CANCELLED'},{...p,id:p.id+'-old-expired',status:'EXPIRED'}]),metrics:{}});}
       if(path==='/api/payment-settings') return json({receiverReady:true});
       if(path==='/api/payments/batch') {
         assert.deepEqual(route.request().postDataJSON().caseIds,['case0','case1']);
@@ -39,6 +39,7 @@ try {
     await page.locator('.profile-button').waitFor();
     await page.evaluate(()=>window.setView('payments'));
     assert.equal(await page.getByRole('button',{name:'Pay selected cases',exact:true}).isDisabled(),true);
+    assert.equal(await page.locator('.payment-table tbody tr').count(),2,'Repeated checkout attempts display one row per case');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Payment dashboard must fit the screen');
     for(const actions of await page.locator('.payment-row-actions').all()) {
       const boxes=await actions.locator('button').evaluateAll(buttons=>buttons.map(button=>{const r=button.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top};}));

@@ -84,6 +84,7 @@ test('combined checkout allocates one verified transfer across cases and protect
     assert.equal(reopened.status,201,JSON.stringify(reopened.data));
     assert.notEqual(reopened.data.payment.id,second.id);assert.equal(reopened.data.payment.amount,200);
     const [f,g,h]=await Promise.all([create(),create(),create()]);
+    const caseCount=(await request('/api/cases',sales)).data.cases.length;
     const fg=(await request('/api/payments/batch',sales,{caseIds:[f.id,g.id]})).data;
     await request('/api/payments/'+fg.id+'/initiate',sales,{method:'QR'});
     assert.equal((await request('/api/payments/batch',sales,{caseIds:[g.id,f.id]})).data.id,fg.id,'Initiating the scanner must not lock selection');
@@ -106,6 +107,7 @@ test('combined checkout allocates one verified transfer across cases and protect
     assert.ok(locked.length && locked.every(p=>p.case_payment_locked),'Filtered history also carries the authoritative verification lock');
     assert.equal((await request('/api/payments/'+fgh.data.id+'/verify',admin,{})).status,200);
     assert.equal((await request('/api/payments/batch',sales,{caseIds:[f.id,g.id]})).status,409,'Paid cases cannot be regrouped');
+    assert.equal((await request('/api/cases',sales)).data.cases.length,caseCount,'Reopening and regrouping checkouts never creates additional cases');
 
   } finally {child.kill();}
 });

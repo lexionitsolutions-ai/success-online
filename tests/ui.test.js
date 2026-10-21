@@ -510,3 +510,26 @@ test('cancelled and expired history stays selectable without charging a case twi
   assert.equal(run('batchEligible(paymentData.payments[1])'),false);
   assert.equal(run('batchEligible(paymentData.payments[2])'),false);
 });
+
+
+test('payment dashboard shows one row per case across checkout retries and keeps unpaid cases payable',()=>{
+  const {run}=client();
+  run(`me={role:'sales'};paymentData={metrics:{},payments:[
+    {id:'p1',case_id:'c1',case_ref:'CASE-1',status:'PENDING',amount:20000},
+    {id:'p2',case_id:'c2',case_ref:'CASE-2',status:'CANCELLED',amount:20000},
+    {id:'p3',case_id:'c3',case_ref:'CASE-3',status:'EXPIRED',amount:20000},
+    {id:'old1',case_id:'c1',case_ref:'CASE-1',status:'CANCELLED',amount:20000},
+    {id:'old2',case_id:'c2',case_ref:'CASE-2',status:'EXPIRED',amount:20000},
+    {id:'old3',case_id:'c3',case_ref:'CASE-3',status:'CANCELLED',amount:20000}
+  ]};`);
+  assert.equal(run('paymentCaseRows().length'),3);
+  assert.equal(run('selectablePaymentCases().length'),3);
+  const html=run('renderPayments()');
+  assert.equal((html.match(/class="payment-customer-cell"/g)||[]).length,3);
+  assert.equal((html.match(/data-payment-case=/g)||[]).length,3);
+  assert.match(html,/3 cases<\/span>/);
+  run(`paymentData.payments.push({id:'review',case_id:'c2',status:'AWAITING_VERIFICATION'}, {id:'paid',case_id:'c3',status:'PAID'});`);
+  assert.equal(run("paymentCaseRows().find(p=>p.case_id==='c2').id"),'review');
+  assert.equal(run("paymentCaseRows().find(p=>p.case_id==='c3').id"),'paid');
+  assert.equal(run('selectablePaymentCases().length'),1);
+});
