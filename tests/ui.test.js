@@ -488,3 +488,25 @@ test('sign-out clears admin caches and returns to the overview', async () => {
   assert.equal(run('adminAnalytics'),null);
   assert.equal(run('employeeData'),null);
 });
+
+
+test('cancelled and expired history stays selectable without charging a case twice',async()=>{
+  const {run}=client();
+  run(`me={role:'sales'};paymentData={payments:[
+    {id:'new1',case_id:'c1',status:'PENDING',amount:20000},
+    {id:'old1',case_id:'c1',status:'CANCELLED',amount:20000},
+    {id:'old2',case_id:'c1',status:'EXPIRED',amount:20000},
+    {id:'old3',case_id:'c2',status:'EXPIRED',amount:20000}
+  ]};selectedPaymentCases.add('c1');selectedPaymentCases.add('c2');`);
+  assert.equal(run('paymentData.payments.every(batchEligible)'),true);
+  assert.equal(run('selectablePaymentCases().length'),2);
+  assert.match(run('combinedPaymentSummary()'),/2 cases selected/);
+  assert.match(run('paymentTableRow(paymentData.payments[1])'),/type="checkbox"/);
+  assert.match(run('paymentTableRow(paymentData.payments[2])'),/type="checkbox"/);
+  run(`let sent;api=async(path,options)=>{sent=options.body.caseIds;return {id:'batch'};};showPayment=async()=>{};`);
+  await run('paySelectedCases()');
+  assert.equal(run('JSON.stringify(sent)'),JSON.stringify(['c1','c2']));
+  run(`paymentData.payments.push({id:'review',case_id:'c1',status:'AWAITING_VERIFICATION'});`);
+  assert.equal(run('batchEligible(paymentData.payments[1])'),false);
+  assert.equal(run('batchEligible(paymentData.payments[2])'),false);
+});

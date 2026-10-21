@@ -1131,7 +1131,7 @@ function paymentTableRow(p) {
   const status = ({PENDING:'Unpaid',INITIATED:'Unpaid',AWAITING_VERIFICATION:'Under review',PAID:'Verified',CANCELLED:'Cancelled checkout',EXPIRED:'Expired checkout',FAILED:'Claim rejected',REFUNDED:'Refunded'})[p.status] || p.status;
   const tone = p.status === 'PAID' ? 'success' : ['PENDING','INITIATED','AWAITING_VERIFICATION','FAILED'].includes(p.status) ? 'warning' : 'neutral';
   return `<tr class="${selectedPaymentCases.has(p.case_id) && payable ? 'payment-row-selected' : ''}">
-    <td class="payment-select-cell">${payable ? `<input type="checkbox" aria-label="Select ${h(p.customer_name)} ${h(p.case_ref)}" onchange="selectPaymentCase('${p.case_id}',this.checked)" ${selectedPaymentCases.has(p.case_id)?'checked':''}>` : '<span class="payment-selection-unavailable" aria-label="Selection unavailable">&mdash;</span>'}</td>
+    <td class="payment-select-cell">${payable ? `<input type="checkbox" data-payment-case="${h(p.case_id)}" aria-label="Select ${h(p.customer_name)} ${h(p.case_ref)}" onchange="selectPaymentCase('${p.case_id}',this.checked)" ${selectedPaymentCases.has(p.case_id)?'checked':''}>` : '<span class="payment-selection-unavailable" aria-label="Selection unavailable">&mdash;</span>'}</td>
     <td class="payment-customer-cell"><strong>${h(p.customer_name)}</strong><span class="payment-customer-phone">${h(p.customer_mobile)}</span><span class="payment-order-reference" title="${h(p.gateway_order_id)}">${h(p.case_ref || p.gateway_order_id)}</span></td>
     <td class="payment-service-cell">${h(p.service_name)}</td>
     <td class="payment-amount-cell">${money(p.amount)}</td>
@@ -1146,7 +1146,7 @@ function renderPayments() {
   const m = paymentData.metrics;
   const latest = paymentData.payments.filter((p,index,rows) => rows.findIndex(row => row.case_id === p.case_id) === index);
   const unpaid = latest.filter(p => ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) && !['Cancelled','Closed','Delivered'].includes(p.case_status) && !paymentData.payments.some(row => row.case_id === p.case_id && ['PAID','AWAITING_VERIFICATION'].includes(row.status))).length;
-  const selected = paymentData.payments.filter(p => selectedPaymentCases.has(p.case_id) && batchEligible(p)).length;
+  const selected = selectablePaymentCases().filter(p => selectedPaymentCases.has(p.case_id)).length;
   return `<section class="payments-workspace">${pageHead('Payments', 'A clear view of your collections, checkouts, and payment activity.')}
     ${me.role==='admin' ? `<section class="metric-grid compact payment-metrics">${metricCard('Verified collections',money(m.collected),'Confirmed in the receiving account','green')}${metricCard('Collected today',money(m.today),'Verified today','green')}${metricCard('Unpaid cases',number(unpaid),'Ready for payment','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting verification','amber')}${metricCard('Failed / cancelled',number(m.failed),'Checkout history')}${metricCard('Verified transfers',number(m.verified),'Individual and combined transfers','green')}</section>${paymentSettingsPanel()}` : `<section class="metric-grid payment-metrics">${metricCard('Unpaid cases',number(unpaid),'Individual or combined checkout','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting payment verification','amber')}${metricCard('Verified collections',money(m.collected),'Confirmed payments','green')}</section>`}
     ${['sales','admin'].includes(me.role) ? `<section class="payment-selection-panel"><div class="payment-selection-intro"><span class="payment-selection-icon">${icon('payments')}</span><div><h2>One payment. Multiple cases.</h2><p>Select one case to pay individually, or choose several to pay together.</p></div></div><div class="payment-selection-checkout"><p id="combinedPaymentTotal" aria-live="polite">${combinedPaymentSummary()}</p><button id="paySelectedButton" type="button" class="primary" onclick="paySelectedCases(this)" ${!selected?'disabled':''}>Pay selected cases <span aria-hidden="true">&rarr;</span></button></div></section>` : ''}
@@ -1295,15 +1295,22 @@ function batchEligible(p) {
   const rows=paymentData?.payments || [];
   return ['sales','admin'].includes(me.role) && !p.case_payment_locked && !['Cancelled','Closed','Delivered'].includes(p.case_status) &&
     ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) &&
-    rows.find(row=>row.case_id===p.case_id)?.id===p.id &&
     !rows.some(row=>row.case_id===p.case_id && ['PAID','AWAITING_VERIFICATION'].includes(row.status));
 }
+function selectablePaymentCases() {
+  const seen=new Set();
+  return (paymentData?.payments || []).filter(p=>{
+    if(!batchEligible(p) || seen.has(p.case_id)) return false;
+    seen.add(p.case_id);return true;
+  });
+}
 function combinedPaymentSummary() {
-  const rows=(paymentData?.payments || []).filter(p=>selectedPaymentCases.has(p.case_id) && batchEligible(p));
+  const rows=selectablePaymentCases().filter(p=>selectedPaymentCases.has(p.case_id));
   return `${rows.length} ${rows.length===1 ? 'case' : 'cases'} selected · ${money(rows.reduce((sum,p)=>sum+p.amount,0))} total`;
 }
 function selectPaymentCase(id,checked) {
   if(checked) selectedPaymentCases.add(id); else selectedPaymentCases.delete(id);
+  document.querySelectorAll('input[data-payment-case]').forEach(input=>{input.checked=selectedPaymentCases.has(input.dataset.paymentCase);});
   document.querySelector('#combinedPaymentTotal').textContent=combinedPaymentSummary();
   const button=document.querySelector('#paySelectedButton');
   if(button) button.disabled=!(paymentData?.payments || []).some(p=>selectedPaymentCases.has(p.case_id) && batchEligible(p));
@@ -1311,7 +1318,7 @@ function selectPaymentCase(id,checked) {
 }
 async function paySelectedCases(button) {
   if(drawerBusy || button?.disabled) return;
-  const ids=(paymentData?.payments || []).filter(p=>selectedPaymentCases.has(p.case_id) && batchEligible(p)).map(p=>p.case_id);
+  const ids=selectablePaymentCases().filter(p=>selectedPaymentCases.has(p.case_id)).map(p=>p.case_id);
   if(!ids.length) return toast('Select at least one unpaid case.');
   if(ids.length===1) {selectedPaymentCases.clear();await pay(ids[0]);return;}
   if(button) button.disabled=true;
