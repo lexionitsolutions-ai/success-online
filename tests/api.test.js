@@ -51,6 +51,8 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     for (const path of ['/api/me','/api/google/status','/api/google/sheets/status','/api/admin/dashboard?period=week','/api/customers?q=test','/api/cases']) assert.equal((await request(path, { cookie:admin })).status, 200, path);
     const services = (await request('/api/services', { cookie:sales })).data.services;
     assert.equal(services.length, 15);
+    assert.ok(services.every(service => service.variants.every(variant => variant.fields.every(field => field.type !== 'email'))));
+    assert.equal((await request('/api/admin/employees', { cookie:admin, body:{...employeeBody, name:'Employee123', username:'invalid.name'} })).status, 400);
     // Exercise checklist enforcement for every service using its conditional selectors.
     for (const service of services) {
       const v = service.variants[0];
@@ -63,6 +65,8 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     }
     const variant = services.find(s => s.slug === 'income-certificate').variants[0];
     const domicile = services.find(s => s.slug === 'domicile-certificate').variants[0];
+    assert.equal(services.find(s => s.slug === 'domicile-certificate').name, 'Age Nationality & Domicile Certificate');
+    assert.ok(domicile.fields.every(field => field.label !== 'Applicant birth place'));
     assert.equal(domicile.documents[1].label,'Father Aadhaar Card');
     assert.match(domicile.documents.find(doc=>doc.label==='Photo').note,/Photo of the beneficiary/);
     assert.match(domicile.documents.find(doc=>doc.label==='School Leaving Certificate').note,/School Leaving Certificate of the beneficiary/);
@@ -80,6 +84,26 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal(adult.data.case.details['Applicant birth date'],undefined);
     assert.equal(adult.data.case.details['Applicant or beneficiary'],undefined);
     const payload = { variantId:variant.id, customer:{ name:'Trial Customer', mobile:'9876543210' }, details:{ 'Years of Certificate Required':'1 year','Reason for application':'Banking', 'Income amount required on certificate (₹)':'150000', 'Ration card colour':'Yellow', 'Ration card area':'City' }, consent:true };
+    const annualFields = variant.fields.filter(field => field.when?.equals === '3 years');
+    assert.equal(annualFields.length, 3);
+    const annualDetails = { ...payload.details, 'Years of Certificate Required':'3 years', ...Object.fromEntries(annualFields.map((field, index) => [field.label, String(100000 + index * 50000)])) };
+    for (const field of annualFields) {
+      for (const value of ['', '-1', 'not a number']) {
+        assert.equal((await request('/api/cases', { cookie:sales, body:{...payload, details:{...annualDetails, [field.label]:value}} })).status, 400);
+      }
+    }
+    const annualCase = await request('/api/cases', { cookie:sales, body:{...payload, details:annualDetails} });
+    assert.equal(annualCase.status, 201);
+    for (const field of annualFields) assert.equal(annualCase.data.case.details[field.label], annualDetails[field.label]);
+    assert.equal(annualCase.data.case.details['Income amount required on certificate (₹)'], undefined);
+    assert.equal((await request('/api/cases', { cookie:sales, body:{...payload, customer:{...payload.customer, name:'Trial123'}} })).status, 400);
+    const passport = services.find(service => service.slug === 'passport').variants[0];
+    assert.equal((await request('/api/cases', { cookie:sales, body:{...payload, variantId:passport.id, details:{'Father name':'Father123'}} })).status, 400);
+    for (const reason of ['Education','Hospital']) {
+      const result = await request('/api/cases', { cookie:sales, body:{...payload, details:{...payload.details, 'Reason for application':reason}} });
+      assert.equal(result.status, 201);
+      assert.equal(result.data.case.details['Reason for application'], reason);
+    }
     for (const amount of ['-1','not a number']) assert.equal((await request('/api/cases',{cookie:sales,body:{...payload,details:{...payload.details,'Income amount required on certificate (₹)':amount}}})).status,400);
     assert.equal((await request('/api/cases', { cookie:sales, body:{ ...payload, consent:false } })).status, 400);
     assert.equal((await request('/api/cases', { cookie:sales, body:{ ...payload, details:{} } })).status, 400);
@@ -131,7 +155,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal((await request(path + '/progress', { cookie:admin, body:{status:'Ready for Assignment'} })).status, 409);
     const firstDoc = item.documents[0];
     const previewPath=firstDoc.download_url.replace('/download','/preview');
-    assert.equal((await request(previewPath,{cookie:sales})).status,403);
+    assert.equal((await request(previewPath,{cookie:sales})).status,200);
     assert.equal((await request(previewPath,{cookie:otherSales})).status,403);
     const preview=await request(previewPath,{cookie:office});
     assert.equal(preview.status,200);
@@ -140,7 +164,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal(inline.status,200);
     assert.match(inline.headers.get('content-disposition'),/^inline;/);
     assert.deepEqual(Buffer.from(await inline.arrayBuffer()),pdf);
-    assert.equal((await request(preview.data.url,{cookie:sales})).status,403);
+    assert.equal((await request(preview.data.url,{cookie:sales})).status,200);
     assert.equal((await request(previewPath,{cookie:admin})).status,200);
     const download = await fetch(origin + firstDoc.download_url, { headers:{cookie:office} });
     assert.equal(download.status, 200); assert.deepEqual(Buffer.from(await download.arrayBuffer()), pdf);

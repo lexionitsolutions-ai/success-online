@@ -1,17 +1,28 @@
 const doc = (label, note = '', when) => ({ label, required: true, note, ...(when ? { when } : {}) });
 const field = (label, type = 'text', options) => ({ label, type, ...(options ? { options } : {}) });
+const incomeAmount = label => ({ ...field(label, 'number'), min: 0, step: '0.01', inputMode: 'decimal', placeholder: 'e.g. 150000' });
+const today = new Date();
+const financialYear = Number(today.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', year: 'numeric' })) - (Number(today.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', month: 'numeric' })) < 4 ? 1 : 0);
+const incomeYears = [3, 2, 1].map(offset => `${financialYear - offset}-${financialYear - offset + 1}`);
 
 export const serviceCatalog = [
   {
     name: 'Income Certificate', slug: 'income-certificate', description: 'Income certificate application assistance.', serviceCharge: 20000,
     instructions: 'For white ration card holders, Form 16 or ITR is required. Talathi report is required for rural ration card holders.',
-    fields: [field('Years of Certificate Required', 'select', ['1 year', '3 years']), { ...field('Income amount required on certificate (₹)', 'number'), min: 0, step: '0.01', inputMode: 'decimal', placeholder: 'e.g. 150000' }, field('Reason for application', 'select', ['Banking', 'Ration Card', 'Government Schemes', 'Other']), { ...field('Other reason (please specify)'), required: true, when: { field: 'Reason for application', equals: 'Other' } }, field('Ration card colour', 'select', ['Yellow', 'Orange', 'White']), field('Ration card area', 'select', ['City', 'Village'])],
+    fields: [
+      field('Years of Certificate Required', 'select', ['1 year', '3 years']),
+      { ...incomeAmount('Income amount required on certificate (₹)'), displayLabel: `${incomeYears.at(-1)} income required (₹)`, when: { field: 'Years of Certificate Required', equals: '1 year' } },
+      ...incomeYears.map(year => ({ ...incomeAmount(`${year} income required (₹)`), required: true, when: { field: 'Years of Certificate Required', equals: '3 years' } })),
+      field('Reason for application', 'select', ['Banking', 'Ration Card', 'Government Schemes', 'Education', 'Hospital', 'Other']),
+      { ...field('Other reason (please specify)'), required: true, when: { field: 'Reason for application', equals: 'Other' } },
+      field('Ration card colour', 'select', ['Yellow', 'Orange', 'White']), field('Ration card area', 'select', ['City', 'Village'])
+    ],
     documents: [doc('Aadhaar Card'), doc('Photo'), doc('Ration Card'), doc('Form 16 / ITR', 'Required for white ration card holders.', { field: 'Ration card colour', equals: 'White' }), { ...doc('Talathi Report', 'Required for ration card holders in villages. Add a photo of each page, or upload a PDF.', { field: 'Ration card area', equals: 'Village' }), multiple: true }]
   },
   {
-    name: 'Age, Nationality & Domicile Certificate', slug: 'domicile-certificate', description: 'Age, nationality and domicile certificate assistance.', serviceCharge: 20000,
+    name: 'Age Nationality & Domicile Certificate', slug: 'domicile-certificate', description: 'Age nationality and domicile certificate assistance.', serviceCharge: 20000,
     instructions: 'Applicants under 18 need Aadhaar cards for both the applicant and father. The family proof should be dated at least 15 years ago; school leaving certificate must show place and date of birth.',
-    fields: [field('Applicant under 18?', 'select', ['Yes', 'No']), { ...field('Applicant', 'select', ['Father', 'Mother', 'Guardian']), when: { field: 'Applicant under 18?', equals: 'Yes' }, defaultWhen: { field: 'Applicant under 18?', equals: 'No', value: 'Self' } }, field('Applicant birth place')],
+    fields: [field('Applicant under 18?', 'select', ['Yes', 'No']), { ...field('Applicant', 'select', ['Father', 'Mother', 'Guardian']), when: { field: 'Applicant under 18?', equals: 'Yes' }, defaultWhen: { field: 'Applicant under 18?', equals: 'No', value: 'Self' } }],
     documents: [doc('Applicant Aadhaar Card', 'For applicants under 18, upload both applicant and father Aadhaar cards.'), doc('Father Aadhaar Card', 'Required for applicants under 18.', { field: 'Applicant under 18?', equals: 'Yes' }), doc('Photo', 'Photo of the beneficiary.'), doc('Ration Card'), doc('School Leaving Certificate', 'School Leaving Certificate of the beneficiary. Must show place and date of birth.'), doc('Family Member Address Proof (15+ years old)', 'Electricity bill, gas passbook, driving licence, or voter ID belonging to a family member.')]
   },
   {
@@ -37,13 +48,13 @@ export const serviceCatalog = [
   },
   {
     name: 'Shop Act / Udyam Aadhaar', slug: 'shop-act-udyam', description: 'Shop Act and Udyam Aadhaar assistance.',
-    fields: [field('Shop name'), field('Email', 'email'), field('Business start date', 'date'), field('Shop address'), field('Owned or rented', 'select', ['Owned', 'Rented']), field('Number of workers', 'number'), field('Business type'), field('Years at Aadhaar address', 'number'), field('Shop size (sq. ft.)', 'number'), field('Business investment', 'number')],
+    fields: [field('Shop name'), field('Business start date', 'date'), field('Shop address'), field('Owned or rented', 'select', ['Owned', 'Rented']), field('Number of workers', 'number'), field('Business type'), field('Years at Aadhaar address', 'number'), field('Shop size (sq. ft.)', 'number'), field('Business investment', 'number')],
     documents: [doc('Owner Aadhaar Card'), doc('Owner Photo'), doc('Owner Signature Image'), doc('Owner PAN Card'), doc('Shop Board Photo')]
   },
   {
     name: 'Caste Validity Certificate', slug: 'caste-validity', description: 'Caste validity certificate application assistance.',
     instructions: 'Historical evidence cutoffs in the source PDF: OBC / SEBC / SBC before 1967; VJNT before 1961; SC / ST before 1950. Upload relative caste validity record only if one exists.',
-    fields: [field('Mobile', 'tel'), field('Email', 'email'), field('Kuldev'), field('Surname (as requested in form)'), field('Applicant education: standards 1–4, school and years'), field('Applicant education: standards 5–8, school and years'), field('Applicant education: standards 9–10, school and years'), field('Applicant education: standards 11–12, college and years'), field('Father education: standards 1–4, school and years'), field('Father education: standards 5–8, school and years'), field('Father education: standards 9–10, school and years'), field('Father education: standards 11–12, college and years'), field('Father graduation details')],
+    fields: [field('Mobile', 'tel'), field('Kuldev'), field('Surname (as requested in form)'), field('Applicant education: standards 1–4, school and years'), field('Applicant education: standards 5–8, school and years'), field('Applicant education: standards 9–10, school and years'), field('Applicant education: standards 11–12, college and years'), field('Father education: standards 1–4, school and years'), field('Father education: standards 5–8, school and years'), field('Father education: standards 9–10, school and years'), field('Father education: standards 11–12, college and years'), field('Father graduation details')],
     documents: [doc('Applicant Aadhaar Card'), doc('Applicant School Leaving Certificate'), doc('Applicant Photo'), doc('Applicant Caste Certificate'), doc('Form 15A'), doc('Father School Leaving Certificate / Bonafide'), doc('Ration Card'), doc('Father Photo'), doc('Father Aadhaar Card'), doc('Relative School Leaving Certificate / Bonafide (pre-1967)', 'Grandfather, aunt, or uncle record, as applicable.'), doc('Historical Revenue Proof (pre-1967)', 'Property card, house assessment, or electoral roll.'), doc('Family Member Caste Validity Record', 'Only if a family member already has caste validity.'), doc('Applicant Signature Image'), doc('Father Signature Image'), doc('Live Photo')]
   },
   {
@@ -58,7 +69,7 @@ export const serviceCatalog = [
   },
   {
     name: 'Passport', slug: 'passport', description: 'Passport application assistance.',
-    fields: [field('Mobile', 'tel'), field('Email', 'email'), field('Qualification'), field('Father name'), field('Mother name'), field('Husband / Wife name'), field('Emergency contact name'), field('Emergency contact number', 'tel'), field('Police Station'), field('Birth place')],
+    fields: [field('Mobile', 'tel'), field('Qualification'), field('Father name'), field('Mother name'), field('Husband / Wife name'), field('Emergency contact name'), field('Emergency contact number', 'tel'), field('Police Station'), field('Birth place')],
     documents: [doc('Aadhaar Card'), doc('PAN Card')]
   },
   {

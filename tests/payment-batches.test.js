@@ -69,6 +69,17 @@ test('combined checkout allocates one verified transfer across cases and protect
     const [d,e]=await Promise.all([create(),create()]);
     const second=(await request('/api/payments/batch',sales,{caseIds:[d.id,e.id]})).data;
     assert.equal((await request('/api/payments/'+second.id+'/cancel',sales,{})).data.payment.status,'CANCELLED');
+    const cancelledRows=(await request('/api/payments',sales)).data.payments.filter(p=>p.batch_id===second.id);
+    assert.equal(cancelledRows.length,2);
+    assert.ok(cancelledRows.every(p=>p.batch_status==='CANCELLED' && p.status==='CANCELLED'));
+    const single=await request('/api/cases/'+d.id+'/payment-order',sales,{});
+    assert.equal(single.status,201);
+    assert.equal(single.data.batch,undefined,'A cancelled group permits an individual checkout');
+    assert.notEqual(single.data.id,d.payment.id);
+    const regrouped=await request('/api/payments/batch',sales,{caseIds:[d.id,e.id]});
+    assert.equal(regrouped.status,201,JSON.stringify(regrouped.data));
+    assert.equal(regrouped.data.amount,200);
+    assert.equal((await request('/api/payments/'+regrouped.data.id+'/cancel',sales,{})).status,200);
     const reopened=await request('/api/payments/'+second.id+'/reopen',sales,{});
     assert.equal(reopened.status,201,JSON.stringify(reopened.data));
     assert.notEqual(reopened.data.payment.id,second.id);assert.equal(reopened.data.payment.amount,200);

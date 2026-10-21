@@ -19,6 +19,27 @@ function client() {
   return { context, run: source => vm.runInContext(source, context) };
 }
 
+test('customer intake omits email and removes numbers from typed or pasted names', () => {
+  const { context, run } = client();
+  assert.doesNotMatch(run('wizardBody()'), /email/i);
+  context.nameInput = { value: "Asha123 Patil\u0967\u0968" };
+  run('removeNameNumbers(nameInput)');
+  assert.equal(context.nameInput.value, 'Asha Patil');
+  const fields = { '#name': { value: 'Asha Patil' }, '#mobile': { value: '9876543210' }, '#address': { value: 'Pune' } };
+  for (const [selector, input] of Object.entries(fields)) Object.assign(input, {
+    id: selector.slice(1), dataset: {}, closest: () => null,
+    classList: { toggle() {} }, setAttribute() {}, removeAttribute() {},
+    checkValidity: () => true, focus() {}
+  });
+  context.document.querySelector = selector => fields[selector];
+  run('saveStep1()');
+  assert.equal(run('draft.step'), 2);
+  assert.equal(run("Object.hasOwn(draft.customer, 'email')"), false);
+  fields['#name'].value = 'Asha123';
+  run('draft.step = 1; saveStep1()');
+  assert.equal(run('draft.step'), 1);
+});
+
 test('unpaid payment label preserves existing workflow values and warning styling',()=>{
   const {run}=client();
   assert.match(run("statusBadge('Awaiting Payment')"),/Unpaid Payment/);
@@ -83,7 +104,7 @@ test('background updates avoid unnecessary redraws and defer changed lists until
   assert.equal(run('redraws'),1);
 });
 
-test('backoffice and admin get document preview actions while sales keeps existing actions',()=>{
+test('sales, backoffice and admin get saved document preview actions',()=>{
   const {context,run}=client();
   context.location={origin:'https://example.test'};
   run("me={role:'backoffice'};const previewDoc={id:'d1',doc_type:'Photo',mime_type:'image/png',download_url:'/api/documents/d1/download'};const previewCase={id:'c1',ref:'SO1',status:'Assigned',customer:{name:'Client'}};");
@@ -91,8 +112,31 @@ test('backoffice and admin get document preview actions while sales keeps existi
   run("me.role='admin';previewDoc.mime_type='application/pdf'");
   assert.match(run('documentActions(previewCase,previewDoc)'),/Preview/);
   run("me.role='sales'");
-  assert.doesNotMatch(run('documentActions(previewCase,previewDoc)'),/previewDocument/);
+  assert.match(run('documentActions(previewCase,previewDoc)'),/previewDocument/);
   assert.match(run('documentActions(previewCase,previewDoc)'),/Download/);
+});
+
+test('cancelled combined checkouts can be selected again, with one case or several', async () => {
+  const { run } = client();
+  run(`me={role:'sales'};paymentData={payments:[
+    {id:'p1',case_id:'c1',batch_id:'old',batch_status:'CANCELLED',status:'CANCELLED'},
+    {id:'p2',case_id:'c2',batch_id:'old',batch_status:'CANCELLED',status:'CANCELLED'}
+  ]};`);
+  assert.equal(run('paymentData.payments.every(batchEligible)'), true);
+  run("paymentData.payments[0].batch_status='PENDING'");
+  assert.equal(run('batchEligible(paymentData.payments[0])'), false);
+  run("paymentData.payments[0].batch_status='CANCELLED';paymentData.payments.push({id:'paid',case_id:'c1',status:'PAID'})");
+  assert.equal(run('batchEligible(paymentData.payments[0])'), false);
+  run("paymentData.payments.pop();selectedPaymentCases.add('c2');let paidCase;pay=async id=>{paidCase=id;}");
+  await run('paySelectedCases()');
+  assert.equal(run('paidCase'), 'c2');
+});
+
+test('opening Payments does not wait for the background case-list refresh', async () => {
+  const { run } = client();
+  run("me={role:'sales'};closeDrawer=()=>{};render=()=>{};refreshCaseUpdates=()=>new Promise(()=>{});let paymentsLoaded=false;refreshPayments=async()=>{paymentsLoaded=true;}");
+  await run("setView('payments')");
+  assert.equal(run('paymentsLoaded'), true);
 });
 
 

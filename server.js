@@ -602,7 +602,6 @@ async function routeApi(req, res, url) {
   const documentMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/(download|preview|view)$/);
   if (req.method === 'GET' && documentMatch) {
     const preview = documentMatch[2] !== 'download';
-    if (preview && !['backoffice','admin'].includes(user.role)) return send(res,403,{error:'Only back office or admin can preview documents'});
     const document = (await one('SELECT * FROM documents WHERE id=$id AND state!=$state', { $id: documentMatch[1], $state: 'replaced' }));
     if (!document) return send(res, 404, { error: 'Document not found' });
     const c = (await one('SELECT * FROM cases WHERE id=$id', { $id: document.case_id }));
@@ -745,6 +744,7 @@ async function routeApi(req, res, url) {
     if (!variant || !variant.active) return send(res, 400, { error: 'Choose an active service request type' });
     if (b.consent !== true) return send(res, 400, { error: 'Customer consent is required' });
     if (!b.customerId && (!String(b.customer?.name || '').trim() || !/^[6-9]\d{9}$/.test(b.customer?.mobile || ''))) return send(res, 400, { error: 'Customer name and a valid 10-digit Indian mobile number are required' });
+    if (!b.customerId && /\p{N}/u.test(b.customer?.name || '')) return send(res, 400, { error: 'Customer name cannot contain numbers' });
     if (b.customerId && !(await one('SELECT id FROM customers WHERE id=$id AND ($admin=1 OR created_by=$user)', { $id: b.customerId, $admin: user.role === 'admin' ? 1 : 0, $user: user.id }))) return send(res, 404, { error: 'Customer not found' });
     const fields = json(variant, 'fields_json', []);
     b.details ||= {};
@@ -754,6 +754,7 @@ async function routeApi(req, res, url) {
     for (const field of fields) {
       if (field.when && b.details?.[field.when.field] !== field.when.equals) continue;
       const value = String(b.details?.[field.label] ?? '').trim();
+      if (/\bname\b|\bsurname\b/i.test(field.label) && /\p{N}/u.test(value)) return send(res, 400, { error: `${field.label} cannot contain numbers` });
       if (field.required && !value) return send(res, 400, { error: `Enter ${field.label}` });
       if (field.type === 'select' && !field.options.includes(value)) return send(res, 400, { error: `Choose ${field.label}` });
       if (value && field.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return send(res, 400, { error: `Invalid ${field.label}` });
@@ -1034,6 +1035,7 @@ async function routeApi(req, res, url) {
     if (req.method === 'POST') return body(req).then(async b => {
       const username = String(b.username || '').trim().toLowerCase();
       const name = String(b.name || '').trim();
+      if (/\p{N}/u.test(name)) return send(res, 400, { error: 'Name cannot contain numbers' });
       if (!['sales','backoffice'].includes(b.role) || !name || name.length > 100 || !/^[a-z0-9._-]{3,50}$/.test(username) || typeof b.password !== 'string' || b.password.length < 10 || b.password.length > 128) return send(res, 400, { error: 'Enter a name, sales/back-office role, username (3–50 letters, numbers, dots, underscores or hyphens), and password (10–128 characters).' });
       if ((await one('SELECT id FROM users WHERE username=$username COLLATE NOCASE', { $username: username }))) return send(res, 409, { error: 'Username already exists' });
       const employee = { id: id('usr'), username, name, role: b.role, active: 1 };
@@ -1124,12 +1126,25 @@ export async function handler(req, res) {
     const documentRequest = req.method==='POST' && (url.pathname==='/api/cases' || /\/api\/cases\/[^/]+\/(documents|finish-uploads)$/.test(url.pathname));
     const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|submit-received-document)$/.test(url.pathname);
     const paymentRequest = /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/payment-order$/.test(url.pathname);
-    await deferredDrive.run(driveJobs, () => deferredSheets.run(sheetsJobs, () => db.transaction(async () => {
-      if (db.cloud) for (const setting of await all('SELECT name,value FROM integration_settings')) process.env[setting.name] = setting.value;
-      servicePrices=new Map((await all('SELECT variant_id,price,original_config FROM service_prices')).map(p=>[p.variant_id,{price:p.price,original:JSON.parse(p.original_config)}]));
+    const readOnly = (req.method === 'GET' && (
+      ['/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments'].includes(url.pathname) ||
+      /^\/api\/cases\/[^/]+$/.test(url.pathname) || /^\/api\/documents\/[^/]+\/(download|preview|view)$/.test(url.pathname)
+    )) || (req.method === 'POST' && ['/api/login','/api/logout'].includes(url.pathname));
+    const route = async () => {
+      // List screens do not need to reload payment configuration or hold a
+      // transaction connection while independent related records are fetched.
+      if (!readOnly || url.pathname === '/api/services') {
+        const [settings, prices] = await Promise.all([
+          db.cloud ? all('SELECT name,value FROM integration_settings') : [],
+          all('SELECT variant_id,price,original_config FROM service_prices')
+        ]);
+        for (const setting of settings) process.env[setting.name] = setting.value;
+        servicePrices=new Map(prices.map(p=>[p.variant_id,{price:p.price,original:JSON.parse(p.original_config)}]));
+      }
       if (db.cloud && (/^\/api\/payments\//.test(url.pathname) || /\/payment-order$/.test(url.pathname))) await one('SELECT pg_advisory_xact_lock(73194204)');
       await routeApi(req, buffered, url);
-    })));
+    };
+    await deferredDrive.run(driveJobs, () => deferredSheets.run(sheetsJobs, () => readOnly && db.cloud ? route() : db.transaction(route)));
     const syncWork = async () => {
       await Promise.all([...driveJobs].map(caseId=>performDriveSync(caseId)));
       const reportingJobs=new Set([...sheetsJobs,...(process.env.SHEETS_MODE==='live'?[...driveJobs]:[])]);

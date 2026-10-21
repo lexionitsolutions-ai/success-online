@@ -29,3 +29,9 @@
 
 .document-preview-body.document-preview-pdf{align-items:stretch;justify-content:stretch}.pdf-preview-page{display:block;min-width:0}.pdf-preview-page canvas{margin:0 auto}
 @media(max-width:600px){.pdf-preview-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;text-align:center}}
+
+#serviceFields > .income-year-field{grid-column:1 / -1}
+
+#wizard .field-invalid{background:#fff1f2;border-color:#e5a0a7}#wizard .field-invalid:focus{border-color:#c64b5a;box-shadow:0 0 0 3px rgba(198,75,90,.12)}#wizard .field-warning{display:block;margin-top:2px;padding:7px 10px;border-radius:6px;background:#fff1f2;color:#a32638;font-size:12px;font-weight:600;line-height:1.5}
+
+.selected-pages li > span{flex:1;min-width:0}

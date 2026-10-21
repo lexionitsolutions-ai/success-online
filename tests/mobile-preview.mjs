@@ -26,7 +26,7 @@ try {
     const contextCases=structuredClone(cases);
     let contextNotices=[];
     let previewFailure=false;
-    const previewDocuments=['backoffice','admin'].includes(role)?[{id:'preview-photo',doc_type:'Photo',file_name:'beneficiary.png',mime_type:'image/png',state:'uploaded',version:1,download_url:'/api/documents/preview-photo/download'},{id:'preview-pdf',doc_type:'Ration Card',file_name:'ration-card.pdf',mime_type:'application/pdf',state:'uploaded',version:1,download_url:'/api/documents/preview-pdf/download'}]:[];
+    const previewDocuments=['sales','backoffice','admin'].includes(role)?[{id:'preview-photo',doc_type:'Photo',file_name:'beneficiary.png',mime_type:'image/png',state:'uploaded',version:1,download_url:'/api/documents/preview-photo/download'},{id:'preview-pdf',doc_type:'Ration Card',file_name:'ration-card.pdf',mime_type:'application/pdf',state:'uploaded',version:1,download_url:'/api/documents/preview-pdf/download'}]:[];
     await context.route('**/*',async route=>{
       const path=new URL(route.request().url()).pathname;
       const json=(data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
@@ -35,7 +35,7 @@ try {
       if(path==='/api/logout') {signedIn=false;return json({ok:true});}
       if(path==='/api/notifications') return json({notifications:contextNotices});
       if(path==='/api/notifications/read') {const ids=route.request().postDataJSON().ids;contextNotices=contextNotices.filter(notice=>!ids.includes(notice.id));return json({ok:true});}
-      if(path==='/api/services') return json({services,demoPayments:true,cloudUploads:false});
+      if(path==='/api/services') return json({services,demoPayments:true,cloudUploads:process.env.CLOUD_PREVIEW==='1'});
       if(path==='/api/cases') return json({cases:contextCases});
       if(path==='/api/cases/case1') return json({case:contextCases[0],documents:previewDocuments,notes:contextCases[0].status==='Correction Required'?[{new_status:'Correction Required',note:'Replace the blurry Ration Card photo',actor:'Operations'}]:[]});
       if(path==='/api/documents/preview-photo/preview' || path==='/api/documents/preview-pdf/preview') {if(previewFailure) return json({error:'Document preview temporarily unavailable'},502);const pdf=path.includes('preview-pdf');return json({url:pdf?'/fixtures/preview.pdf':'/fixtures/preview.png',mimeType:pdf?'application/pdf':'image/png',fileName:pdf?'ration-card.pdf':'beneficiary.png'});}
@@ -46,7 +46,7 @@ try {
       if(path==='/api/admin/dashboard') return json({metrics:{collected:500000,payments:12,businessRevenue:200000,newCases:15,completed:9,outstanding:150000},operations:{active:12,ready:3,missingDocuments:4,unpaid:5,followUpsDue:1,syncFailures:0},trend:[],statusBreakdown:[],servicePerformance:[],staffPerformance:{sales:[{...employee('sales'),cases:12,completed:7,collected:500000}],backoffice:[{...employee('backoffice'),assigned:8,completed:7,active:3}]},recentPayments:[]});
       if(path.startsWith('/api/google')) return json({configured:false,connected:false,live:false});
       if(path.startsWith('/vendor/pdfjs/') && !path.includes('..')) return route.fulfill({contentType:path.endsWith('.mjs')?'application/javascript':path.endsWith('.wasm')?'application/wasm':'application/octet-stream',body:readFileSync(join('public',path.slice(1)))});
-      const file={'/':'index.html','/script.js':'script.js','/styles.css':'styles.css','/mobile.css':'mobile.css'}[path];
+      const file={'/':'index.html','/script.js':'script.js','/styles.css':'styles.css','/mobile.css':'mobile.css','/dashboard.css':'dashboard.css'}[path];
       if(file) return route.fulfill({contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:readFileSync(join('public',file),'utf8')});
       return route.abort();
     });
@@ -98,7 +98,7 @@ try {
     await page.locator('#drawer').waitFor();
     if(width===390) await page.screenshot({path:join(root,role+'-documents.png')});
     assert.ok(await page.locator('.panel').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'Drawer overflows');
-    if(['backoffice','admin'].includes(role)) {
+    if(['sales','backoffice','admin'].includes(role)) {
       let downloads=0;page.on('download',()=>downloads++);
       const photoButton=page.getByRole('button',{name:'Preview Photo',exact:true});
       await photoButton.click();
@@ -203,10 +203,11 @@ try {
       await otherReason.fill('Education admission');
       await reason.selectOption('Banking');
       const colourOptions=await page.locator('[data-field="Ration%20card%20colour"]').locator('option').allTextContents();
-      assert.deepEqual(colourOptions.slice(1),['\u{1F7E1} Yellow','\u{1F7E0} Orange','\u26AA White']);
+      assert.deepEqual(colourOptions.slice(1),['\u{1F7E1} Yellow (PHH)','\u{1F7E0} Orange (PHH/NPH)','\u26AA White (APL)']);
       assert.deepEqual(await page.locator('[data-field="Ration%20card%20area"]').locator('option').allTextContents(),['Choose…','City','Village']);
       const selectors=page.locator('#serviceFields select');
-      const incomeAmount=page.getByLabel('Income amount required on certificate (₹)',{exact:true});
+      await page.locator('[data-field="Years%20of%20Certificate%20Required"]').selectOption('1 year');
+      const incomeAmount=page.locator('[data-field="Income%20amount%20required%20on%20certificate%20(%E2%82%B9)"]');
       assert.equal(await incomeAmount.getAttribute('inputmode'),'decimal');
       await incomeAmount.fill('150000');
       for(let index=0;index<await selectors.count();index++) await selectors.nth(index).selectOption({index:1});
@@ -218,9 +219,15 @@ try {
       {
         const files=page.locator('#drawer input[type="file"]:not([multiple])');
         for(let index=0;index<await files.count();index++) {
-          await files.nth(index).setInputFiles({name:'trial.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\ntrial\n%%EOF')});
+          await files.nth(index).setInputFiles({name:'trial.pdf',mimeType:'application/pdf',buffer:Buffer.from(previewPDF)});
           await page.waitForFunction(expected=>[...document.querySelectorAll('#drawer .doc em')].filter(el=>el.textContent==='trial.pdf').length===expected,index+1);
         }
+        await page.locator('.selected-pages').first().getByRole('button',{name:'Preview',exact:true}).click();
+        await page.locator('#documentPreview canvas[data-rendered="1"]').waitFor();
+        await page.getByRole('button',{name:'Next PDF page',exact:true}).click();
+        await page.locator('#documentPreview canvas[data-rendered="2"]').waitFor();
+        await page.getByRole('button',{name:'Close preview',exact:true}).click();
+        assert.ok(await page.locator('.panel').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'Selected files and preview controls must fit');
         await page.getByRole('button',{name:'Remove Ration Card',exact:true}).click();
         assert.equal(await page.getByRole('button',{name:'Remove Ration Card',exact:true}).count(),0);
         assert.equal(await page.locator('#drawer').getByRole('button',{name:'Continue',exact:true}).isDisabled(),true);
@@ -231,6 +238,10 @@ try {
         const pagePhoto=index=>({name:`report-page-${index}.png`,mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aSU8AAAAASUVORK5CYII=','base64')});
         await page.locator('#drawer input[multiple]').setInputFiles([pagePhoto(1),pagePhoto(2),pagePhoto(3)]);
         await report.locator('.selected-pages li').nth(2).waitFor();
+        await report.locator('.selected-pages li').nth(2).getByRole('button',{name:'Preview',exact:true}).click();
+        await page.waitForFunction(()=>document.querySelector('#documentPreview img')?.naturalWidth>0);
+        await page.screenshot({path:join(root,`sales-staged-preview-${width}.png`)});
+        await page.getByRole('button',{name:'Close preview',exact:true}).click();
         await page.locator('#drawer input[multiple]').setInputFiles([pagePhoto(4)]);
         await report.locator('.selected-pages li').nth(3).waitFor();
         if(width<=900) assert.ok((await page.getByRole('button',{name:'Remove page 4',exact:true}).boundingBox()).height>=44,'Remove controls must be easy to tap');

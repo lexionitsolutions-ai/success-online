@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import './generate-apps-script.js';
 import './generate-supabase-schema.js';
 import './vendor-pdfjs.js';
-const required = ['server.js','service-catalog.js','public/index.html','public/app.js','public/styles.css','public/mobile.css','.env.example','google-apps-script/Code.gs','README.md'];
+const required = ['server.js','service-catalog.js','public/index.html','public/app.js','public/styles.css','public/mobile.css','public/dashboard.css','.env.example','google-apps-script/Code.gs','README.md'];
 const missing = required.filter(f => !existsSync(f));
 if (missing.length) {
   console.error('Missing files:', missing.join(', '));

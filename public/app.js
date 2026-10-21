@@ -1,3 +1,5 @@
+function removeNameNumbers(input) { input.value = input.value.replace(/\p{N}/gu, ''); }
+
 const app = document.querySelector('#app');
 
 let me = null;
@@ -252,7 +254,7 @@ async function markCaseUpdatesRead(caseId) {
   } catch { /* Keep unread indicators until acknowledgement succeeds. */ }
 }
 async function refreshCaseUpdates() {
-  if (!me || updatesInFlight || document.hidden) return;
+  if (!me || updatesInFlight || document.hidden || drawerBusy) return;
   const userId = me.id;
   updatesInFlight = true;
   try {
@@ -298,7 +300,7 @@ function renderDashboard() {
     <section class="metric-grid">
       ${metricCard('Open cases', number(mine.filter(item => !['Closed','Delivered','Cancelled'].includes(item.status)).length), 'Currently active')}
       ${metricCard('Missing documents', number(mine.filter(item => item.document_state === 'missing').length), 'Customer follow-up needed', 'amber')}
-      ${metricCard('Payment pending', number(mine.filter(item => item.payment_state === 'unpaid').length), 'Awaiting collection', 'blue')}
+      ${metricCard('Payment pending', number(mine.filter(item => ['unpaid','PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(item.payment?.status || item.payment_state)).length), 'Awaiting collection', 'blue')}
       ${metricCard('Ready to assign', number(c['Ready for Assignment'] || 0), 'Available to operations', 'green')}
     </section>
     <section class="section-head"><div><h2>Needs attention</h2><p>Most recently updated cases in your workload.</p></div><button class="text-button" onclick="setView('cases')">View all cases</button></section>
@@ -406,7 +408,7 @@ function renderEmployees() {
     <details class="metric-help"><summary>How performance is measured</summary><p class="muted">New cases, collections, handled cases and completions use the selected period. Active and overdue counts show current workload. Turnaround is measured from case creation to completion. Custom dates include the whole end date in India time.</p></details>
     <section class="section-head"><h2>Sales employees</h2></section>${table('sales')}
     <section class="section-head"><h2>Back-office employees</h2></section>${table('backoffice')}
-    <section class="analytics-panel employee-create"><h2>Create employee</h2><p>Set credentials for a new sales or back-office employee.</p><form onsubmit="createEmployee(event)"><div class="formgrid"><label>Full name<input name="name" required maxlength="100" autocomplete="off"></label><label>Role<select name="role"><option value="sales">Sales</option><option value="backoffice">Back office</option></select></label><label>Username<input name="username" required pattern="[A-Za-z0-9._-]{3,50}" minlength="3" maxlength="50" autocomplete="off"></label><label>Password<input name="password" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></label></div><div class="form-actions"><button class="primary">Create employee</button></div><p class="muted" role="status" id="employeeResult"></p></form></section>`;
+    <section class="analytics-panel employee-create"><h2>Create employee</h2><p>Set credentials for a new sales or back-office employee.</p><form onsubmit="createEmployee(event)"><div class="formgrid"><label>Full name<input name="name" oninput="removeNameNumbers(this)" required maxlength="100" autocomplete="off"></label><label>Role<select name="role"><option value="sales">Sales</option><option value="backoffice">Back office</option></select></label><label>Username<input name="username" required pattern="[A-Za-z0-9._-]{3,50}" minlength="3" maxlength="50" autocomplete="off"></label><label>Password<input name="password" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></label></div><div class="form-actions"><button class="primary">Create employee</button></div><p class="muted" role="status" id="employeeResult"></p></form></section>`;
 }
 
 function toggleEmployeeDates(period) {
@@ -482,12 +484,12 @@ function drawWizard() {
 }
 
 function wizardBody(service, variant) {
-  if (draft.step === 1) return `<div class="formgrid"><label>Full name<input id="name" autocomplete="name" value="${h(draft.customer.name || '')}"></label><label>Mobile number<input id="mobile" type="tel" inputmode="numeric" maxlength="10" pattern="[0-9]{10}" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" autocomplete="tel-national" placeholder="10-digit mobile number" value="${h(draft.customer.mobile || '')}"></label><label>Email<input id="email" type="email" autocomplete="email" value="${h(draft.customer.email || '')}"></label><label>Address<input id="address" autocomplete="street-address" value="${h(draft.customer.address || '')}"></label></div><div class="form-actions"><button class="primary" onclick="saveStep1()">Continue</button></div>`;
+  if (draft.step === 1) return `<div class="formgrid"><label>Full name<input id="name" oninput="removeNameNumbers(this)" autocomplete="name" value="${h(draft.customer.name || '')}"></label><label>Mobile number<input id="mobile" type="tel" inputmode="numeric" maxlength="10" pattern="[0-9]{10}" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" autocomplete="tel-national" placeholder="10-digit mobile number" value="${h(draft.customer.mobile || '')}"></label><label>Address<input id="address" autocomplete="street-address" value="${h(draft.customer.address || '')}"></label></div><div class="form-actions"><button class="primary" onclick="saveStep1()">Continue</button></div>`;
   if (draft.step === 2) return `<div class="formgrid"><label>Service<select id="service">${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label></div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="primary" onclick="saveStep2()">Continue</button></div>`;
   if (draft.step === 3) {
     const docs = applicableDocuments(variant?.documents || [], draft.details);
     const missing = docs.filter(item => item.required && !draft.docs[item.label]);
-    return `<p class="muted">${docs.filter(item => item.required).length - missing.length} of ${docs.filter(item => item.required).length} required documents selected. Upload every required document to continue.</p><div class="upload-list">${docs.map(item => `<div class="doc"><span><strong>${h(item.label)}</strong><small>${h(item.note || (item.required ? 'Required document' : 'Optional supporting document'))}</small><em>${h(draft.docs[item.label]?.pages ? `${draft.docs[item.label].pages.length} pages selected` : draft.docs[item.label]?.fileName || 'Not selected')}</em></span>${uploadControls(encodeURIComponent(item.label), '', item.multiple)}${draft.docs[item.label] && !draft.docs[item.label].pages ? `<ul class="selected-pages"><li><span>${h(draft.docs[item.label].fileName)}</span><button type="button" class="quiet" onclick="removeDraftDocument('${encodeURIComponent(item.label)}')" aria-label="Remove ${h(item.label)}">Remove</button></li></ul>` : ''}${draft.docs[item.label]?.pages ? `<ul class="selected-pages">${draft.docs[item.label].pages.map((page,index) => `<li><span>Page ${index+1}: ${h(page.fileName)}</span><button type="button" class="quiet" onclick="removeDraftPage('${encodeURIComponent(item.label)}',${index})" aria-label="Remove page ${index+1}">Remove</button></li>`).join('')}</ul>` : ''}</div>`).join('')}</div><div class="form-actions"><button class="quiet" onclick="wizardBack(2)">Back</button><button class="primary" onclick="saveStep3()" ${missing.length ? 'disabled' : ''}>Continue</button></div>`;
+    return `<p class="muted">${docs.filter(item => item.required).length - missing.length} of ${docs.filter(item => item.required).length} required documents selected. Upload every required document to continue.</p><div class="upload-list">${docs.map(item => `<div class="doc"><span><strong>${h(item.label)}</strong><small>${h(item.note || (item.required ? 'Required document' : 'Optional supporting document'))}</small><em>${h(draft.docs[item.label]?.pages ? `${draft.docs[item.label].pages.length} pages selected` : draft.docs[item.label]?.fileName || 'Not selected')}</em></span>${uploadControls(encodeURIComponent(item.label), '', item.multiple)}${draft.docs[item.label] && !draft.docs[item.label].pages ? `<ul class="selected-pages"><li><span>${h(draft.docs[item.label].fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}')">Preview</button><button type="button" class="quiet" onclick="removeDraftDocument('${encodeURIComponent(item.label)}')" aria-label="Remove ${h(item.label)}">Remove</button></li></ul>` : ''}${draft.docs[item.label]?.pages ? `<ul class="selected-pages">${draft.docs[item.label].pages.map((page,index) => `<li><span>Page ${index+1}: ${h(page.fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}',${index})">Preview</button><button type="button" class="quiet" onclick="removeDraftPage('${encodeURIComponent(item.label)}',${index})" aria-label="Remove page ${index+1}">Remove</button></li>`).join('')}</ul>` : ''}</div>`).join('')}</div><div class="form-actions"><button class="quiet" onclick="wizardBack(2)">Back</button><button class="primary" onclick="saveStep3()" ${missing.length ? 'disabled' : ''}>Continue</button></div>`;
   }
   const amount = variant?.amounts || { serviceCharge:0, officialFee:0, tax:0, total:0 };
   const pages = Object.values(draft.docs).reduce((count,doc) => count + (doc.pages?.length || 1), 0);
@@ -512,9 +514,10 @@ function bindWizard() {
       const value = h(rawValue);
       const automatic = field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals;
       const control = automatic ? `<input data-field="${key}" value="${value}" readonly aria-readonly="true">` : field.type === 'select'
-        ? `<select data-field="${key}"><option value="">Choose…</option>${(field.options || []).map(option => `<option value="${h(option)}" ${option === rawValue ? 'selected' : ''}>${field.label === 'Ration card colour' ? ({ Yellow: '\u{1F7E1} ', Orange: '\u{1F7E0} ', White: '\u26AA ' }[option] || '') : ''}${h(option)}</option>`).join('')}</select>`
-        : `<input data-field="${key}" type="${['email','date','number','tel'].includes(field.type) ? field.type : 'text'}" value="${value}" ${field.required ? 'required' : ''} ${field.min !== undefined ? `min="${h(field.min)}"` : ''} ${field.step ? `step="${h(field.step)}"` : ''} ${field.inputMode ? `inputmode="${h(field.inputMode)}"` : ''} ${field.placeholder ? `placeholder="${h(field.placeholder)}"` : ''} maxlength="500">`;
-      return `<label>${h(field.label)}${control}</label>`;
+        ? `<select data-field="${key}"><option value="" disabled hidden ${!rawValue ? 'selected' : ''}>Choose…</option>${(field.options || []).map(option => `<option value="${h(option)}" ${option === rawValue ? 'selected' : ''}>${field.label === 'Ration card colour' ? ({ Yellow: '\u{1F7E1} ', Orange: '\u{1F7E0} ', White: '\u26AA ' }[option] || '') : ''}${h(field.label === 'Ration card colour' ? ({ Yellow: 'Yellow (PHH)', Orange: 'Orange (PHH/NPH)', White: 'White (APL)' }[option] || option) : option)}</option>`).join('')}</select>`
+        : `<input data-field="${key}" type="${['email','date','number','tel'].includes(field.type) ? field.type : 'text'}" value="${value}" ${field.required ? 'required' : ''} ${field.min !== undefined ? `min="${h(field.min)}"` : ''} ${field.step ? `step="${h(field.step)}"` : ''} ${field.inputMode ? `inputmode="${h(field.inputMode)}"` : ''} ${field.placeholder ? `placeholder="${h(field.placeholder)}"` : ''} maxlength="500" ${/\bname\b|\bsurname\b/i.test(field.label) ? 'oninput="removeNameNumbers(this)"' : ''}>`;
+      const incomeYear = service.slug === 'income-certificate' && (field.label === 'Years of Certificate Required' || field.when?.field === 'Years of Certificate Required');
+      return `<label${incomeYear ? ' class="income-year-field"' : ''}>${h(field.displayLabel || field.label)}${control}</label>`;
     }).join('');
     document.querySelector('#serviceFields').querySelectorAll('[data-field]').forEach(input => input.onchange = () => {
       const label = decodeURIComponent(input.dataset.field);
@@ -531,8 +534,9 @@ function bindWizard() {
     });
     const docs = applicableDocuments(variant.documents, draft.details);
     document.querySelector('#svcInfo').innerHTML = `<strong>${h(service.description)}</strong><p>${docs.map(item => h(item.label)).join(' · ')}</p><small>${h(variant.instructions || 'Confirm documents and fees before submission.')}</small><span>Fees to confirm before payment</span>`;
+    if (draft.validationStep === 2) validateWizardFields(document.querySelectorAll('#serviceFields [data-field]'), false);
   };
-  serviceSelect.onchange = () => { collectFields(); draft.details = {}; draft.variantId = ''; update(); };
+  serviceSelect.onchange = () => { collectFields(); draft.details = {}; draft.variantId = ''; delete draft.validationStep; update(); };
   update();
 }
 
@@ -541,18 +545,60 @@ function applicableDocuments(documents, details) {
 }
 
 function rerenderWizard({keepScroll=false}={}) {const scroll=keepScroll?(document.querySelector('#drawer .panel')?.scrollTop||0):0;closeDrawer();drawWizard();if(keepScroll) document.querySelector('#drawer .panel').scrollTop=scroll;}
+function fieldWarning(input) {
+  const label = input.dataset.field ? decodeURIComponent(input.dataset.field) : ({ name: 'Full name', mobile: 'Mobile number' }[input.id] || input.name || 'this field');
+  const value = input.value.trim();
+  const required = input.required || input.tagName === 'SELECT' || ['name', 'mobile'].includes(input.id);
+  if (required && !value) return `${input.tagName === 'SELECT' ? 'Please choose' : 'Please enter'} ${label}.`;
+  if (input.id === 'mobile' && !/^[6-9]\d{9}$/.test(value)) return 'Enter a valid 10-digit Indian mobile number.';
+  if ((input.id === 'name' || /\bname\b|\bsurname\b/i.test(input.dataset.field ? decodeURIComponent(input.dataset.field) : '')) && /\p{N}/u.test(value)) return 'Name cannot contain numbers.';
+  if (!input.checkValidity()) return input.validationMessage || `Check ${label}.`;
+  return '';
+}
+function showFieldWarning(input) {
+  const message = fieldWarning(input);
+  const label = input.closest('label');
+  const errorId = `field-error-${input.id || input.dataset.field}`;
+  let warning = label?.querySelector('.field-warning');
+  input.classList.toggle('field-invalid', Boolean(message));
+  if (message) {
+    input.setAttribute('aria-invalid', 'true');
+    input.setAttribute('aria-describedby', errorId);
+    if (!warning && label) {
+      warning = document.createElement('small');
+      warning.className = 'field-warning';
+      warning.id = errorId;
+      warning.setAttribute('role', 'alert');
+      label.append(warning);
+    }
+    if (warning) warning.textContent = message;
+  } else {
+    input.removeAttribute('aria-invalid');
+    input.removeAttribute('aria-describedby');
+    warning?.remove();
+  }
+  return !message;
+}
+function validateWizardFields(inputs, focus = true) {
+  let firstInvalid;
+  for (const input of inputs) {
+    if (!showFieldWarning(input) && !firstInvalid) firstInvalid = input;
+  }
+  if (focus) firstInvalid?.focus();
+  return !firstInvalid;
+}
+for (const eventName of ['input', 'change']) document.addEventListener(eventName, event => {
+  const input = event.target;
+  if (input.matches('#wizard input, #wizard select') && input.getAttribute('aria-invalid') === 'true') showFieldWarning(input);
+});
 function saveStep1() {
-  draft.customer = { mobile: document.querySelector('#mobile').value, name: document.querySelector('#name').value, email: document.querySelector('#email').value, address: document.querySelector('#address').value };
-  if (!draft.customer.mobile || !draft.customer.name) return toast('Name and mobile are required');
-  if (!/^[6-9]\d{9}$/.test(draft.customer.mobile)) return toast('Enter a valid 10-digit Indian mobile number');
-  if (draft.customer.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.customer.email)) return toast('Enter a valid email address');
+  draft.customer = { mobile: document.querySelector('#mobile').value, name: document.querySelector('#name').value, address: document.querySelector('#address').value };
+  if (!validateWizardFields([document.querySelector('#name'), document.querySelector('#mobile')])) return;
   draft.step = 2; rerenderWizard();
 }
 function saveStep2() {
-  for (const input of document.querySelectorAll('#serviceFields [data-field]')) {
-    if (input.tagName === 'SELECT' && !input.value) return toast(`Choose ${decodeURIComponent(input.dataset.field)}`);
-    if (!input.checkValidity()) { input.reportValidity(); return; }
-  }
+  draft.validationStep = 2;
+  if (!validateWizardFields(document.querySelectorAll('#serviceFields [data-field]'))) return;
   document.querySelectorAll('#serviceFields [data-field]').forEach(input => { draft.details[decodeURIComponent(input.dataset.field)] = input.value; });
   draft.serviceId = document.querySelector('#service').value;
   draft.step = 3;
@@ -674,7 +720,8 @@ async function submitCase(nextAction='pay') {
     await Promise.all(Array.from({length:Math.min(3,total)},worker));
     if(failure) throw failure;
     if(cloudUploads) await api(`/api/cases/${created.id}/finish-uploads`,{method:'POST',body:{}});
-    setDrawerBusy(); closeDrawer(); await load(); toast(`Created ${created.ref}`);
+    setDrawerBusy(); closeDrawer(); toast(`Created ${created.ref}`);
+    void refreshCaseUpdates();
     if(nextAction==='another') startCase();
     else if(nextAction==='later') {toast('Case saved. Select unpaid cases in Payments to pay them together.');await setView('payments');}
     else await pay(created.id);
@@ -716,10 +763,11 @@ function documentActions(item, document) {
   const whatsapp = `https://wa.me/?text=${encodeURIComponent(message)}`;
   const ready = ['Ready to Submit','Submitted to Official Portal','Under Government Review','Approved','Delivered','Closed'].includes(item.status);
   const removable = !['Closed','Delivered','Cancelled'].includes(item.status) && (document.doc_type !== 'Received Document' || (['backoffice','admin'].includes(me.role) && item.status === 'Document Received'));
-  const previewable = ['backoffice','admin'].includes(me.role) && ['image/jpeg','image/png','application/pdf'].includes(document.mime_type);
+  const previewable = ['sales','backoffice','admin'].includes(me.role) && ['image/jpeg','image/png','application/pdf'].includes(document.mime_type);
   return `<span class="doc-actions">${previewable ? `<button type="button" class="quiet preview-document-button" onclick="previewDocument('${document.id}')" aria-label="Preview ${h(document.doc_type)}">Preview</button>` : ''}<a href="${h(document.download_url)}" target="_blank" rel="noopener">Download</a>${ready ? `<a href="${h(whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${removable ? `<button type="button" class="quiet" onclick="removeSavedDocument('${item.id}','${document.id}')" aria-label="Remove ${h(document.doc_type)} file">Remove</button>` : ''}</span>`;
 }
 
+let documentPreviewObjectURL = null;
 let documentPreviewGeneration = 0;
 let documentPreviewTrigger = null;
 let documentPreviewLoading = null;
@@ -728,12 +776,22 @@ let documentPreviewRender = null;
 let documentPreviewPage = 1;
 let documentPreviewZoom = 1;
 let documentPreviewBusy = false;
-async function previewDocument(documentId) {
+async function previewDraftDocument(encodedType, index = null) {
+  if (drawerBusy) return;
+  const type = decodeURIComponent(encodedType);
+  const group = draft.docs[type];
+  const doc = index === null ? group : group?.pages[index];
+  if (!doc) return;
+  const url = doc.file ? URL.createObjectURL(doc.file) : `data:${doc.mimeType};base64,${doc.content}`;
+  await previewDocument(null, { url, mimeType: doc.mimeType, fileName: doc.fileName, doc_type: type, objectURL: doc.file ? url : null });
+}
+async function previewDocument(documentId, staged = null) {
   if (drawerBusy) return;
   closeDocumentPreview();
   documentPreviewTrigger = document.activeElement;
+  documentPreviewObjectURL = staged?.objectURL || null;
   const generation = ++documentPreviewGeneration;
-  const saved = selectedCase?.documents.find(document => document.id === documentId);
+  const saved = staged ? {doc_type:staged.doc_type,file_name:staged.fileName} : selectedCase?.documents.find(document => document.id === documentId);
   const dialog = document.createElement('dialog');
   dialog.id = 'documentPreview';
   dialog.className = 'document-preview';
@@ -744,11 +802,12 @@ async function previewDocument(documentId) {
   document.body.append(dialog);
   dialog.showModal();
   try {
-    const preview = await api(`/api/documents/${encodeURIComponent(documentId)}/preview`);
+    const preview = staged || await api(`/api/documents/${encodeURIComponent(documentId)}/preview`);
     if (generation !== documentPreviewGeneration || !dialog.isConnected) return;
     dialog.querySelector('#documentPreviewName').textContent = preview.fileName;
     const body = dialog.querySelector('#documentPreviewBody');
     dialog.querySelector('#documentPreviewActions').innerHTML = `<button type="button" class="quiet" onclick="previewDocument('${documentId}')">Reload preview</button><a class="document-preview-open" href="${h(preview.url)}" target="_blank" rel="noopener">Open full-size preview</a><a class="document-preview-download" href="/api/documents/${encodeURIComponent(documentId)}/download" target="_blank" rel="noopener">Download</a>`;
+    if (staged) dialog.querySelector('#documentPreviewActions').innerHTML = `<a class="document-preview-open" href="${h(preview.url)}" target="_blank" rel="noopener">Open full-size preview</a><a class="document-preview-download" href="${h(preview.url)}" download="${h(preview.fileName)}">Download</a>`;
     if (preview.mimeType === 'application/pdf') {
       const pdfjs = await import('/vendor/pdfjs/pdf.mjs');
       if (generation !== documentPreviewGeneration) return;
@@ -763,11 +822,11 @@ async function previewDocument(documentId) {
       await renderPDFPreview();
     } else {
       body.innerHTML = `<img class="document-preview-image" src="${h(preview.url)}" alt="Preview of ${h(preview.fileName)}">`;
-      body.querySelector('img').onerror = () => { if(generation === documentPreviewGeneration) body.innerHTML='<p role="alert">The preview could not load. Use Reload preview to try again.</p>'; };
+      body.querySelector('img').onerror = () => { if(generation === documentPreviewGeneration) body.innerHTML=`<p role="alert">${staged ? 'The preview could not load. Close this preview and try selecting the file again.' : 'The preview could not load. Use Reload preview to try again.'}</p>`; };
     }
   } catch (error) {
     if (generation !== documentPreviewGeneration || !dialog.isConnected) return;
-    dialog.querySelector('#documentPreviewBody').innerHTML = `<div class="document-preview-error" role="alert"><p>${h(error.message)}</p><button type="button" class="quiet" onclick="previewDocument('${documentId}')">Retry preview</button></div>`;
+    dialog.querySelector('#documentPreviewBody').innerHTML = `<div class="document-preview-error" role="alert"><p>${h(error.message)}</p>${staged ? '<p>Close this preview and try selecting the file again.</p>' : `<button type="button" class="quiet" onclick="previewDocument('${documentId}')">Retry preview</button>`}</div>`;
   }
 }
 async function renderPDFPreview() {
@@ -821,6 +880,8 @@ async function zoomDocumentPreview(delta) {
 
 function closeDocumentPreview() {
   documentPreviewGeneration++;
+  if (documentPreviewObjectURL) URL.revokeObjectURL(documentPreviewObjectURL);
+  documentPreviewObjectURL = null;
   documentPreviewRender?.cancel();documentPreviewRender = null;
   if (documentPreviewLoading) void documentPreviewLoading.destroy().catch(()=>{});
   documentPreviewLoading = documentPreviewPDF = null;documentPreviewBusy = false;
@@ -991,15 +1052,15 @@ async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/
 async function setView(next) {
   if(drawerBusy) return;
   closeDrawer();view=next;render();
-  await refreshCaseUpdates();
   if(next==='payments') {await refreshPayments();return;}
+  void refreshCaseUpdates();
   if(me.role==='admin' && ['admin','employees'].includes(next)) {
     try {await loadViewData();if(view===next) render();} catch(error) {toast(error.message);}
   }
 }
 
-Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, previewDocument, closeDocumentPreview, changePreviewPage, zoomDocumentPreview, uploadCaseDocument, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
-Object.assign(window, { downloadCaseFiles, wizardBack });
+Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, previewDraftDocument, previewDocument, closeDocumentPreview, changePreviewPage, zoomDocumentPreview, uploadCaseDocument, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
+Object.assign(window, { downloadCaseFiles, wizardBack, removeNameNumbers });
 Object.assign(window, { saveDriveRootFolder });
 Object.assign(window, { toggleEmployeeDates, applyEmployeePeriod, createEmployee });
 Object.assign(window,{focusSignIn,switchAccount});
@@ -1009,21 +1070,42 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape') document.qu
 let paymentData = null, paymentSettings = null, checkout = null;
 let paymentFilters = '';
 const selectedPaymentCases=new Set();
-const paymentSearchFields={all:'All fields',customer:'Customer name',utr:'UTR',mobile:'Mobile number',service:'Service',employee:'Employee',order:'Order / Case ID',status:'Status',from:'From date',to:'To date'};
+const paymentSearchFields={all:'All fields',customer:'Customer',utr:'UTR',mobile:'Mobile',service:'Service',employee:'Employee',order:'Order / case',status:'Status',from:'From date',to:'To date'};
 async function loadPayments() {
-  [paymentData,paymentSettings] = await Promise.all([api('/api/payments'+paymentFilters),api('/api/payment-settings')]);
+  [paymentData,paymentSettings] = await Promise.all([api('/api/payments'+paymentFilters),me.role==='admin' ? api('/api/payment-settings') : null]);
+}
+function paymentTableRow(p) {
+  const payable = batchEligible(p);
+  const review = me.role === 'admin' && p.status === 'AWAITING_VERIFICATION';
+  const status = ({PENDING:'Unpaid',INITIATED:'Unpaid',AWAITING_VERIFICATION:'Under review',PAID:'Verified',CANCELLED:'Cancelled checkout',EXPIRED:'Expired checkout',FAILED:'Claim rejected',REFUNDED:'Refunded'})[p.status] || p.status;
+  const tone = p.status === 'PAID' ? 'success' : ['PENDING','INITIATED','AWAITING_VERIFICATION','FAILED'].includes(p.status) ? 'warning' : 'neutral';
+  return `<tr class="${selectedPaymentCases.has(p.case_id) && payable ? 'payment-row-selected' : ''}">
+    <td class="payment-select-cell">${payable ? `<input type="checkbox" aria-label="Select ${h(p.customer_name)} ${h(p.case_ref)}" onchange="selectPaymentCase('${p.case_id}',this.checked)" ${selectedPaymentCases.has(p.case_id)?'checked':''}>` : '<span class="payment-selection-unavailable" aria-label="Selection unavailable">&mdash;</span>'}</td>
+    <td class="payment-customer-cell"><strong>${h(p.customer_name)}</strong><span class="payment-customer-phone">${h(p.customer_mobile)}</span><span class="payment-order-reference" title="${h(p.gateway_order_id)}">${h(p.case_ref || p.gateway_order_id)}</span></td>
+    <td class="payment-service-cell">${h(p.service_name)}</td>
+    <td class="payment-amount-cell">${money(p.amount)}</td>
+    <td class="payment-method-cell"><span>${h(p.payment_method || 'Not recorded')}</span>${p.transaction_id ? `<small title="UPI transaction reference">${h(p.transaction_id)}</small>` : ''}</td>
+    <td class="payment-status-cell"><span class="badge ${tone}">${h(status)}</span></td>
+    <td class="payment-owner-cell"><span>${h(p.employee_name)}</span><small>${dateTime(p.created_at)}</small></td>
+    <td class="payment-actions-cell"><div class="payment-row-actions"><button type="button" class="quiet payment-view-button" onclick="showPayment('${p.id}')">${review ? 'Review' : 'View'}</button>${payable ? `<button type="button" class="primary payment-pay-button" onclick="pay('${p.case_id}')">Pay <span aria-hidden="true">&rarr;</span></button>` : ''}</div></td>
+  </tr>`;
 }
 function renderPayments() {
-  if (!paymentData) return empty('Loading payments…');
-  const m=paymentData.metrics;
-  return `${pageHead('Payments','Direct UPI collections. Only receiving-account verification records revenue.')}
-    ${me.role==='admin' ? `<section class="metric-grid compact">${metricCard('Verified collections',money(m.collected),'All verified UPI collections','green')}${metricCard('Today',money(m.today),'India time','green')}${metricCard('Pending',number(m.pending),'Unsubmitted / expired','amber')}${metricCard('Awaiting verification',number(m.awaiting),'Customer claims','amber')}${metricCard('Failed / cancelled',number(m.failed),'Review receiving account if needed','blue')}${metricCard('Verified transactions',number(m.verified),'Manually checked','green')}</section>${paymentSettingsPanel()}` : ''}
-    ${['sales','admin'].includes(me.role) ? `<section class="summary-box"><strong>Pay for multiple cases together</strong><p>Create cases one by one, then select the unpaid cases below and pay their combined amount once.</p><p id="combinedPaymentTotal">${combinedPaymentSummary()}</p><button class="primary" onclick="paySelectedCases(this)">Pay selected cases together</button></section>` : ''}
+  if (!paymentData) return empty('Loading payments...');
+  const m = paymentData.metrics;
+  const latest = paymentData.payments.filter((p,index,rows) => rows.findIndex(row => row.case_id === p.case_id) === index);
+  const unpaid = latest.filter(p => ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) && !['Cancelled','Closed','Delivered'].includes(p.case_status) && !paymentData.payments.some(row => row.case_id === p.case_id && ['PAID','AWAITING_VERIFICATION'].includes(row.status))).length;
+  const selected = paymentData.payments.filter(p => selectedPaymentCases.has(p.case_id) && batchEligible(p)).length;
+  return `<section class="payments-workspace">${pageHead('Payments', 'A clear view of your collections, checkouts, and payment activity.')}
+    ${me.role==='admin' ? `<section class="metric-grid compact payment-metrics">${metricCard('Verified collections',money(m.collected),'Confirmed in the receiving account','green')}${metricCard('Collected today',money(m.today),'Verified today','green')}${metricCard('Unpaid cases',number(unpaid),'Ready for payment','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting verification','amber')}${metricCard('Failed / cancelled',number(m.failed),'Checkout history')}${metricCard('Verified transfers',number(m.verified),'Individual and combined transfers','green')}</section>${paymentSettingsPanel()}` : `<section class="metric-grid payment-metrics">${metricCard('Unpaid cases',number(unpaid),'Individual or combined checkout','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting payment verification','amber')}${metricCard('Verified collections',money(m.collected),'Confirmed payments','green')}</section>`}
+    ${['sales','admin'].includes(me.role) ? `<section class="payment-selection-panel"><div class="payment-selection-intro"><span class="payment-selection-icon">${icon('payments')}</span><div><h2>One payment. Multiple cases.</h2><p>Select one case to pay individually, or choose several to pay together.</p></div></div><div class="payment-selection-checkout"><p id="combinedPaymentTotal" aria-live="polite">${combinedPaymentSummary()}</p><button id="paySelectedButton" type="button" class="primary" onclick="paySelectedCases(this)" ${!selected?'disabled':''}>Pay selected cases <span aria-hidden="true">&rarr;</span></button></div></section>` : ''}
+    <section class="payment-activity" aria-labelledby="paymentActivityTitle"><div class="payment-activity-heading"><div><h2 id="paymentActivityTitle">Payment activity</h2><p>Search a payment, review its details, or open a checkout.</p></div><span class="payment-record-count">${number(paymentData.payments.length)} ${paymentData.payments.length===1?'record':'records'}</span></div>
     <div class="payment-list-tools"><form id="paymentFilters" class="payment-search" role="search" aria-label="Search payments" onsubmit="filterPayments(event)">
       <label class="payment-search-by"><span>Search by</span><select name="searchBy" onchange="updatePaymentSearch(this.value)">${Object.entries(paymentSearchFields).map(([key,label])=>`<option value="${key}" ${key===(new URLSearchParams(paymentFilters).get('searchBy') || 'all')?'selected':''}>${label}</option>`).join('')}</select></label>
       <input id="paymentSearchInput" name="q" type="${['from','to'].includes(new URLSearchParams(paymentFilters).get('searchBy'))?'date':'search'}" aria-label="Search value" placeholder="Search payments" value="${h(new URLSearchParams(paymentFilters).get('q') || '')}">
       <button class="primary payment-search-submit" aria-label="Search payments" title="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
-    </form><div class="payment-search-actions">${paymentFilters?'<button type="button" onclick="resetPaymentFilters()">Clear search</button>':''}<button type="button" onclick="exportPayments()">Export report</button></div></div><div class="table-shell"><table class="table"><thead><tr><th>Select</th><th>Order / Customer</th><th>Service</th><th>Amount</th><th>Method / UTR</th><th>Employee</th><th>Status</th><th>Date</th><th>Action</th></tr></thead><tbody>${paymentData.payments.map(p=>`<tr><td>${batchEligible(p) ? `<input type="checkbox" aria-label="Select ${h(p.customer_name)} ${h(p.case_ref)}" onchange="selectPaymentCase('${p.case_id}',this.checked)" ${selectedPaymentCases.has(p.case_id)?'checked':''}>` : ''}</td><td><strong>${h(p.gateway_order_id)}</strong><small>${h(p.customer_name)} · ${h(p.customer_mobile)}</small></td><td>${h(p.service_name)}</td><td>${money(p.amount)}</td><td>${h(p.payment_method || '—')}<small>${h(p.transaction_id || '—')}</small></td><td>${h(p.employee_name)}</td><td>${statusBadge(p.status)}</td><td>${dateTime(p.created_at)}</td><td><button onclick="showPayment('${p.id}')">${me.role==='admin' && p.status==='AWAITING_VERIFICATION' ? 'Review claim' : 'View'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    </form><div class="payment-search-actions">${paymentFilters?'<button type="button" class="quiet" onclick="resetPaymentFilters()">Clear search</button>':''}<button type="button" class="quiet payment-export-button" onclick="exportPayments()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>Export report</button></div></div>
+    <div class="table-shell payment-table-shell">${paymentData.payments.length ? `<table class="table payment-table"><thead><tr><th><span class="visually-hidden">Select</span></th><th>Customer / case</th><th>Service</th><th>Amount</th><th>Method / UTR</th><th>Status</th><th>Employee / date</th><th>Actions</th></tr></thead><tbody>${paymentData.payments.map(paymentTableRow).join('')}</tbody></table>` : '<div class="payment-empty"><span>'+icon('payments')+'</span><h3>No payments found</h3><p>Try another search or create a customer case to get started.</p></div>'}</div></section></section>`;
 }
 function paymentSettingsPanel() {
   const c=paymentSettings;
@@ -1160,23 +1242,27 @@ Object.assign(window,{showPayment,pay,launchUPI,startManualUPI,revealPaymentUTR,
 
 function batchEligible(p) {
   const rows=paymentData?.payments || [];
-  return ['sales','admin'].includes(me.role) && !p.batch_id && p.case_status!=='Cancelled' &&
+  return ['sales','admin'].includes(me.role) && (!p.batch_id || ['EXPIRED','CANCELLED','FAILED'].includes(p.batch_status || p.status)) && !['Cancelled','Closed','Delivered'].includes(p.case_status) &&
     ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) &&
     rows.find(row=>row.case_id===p.case_id)?.id===p.id &&
     !rows.some(row=>row.case_id===p.case_id && ['PAID','AWAITING_VERIFICATION'].includes(row.status));
 }
 function combinedPaymentSummary() {
   const rows=(paymentData?.payments || []).filter(p=>selectedPaymentCases.has(p.case_id) && batchEligible(p));
-  return `${rows.length} cases selected - Total ${money(rows.reduce((sum,p)=>sum+p.amount,0))}`;
+  return `${rows.length} ${rows.length===1 ? 'case' : 'cases'} selected · ${money(rows.reduce((sum,p)=>sum+p.amount,0))} total`;
 }
 function selectPaymentCase(id,checked) {
   if(checked) selectedPaymentCases.add(id); else selectedPaymentCases.delete(id);
   document.querySelector('#combinedPaymentTotal').textContent=combinedPaymentSummary();
+  const button=document.querySelector('#paySelectedButton');
+  if(button) button.disabled=!(paymentData?.payments || []).some(p=>selectedPaymentCases.has(p.case_id) && batchEligible(p));
+  document.querySelectorAll('.payment-table tbody tr').forEach(row=>row.classList.toggle('payment-row-selected',Boolean(row.querySelector('input[type=checkbox]')?.checked)));
 }
 async function paySelectedCases(button) {
   if(drawerBusy || button?.disabled) return;
   const ids=(paymentData?.payments || []).filter(p=>selectedPaymentCases.has(p.case_id) && batchEligible(p)).map(p=>p.case_id);
-  if(ids.length<2) return toast('Select at least two unpaid cases.');
+  if(!ids.length) return toast('Select at least one unpaid case.');
+  if(ids.length===1) {selectedPaymentCases.clear();await pay(ids[0]);return;}
   if(button) button.disabled=true;
   try {
     const payment=await api('/api/payments/batch',{method:'POST',body:{caseIds:ids}});

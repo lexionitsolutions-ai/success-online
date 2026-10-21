@@ -103,7 +103,7 @@ const SHEET_HEADERS = {
     "Documents",
     "Updated"
   ],
-  "Age, Nationality & Domicile Cer": [
+  "Age Nationality & Domicile Cert": [
     "Case ID",
     "Customer Name",
     "Phone",

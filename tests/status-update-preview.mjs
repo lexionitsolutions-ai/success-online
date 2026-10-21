@@ -24,7 +24,7 @@ try {
         return json({case:{...item,status:body.status},note:{id:'note1',actor:'Test Office',new_status:body.status,note:body.note,created_at:new Date().toISOString()}});
       }
       const file=path==='/'?'index.html':path.slice(1);
-      if(['index.html','script.js','styles.css','mobile.css','payments.css'].includes(file)) return route.fulfill({contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:readFileSync('public/'+file,'utf8')});
+      if(['index.html','script.js','styles.css','mobile.css','payments.css','dashboard.css'].includes(file)) return route.fulfill({contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:readFileSync('public/'+file,'utf8')});
       return route.abort();
     });
     await page.goto('https://status-preview.test');

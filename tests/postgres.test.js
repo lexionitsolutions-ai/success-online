@@ -106,7 +106,7 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const previewContent=await fetch(preview.data.url);
     assert.equal(previewContent.status,200);
     assert.deepEqual(Buffer.from(await previewContent.arrayBuffer()),pdf);
-    assert.equal((await request(`/api/documents/${storedDocument.id}/preview`,{cookie:accounts.sales})).status,403);
+    assert.equal((await request(`/api/documents/${storedDocument.id}/preview`,{cookie:accounts.sales})).status,200);
     const checkoutStarted=performance.now();
     assert.equal((await request(path+'/payment-order',{cookie:accounts.sales,method:'POST'})).status,201);
     assert.ok(performance.now()-checkoutStarted<1500,'Checkout must not wait on the in-flight Google mirror');
@@ -201,7 +201,10 @@ test('cloud payments commit before delayed Sheets work and preserve retryable jo
     const mirrorDeadline=Date.now()+5000;
     let mirrored=false;
     while(Date.now()<mirrorDeadline && !mirrored) {
-      if(existsSync(workbookFile)) mirrored=Object.values(JSON.parse(readFileSync(workbookFile,'utf8')).Documents || {}).some(row=>row[9]==='https://drive.google.com/file/d/mock-file/view');
+      if(existsSync(workbookFile)) {
+        try { mirrored=Object.values(JSON.parse(readFileSync(workbookFile,'utf8')).Documents || {}).some(row=>row[9]==='https://drive.google.com/file/d/mock-file/view'); }
+        catch(error) { if(!(error instanceof SyntaxError)) throw error; } // The mock writer may still be replacing the JSON contents.
+      }
       if(!mirrored) await new Promise(resolve=>setTimeout(resolve,30));
     }
     assert.ok(mirrored,'A deferred document mirror must eventually populate the Drive link in Sheets');
