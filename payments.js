@@ -1,3 +1,4 @@
+import './public/intake-rules.js';
 import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 import {batchSchema,createBatchPayments} from './payment-batches.js';
@@ -91,7 +92,8 @@ export function createPayments({db, recomputeCase, send, body}) {
     const existing = await one("SELECT * FROM payments WHERE case_id=$case AND gateway='direct_upi' AND status IN ('PENDING','INITIATED','AWAITING_VERIFICATION','PAID') ORDER BY CASE WHEN status='PAID' THEN 0 WHEN status='AWAITING_VERIFICATION' THEN 1 ELSE 2 END,created_at DESC LIMIT 1",{$case:c.id});
     if (existing) return existing;
     const variant = await one('SELECT v.*,s.price configured_price,s.original_config FROM variants v LEFT JOIN service_prices s ON s.variant_id=v.id WHERE v.id=$id',{$id:c.variant_id});
-    const a = priceAmounts(variant,variant.configured_price,variant.original_config ? JSON.parse(variant.original_config) : undefined);
+    const base = priceAmounts(variant,variant.configured_price,variant.original_config ? JSON.parse(variant.original_config) : undefined);
+    const a = JSON.parse(variant.fields_json || '[]').some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base, JSON.parse(c.details_json || '{}')) : base;
     if (!Number.isSafeInteger(a.total) || a.total <= 0) fail(409,'Configure a positive service price first');
     const service = await one('SELECT name FROM services WHERE id=$id',{$id:c.service_id});
     const config = paymentConfig(), pid = `pay_${randomUUID()}`, order = `SO-P-${new Date().getUTCFullYear()}-${randomUUID()}`, stamp = at();

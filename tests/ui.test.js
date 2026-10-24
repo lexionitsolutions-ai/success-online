@@ -2,12 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import {serviceCatalog} from '../service-catalog.js';
 
 function client() {
   const context = vm.createContext({
     document: { querySelector: selector => selector === '#consent' ? { checked: true } : null,addEventListener() {} },
     window: {}, URL, URLSearchParams, console, setTimeout, clearTimeout
   });
+  vm.runInContext(readFileSync('public/intake-rules.js', 'utf8'), context);
   vm.runInContext(readFileSync('public/app.js', 'utf8').replace(/boot\(\);\s*$/, ''), context);
   vm.runInContext(`
     const messages = [];
@@ -18,6 +20,99 @@ function client() {
   `, context);
   return { context, run: source => vm.runInContext(source, context) };
 }
+
+test('all services render Marathi document checklists and separate bilingual notes',()=>{
+  const {context,run}=client();
+  for (const service of serviceCatalog) {
+    assert.ok(service.documents.every(doc=>doc.marathiLabel && /[\u0900-\u097f]/u.test(doc.marathiLabel)),service.name);
+    context.guidanceService=service;
+    context.guidanceVariant={documents:service.documents,instructions:service.instructions};
+    const markup=run('serviceGuidance(guidanceService,guidanceVariant,{})');
+    assert.match(markup,/<details class="intake-notices"/);
+    assert.match(markup,/<strong>Important Notices<\/strong>/);
+    assert.doesNotMatch(markup,/<details[^>]*\sopen(?:\s|>)/);
+    assert.match(markup,/आवश्यक कागदपत्रे/);
+    assert.match(markup,/income-checklist/);
+    assert.match(markup,/महत्त्वाच्या सूचना \/ Important notes/);
+    assert.doesNotMatch(markup,/Fees to confirm before payment/i);
+    if(service.slug!=='income-certificate') assert.ok(service.instructions.includes(' / '),service.name);
+  }
+});
+
+test('overview has collapsed Recent Updates and a completed-case navigation card',()=>{
+  const {context,run}=client();
+  context.overviewRows=[
+    {id:'old',ref:'OLDER-CASE',updated_at:'2026-10-20',status:'Assigned',payment_state:'paid'},
+    {id:'new',ref:'NEWER-CASE',updated_at:'2026-10-24',status:'Awaiting Payment',payment_state:'unpaid'},
+    {id:'done',ref:'COMPLETED-CASE',status:'Closed',payment_state:'paid',backoffice:{id:'office'}}
+  ].map(row=>({...row,customer:{name:'Client',mobile:'9876543210'},service:{name:'Certificate'},variant:{name:'Application'},amounts:{total:20000}}));
+  run("me={id:'admin',role:'admin'};cases=overviewRows;");
+  const html=run('renderDashboard()');
+  assert.match(html,/<strong>Recent Updates<\/strong>/);
+  assert.doesNotMatch(html,/Needs attention/);
+  assert.doesNotMatch(html,/<details id="recentUpdates"[^>]*\sopen(?:\s|>)/);
+  assert.match(html,/aria-label="View completed cases"><span>Completed cases<\/span><strong>1<\/strong>/);
+  assert.ok(html.indexOf('NEWER-CASE')<html.indexOf('OLDER-CASE'),'Recent rows are ordered by update time');
+  run("rememberRecentUpdates({isConnected:true,open:true})");
+  assert.match(run('renderDashboard()'),/<details id="recentUpdates"[^>]*\sopen\s/);
+  run("rememberRecentUpdates({isConnected:true,open:false})");
+  assert.doesNotMatch(run('renderDashboard()'),/<details id="recentUpdates"[^>]*\sopen(?:\s|>)/);
+});
+
+test('payment report export is hidden and blocked only for sales',()=>{
+  const {run}=client();
+  run("paymentData={metrics:{},payments:[]};paymentSettings={receiverReady:true,prices:[]};me={role:'sales'};let downloads=0;downloadPaymentAsset=()=>downloads++;");
+  assert.doesNotMatch(run('renderPayments()'),/Export report|payment-export-button/);
+  run('exportPayments()');
+  assert.equal(run('downloads'),0);
+  for(const role of ['admin','backoffice']) {
+    run(`me.role='${role}'`);
+    assert.match(run('renderPayments()'),/Export report/);
+  }
+});
+
+test('announcements are below Recent Updates, escaped, and admin controls are role limited',()=>{
+  const {run}=client();
+  run(`me={role:'sales'};cases=[];announcements=[{id:'ann1',title:'<script>alert(1)</script>',body:'First line\\n<script>bad()</script>',author:'Admin',created_at:'2026-10-24T09:00:00Z',image_url:'/api/announcements/ann1/image'}];`);
+  const html=run('renderDashboard()');
+  assert.ok(html.indexOf('id="recentUpdates"')<html.indexOf('id="announcementsTitle"'));
+  assert.doesNotMatch(html,/<script>|announcement-composer|Remove announcement:/);
+  assert.match(html,/&lt;script&gt;/);
+  assert.match(html,/\/api\/announcements\/ann1\/image/);
+  run("me.role='backoffice'");
+  assert.doesNotMatch(run('renderAnnouncements()'),/announcement-composer|Remove announcement:/);
+  run("me.role='admin'");
+  assert.match(run('renderAnnouncements()'),/Post announcement/);
+  assert.match(run('renderAnnouncements()'),/Remove announcement:/);
+});
+
+test('background announcement updates preserve an open admin composer',async()=>{
+  const {context,run}=client();
+  const feed={innerHTML:''};
+  context.document.querySelector=selector=>selector==='.announcement-composer[open]'?{}:selector==='#announcementFeed'?feed:selector.includes('.announcement-composer[open]')?{}:null;
+  run("me={id:'admin',role:'admin'};view='dashboard';cases=[];let redraws=0;render=()=>redraws++;updateCaseIndicators=()=>{};api=async path=>path==='/api/cases'?{cases:[]}:path==='/api/announcements'?{announcements:[{id:'new',title:'New update',body:'Team update'}]}:{notifications:[]};");
+  await run('refreshCaseUpdates()');
+  assert.equal(run('redraws'),0);
+  assert.match(feed.innerHTML,/New update/);
+});
+
+test('domicile affidavit fee is visible with notices closed and matches the review total',()=>{
+  const {context,run}=client();
+  context.domicileService=serviceCatalog.find(service=>service.slug==='domicile-certificate');
+  context.domicileVariant={documents:context.domicileService.documents,instructions:context.domicileService.instructions,amounts:{serviceCharge:20000,officialFee:0,tax:0,total:20000}};
+  run("draft.step=4;draft.details={'Do you have proof confirming the entered address?':'No'};draft.customer={name:'Test Applicant',mobile:'9876543210'}");
+  const markup=run('serviceGuidance(domicileService,domicileVariant,draft.details)');
+  assert.match(markup,/<\/details><aside class="income-fee-notice affidavit-notice"/);
+  assert.match(markup,/additional ₹200/);
+  assert.match(markup,/₹400\.00/);
+  const review=run('wizardBody(domicileService,domicileVariant)');
+  assert.match(review,/includes ₹200 affidavit fee/);
+  assert.match(review,/₹400\.00/);
+  run("draft.details['Do you have proof confirming the entered address?']='Yes'");
+  assert.doesNotMatch(run('serviceGuidance(domicileService,domicileVariant,draft.details)'),/affidavit-notice/);
+  assert.match(run('wizardBody(domicileService,domicileVariant)'),/₹200\.00/);
+  assert.doesNotMatch(run('wizardBody(domicileService,domicileVariant)'),/includes ₹200 affidavit fee/);
+});
 
 test('customer intake omits email and removes numbers from typed or pasted names', () => {
   const { context, run } = client();
@@ -45,17 +140,42 @@ test('unpaid payment label preserves existing workflow values and warning stylin
   assert.match(run("statusBadge('Awaiting Payment')"),/Unpaid Payment/);
   assert.match(run("statusBadge('Awaiting Payment')"),/badge warning/);
   run("me={role:'backoffice'};const paymentItem={id:'c1',status:'Draft',document_state:'complete',payment_state:'unpaid'};");
-  assert.match(run('progressControls(paymentItem)'),/<option value="Awaiting Payment">Unpaid Payment<\/option>/);
+  assert.equal(run('progressControls(paymentItem)'),'');
   assert.doesNotMatch(run('progressControls(paymentItem)'),/>Awaiting Payment</);
   assert.match(run("horizontalBars([{status:'Awaiting Payment',count:1}],'count')"),/Unpaid Payment/);
 });
 
-test('pending cases and notification destinations follow current case status',()=>{
+test('portrait requirements display Live Photo with an immediate capture instruction',()=>{
+  for(const service of serviceCatalog) for(const doc of service.documents.filter(doc=>/^(?:(Applicant|Father|Owner) )?(?:Live )?Photo$/.test(doc.label))) {
+    assert.match(doc.displayLabel,/Live Photo/);
+    assert.match(doc.note,/photo clicked at the moment/);
+  }
+});
+
+test('completed tables expose only the received document in their last download column',()=>{
+  const {context,run}=client();
+  context.completedRow={id:'c1',ref:'SO-TEST',customer:{name:'Client',mobile:'9876543210'},service:{name:'Certificate'},variant:{name:'Application'},status:'Closed',payment_state:'paid',amounts:{total:20000},received_document:{download_url:'/api/documents/final-document/download'}};
+  const table=run('caseTable([completedRow],true)');
+  assert.match(table,/<th>Updated<\/th><th>Download file<\/th>/);
+  assert.match(table,/href="\/api\/documents\/final-document\/download"/);
+  assert.match(table,/event.stopPropagation\(\)/);
+  assert.match(table,/<svg/);
+  assert.doesNotMatch(run('caseTable([completedRow])'),/<th>Download file<\/th>/);
+  context.completedRow.received_document=null;
+  assert.match(run('caseTable([completedRow],true)'),/Not available/);
+});
+
+test('pending and active cases follow verified payment, including correction and verification states',()=>{
   const {run}=client();
-  run("cases=[{id:'c1',status:'Correction Required'},{id:'c2',status:'Closed'},{id:'c3',status:'Assigned'}];caseNotifications=[{id:'n1',caseId:'c1',status:'Assigned'}];");
+  run("cases=[{id:'c1',status:'Correction Required',payment_state:'unpaid'},{id:'c2',status:'Closed',payment_state:'paid'},{id:'c3',status:'Assigned',payment_state:'paid'}];caseNotifications=[{id:'n1',caseId:'c1',status:'Assigned'}];");
   assert.equal(run("isPendingCase({status:'Awaiting Documents'})"),true);
   assert.equal(run("isPendingCase({status:'Correction Required'})"),true);
-  assert.equal(run("isPendingCase({status:'Assigned'})"),false);
+  assert.equal(run("isPendingCase({status:'Assigned',payment_state:'paid'})"),false);
+  assert.equal(run("isPendingCase({status:'Ready for Assignment',payment:{status:'AWAITING_VERIFICATION'}})"),true);
+  assert.equal(run("isActiveCase({status:'Correction Required',payment_state:'paid'})"),true);
+  assert.equal(run("isActiveCase({status:'Awaiting Documents',payment_state:'paid'})"),true);
+  assert.equal(run("isActiveCase({status:'Submitted to Official Portal',payment_state:'unpaid'})"),false);
+  assert.equal(run("isActiveCase({status:'Ready for Assignment',payment:{status:'paid',gateway:'demo'}})"),false);
   assert.equal(run("isPendingCase({status:'Closed'})"),false);
   assert.equal(run("hasSectionUpdates('pending')"),true);
   assert.equal(run("hasSectionUpdates('cases')"),false);

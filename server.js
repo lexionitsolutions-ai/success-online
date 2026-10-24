@@ -1,3 +1,5 @@
+import './public/intake-rules.js';
+const { matches: matchesIntake } = globalThis.IntakeRules;
 import http from 'node:http';
 import { createHmac, randomBytes, scryptSync, timingSafeEqual, randomUUID } from 'node:crypto';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -14,6 +16,7 @@ import { serviceCatalog } from './service-catalog.js';
 import { sheetHeaders, serviceTabs } from './operations-schema.js';
 import { createPayments, paymentSchema, paymentConfig, priceAmounts } from './payments.js';
 import { correctionStatuses, reuploadState } from './reuploads.js';
+import {announcementSchema, createAnnouncements} from './announcements.js';
 
 if (existsSync('.env')) loadEnvFile('.env');
 
@@ -30,6 +33,7 @@ const deferredSheets = new AsyncLocalStorage();
 const deferredDrive = new AsyncLocalStorage();
 const sheetsContext = new AsyncLocalStorage();
 const paymentSystem = createPayments({db, recomputeCase, send, body});
+const announcementSystem = createAnnouncements({db, send, body});
 let servicePrices = new Map();
 
 const statuses = ['Draft','Awaiting Documents','Awaiting Payment','Ready for Assignment','Assigned','Document Review','Correction Required','Ready to Submit','Submitted to Official Portal','Under Government Review','Customer Action Required','Document Received','Approved','Rejected','Delivered','Closed','Cancelled'];
@@ -71,6 +75,7 @@ async function migrate() {
     CREATE TABLE IF NOT EXISTS upload_intents (id TEXT PRIMARY KEY, case_id TEXT, user_id TEXT, doc_type TEXT, file_name TEXT, mime_type TEXT, size INTEGER, storage_path TEXT, expires_at TEXT, completed_at TEXT);
   `.replace(db.cloud ? /PRAGMA journal_mode = WAL;/ : /$^/, ''));
   await db.exec(paymentSchema);
+  await db.exec(announcementSchema);
 }
 
 function now() { return new Date().toISOString(); }
@@ -295,7 +300,7 @@ function serviceSheet(name) { return serviceTabs[name]; }
 async function syncCaseToGoogle(caseId) {
   const c = (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: caseId }))));
   const missing = (await missingDocuments(c));
-  const required = c.variant.documents.filter(d => d.required && (!d.when || !String(c.details[d.when.field] || '').trim() || String(c.details[d.when.field]) === String(d.when.equals))).length;
+  const required = c.variant.documents.filter(d => d.required && matchesIntake(d.when, c.details, true)).length;
   const master = [c.ref, sheetSafe(c.customer.name), c.customer.mobile, c.service.name, c.created_at, c.sales.name, c.backoffice?.name || '', c.document_state, c.payment_state, c.status, c.updated_at, c.follow_up_date || '', c.completed_at || '', required, required - missing.length, missing.join('; '), c.drive_case_folder_id ? `https://drive.google.com/drive/folders/${c.drive_case_folder_id}` : ''];
   await upsertSheetRow('All Cases', c.ref, master);
   const tab = serviceSheet(c.service.name);
@@ -466,8 +471,8 @@ async function caseRows(rows) {
     related('customers','id',rows.map(c=>c.customer_id),'id,name,mobile,email'),
     related('services','id',rows.map(c=>c.service_id),'id,name'),
     related('users','id',rows.flatMap(c=>[c.sales_user_id,c.backoffice_user_id]),'id,username,name,role'),
-    related('documents','case_id',rows.map(c=>c.id),'case_id,doc_type'," AND state='uploaded'"),
-    related('payments','case_id',rows.map(c=>c.id),'*'," AND gateway='direct_upi' ORDER BY created_at DESC")
+    related('documents','case_id',rows.map(c=>c.id),'id,case_id,doc_type,file_name,mime_type,created_at'," AND state='uploaded' ORDER BY created_at DESC"),
+    related('payments','case_id',rows.map(c=>c.id),'*'," AND gateway!='demo' ORDER BY created_at DESC")
   ]);
   const byId = items => new Map(items.map(item=>[item.id,item]));
   const variantMap=byId(variants),customerMap=byId(customers),serviceMap=byId(serviceRows),userMap=byId(users);
@@ -475,13 +480,14 @@ async function caseRows(rows) {
   for(const document of documents) {if(!have.has(document.case_id)) have.set(document.case_id,new Set());have.get(document.case_id).add(document.doc_type);}
   return rows.map(c=>{
     const variant=variantMap.get(c.variant_id),details=json(c,'details_json',{});
-    const payment=payments.find(p=>p.case_id===c.id && p.status==='PAID') || payments.find(p=>p.case_id===c.id);
+    const payment=payments.find(p=>p.case_id===c.id && ['PAID','verified','offline_approved'].includes(p.status)) || payments.find(p=>p.case_id===c.id);
     const requirements=json(variant,'documents_json',[]);
-    const missing=requirements.some(d=>d.required && (!d.when || !String(details[d.when.field]||'').trim() || String(details[d.when.field])===String(d.when.equals)) && !have.get(c.id)?.has(d.label));
-    return {...c,payment_state:payment ? payment.status==='PAID' ? 'paid' : payment.status : c.payment_state,document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,amounts:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : amounts(variant),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
+    const received=documents.find(doc=>doc.case_id===c.id && doc.doc_type===RECEIVED_DOCUMENT_TYPE);
+    const missing=requirements.some(d=>d.required && matchesIntake(d.when, details, true) && !have.get(c.id)?.has(d.label));
+    return {...c,payment_state:payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received ? publicDocument(received) : null,amounts:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : amounts(variant,details),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
   });
 }
-function amounts(v) { const p=servicePrices.get(v.id);return priceAmounts(v,p?.price,p?.original); }
+function amounts(v, details = {}) { const p=servicePrices.get(v.id);const base=priceAmounts(v,p?.price,p?.original);return json(v,'fields_json',[]).some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base,details) : base; }
 async function caseDetailData(c, user) {
   const [item, documents, notes] = await Promise.all([
     caseRow(c),
@@ -510,14 +516,14 @@ async function recomputeCase(id, {sync=true} = {}) {
   const docs = (await all('SELECT * FROM documents WHERE case_id=$id AND state!=$state', { $id: id, $state: 'replaced' }));
   const have = new Set(docs.map(d => d.doc_type));
   const details = json(c, 'details_json', {});
-  const requiredDocs = docsReq.filter(d => d.required && (!d.when || !Object.hasOwn(details, d.when.field) || !String(details[d.when.field] || '').trim() || String(details[d.when.field]) === String(d.when.equals)));
+  const requiredDocs = docsReq.filter(d => d.required && matchesIntake(d.when, details, true));
   const documentState = requiredDocs.every(d => have.has(d.label)) ? 'complete' : 'missing';
   const paid = (await one("SELECT * FROM payments WHERE case_id=$id AND status IN ('PAID','verified','offline_approved') AND gateway!='demo'", { $id: id }));
   const latest = await one("SELECT status FROM payments WHERE case_id=$id AND gateway='direct_upi' ORDER BY created_at DESC LIMIT 1",{$id:id});
   const paymentState = paid ? 'paid' : latest?.status || 'unpaid';
   let status = c.status;
   if (!['Assigned','Document Review','Correction Required','Ready to Submit','Submitted to Official Portal','Under Government Review','Customer Action Required','Document Received','Approved','Rejected','Delivered','Closed','Cancelled'].includes(status)) {
-    status = documentState === 'complete' && (paymentState === 'paid' || await one('SELECT case_id FROM payment_exceptions WHERE case_id=$id',{$id:id})) ? 'Ready for Assignment' : documentState === 'missing' ? 'Awaiting Documents' : 'Awaiting Payment';
+    status = documentState === 'complete' && paymentState === 'paid' ? 'Ready for Assignment' : documentState === 'missing' ? 'Awaiting Documents' : 'Awaiting Payment';
   }
   (await run('UPDATE cases SET document_state=$d,payment_state=$p,status=$s,updated_at=$u WHERE id=$id', { $d: documentState, $p: paymentState, $s: status, $u: now(), $id: id }));
   if (sync) await syncCase(id);
@@ -570,7 +576,7 @@ async function missingDocuments(c) {
   const requirements = json((await one('SELECT documents_json FROM variants WHERE id=$id', { $id: c.variant_id })), 'documents_json', []);
   const details = json(c, 'details_json', {});
   const have = new Set((await all("SELECT doc_type FROM documents WHERE case_id=$id AND state='uploaded'", { $id: c.id })).map(d => d.doc_type));
-  return requirements.filter(d => d.required && (!d.when || !String(details[d.when.field] || '').trim() || String(details[d.when.field]) === String(d.when.equals)) && !have.has(d.label)).map(d => d.label);
+  return requirements.filter(d => d.required && matchesIntake(d.when, details, true) && !have.has(d.label)).map(d => d.label);
 }
 async function documentGate(c, res) {
   const pending = await one('SELECT id FROM upload_intents WHERE case_id=$id AND completed_at IS NULL AND expires_at>$at LIMIT 1', { $id:c.id, $at:now() });
@@ -582,9 +588,8 @@ async function documentGate(c, res) {
 }
 async function processingGate(c,res) {
   const paid=await one("SELECT id FROM payments WHERE case_id=$id AND status IN ('PAID','verified','offline_approved') AND gateway!='demo'",{$id:c.id});
-  const exception=await one('SELECT case_id FROM payment_exceptions WHERE case_id=$id',{$id:c.id});
-  if(paid || exception) return true;
-  send(res,409,{error:'Verified payment or an administrator exception is required before processing'});return false;
+  if(paid) return true;
+  send(res,409,{error:'Payment must be received and verified before back-office processing'});return false;
 }
 async function routeApi(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true });
@@ -598,6 +603,7 @@ async function routeApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/logout') return send(res, 200, { ok: true }, { 'set-cookie': 'so_session=; Max-Age=0; Path=/' });
   const user = (await requireUser(req, res));
   if (!user) return;
+  if (await announcementSystem.handle(req,res,url,user)) return;
   if (req.method === 'GET' && url.pathname === '/api/notifications') {
     const rows = await all('SELECT * FROM notifications WHERE user_id=$user AND read_at IS NULL ORDER BY created_at DESC LIMIT 500',{$user:user.id});
     return send(res,200,{notifications:rows.map(row=>{let data={};try {data=JSON.parse(row.body);} catch {}return {id:row.id,title:row.title,...data,createdAt:row.created_at};})});
@@ -744,7 +750,7 @@ async function routeApi(req, res, url) {
     return send(res, 200, { customers: (await all('SELECT id,name,mobile,email FROM customers WHERE (mobile LIKE $q OR name LIKE $q) AND ($sales=0 OR created_by=$user) LIMIT 20', { $q: q, $sales: user.role === 'sales' ? 1 : 0, $user: user.id })) });
   }
   if (req.method === 'GET' && url.pathname === '/api/cases') {
-    const where = user.role === 'sales' ? 'WHERE sales_user_id=$uid' : user.role === 'backoffice' ? "WHERE status!='Draft' AND (backoffice_user_id=$uid OR backoffice_user_id IS NULL OR status IN ('Awaiting Documents','Awaiting Payment'))" : '';
+    const where = user.role === 'sales' ? 'WHERE sales_user_id=$uid' : user.role === 'backoffice' ? "WHERE status!='Draft' AND EXISTS (SELECT 1 FROM payments p WHERE p.case_id=cases.id AND p.status IN ('PAID','verified','offline_approved') AND p.gateway!='demo') AND (backoffice_user_id=$uid OR backoffice_user_id IS NULL)" : '';
     const params = user.role === 'admin' ? {} : { $uid: user.id };
     return send(res, 200, { cases: await caseRows(await all(`SELECT * FROM cases ${where} ORDER BY updated_at DESC`, params)) });
   }
@@ -762,7 +768,7 @@ async function routeApi(req, res, url) {
       if (field.defaultWhen && b.details[field.defaultWhen.field] === field.defaultWhen.equals) b.details[field.label] = field.defaultWhen.value;
     }
     for (const field of fields) {
-      if (field.when && b.details?.[field.when.field] !== field.when.equals) continue;
+      if (!matchesIntake(field.when, b.details)) continue;
       const value = String(b.details?.[field.label] ?? '').trim();
       if (/\bname\b|\bsurname\b/i.test(field.label) && /\p{N}/u.test(value)) return send(res, 400, { error: `${field.label} cannot contain numbers` });
       if (field.required && !value) return send(res, 400, { error: `Enter ${field.label}` });
@@ -777,7 +783,7 @@ async function routeApi(req, res, url) {
       customerId = id('cus');
       (await run('INSERT INTO customers VALUES ($id,$name,$mobile,$email,$address,$created_by,$created_at)', { $id: customerId, $name: b.customer.name, $mobile: b.customer.mobile, $email: b.customer.email || '', $address: b.customer.address || '', $created_by: user.id, $created_at: now() }));
     }
-    const allowedFields = new Set(fields.filter(field => !field.when || b.details?.[field.when.field] === field.when.equals || (field.defaultWhen && b.details?.[field.defaultWhen.field] === field.defaultWhen.equals)).map(field => field.label).filter(label => !/password/i.test(label)));
+    const allowedFields = new Set(fields.filter(field => matchesIntake(field.when, b.details) || (field.defaultWhen && b.details?.[field.defaultWhen.field] === field.defaultWhen.equals)).map(field => field.label).filter(label => !/password/i.test(label)));
     const details = Object.fromEntries(Object.entries(b.details || {}).filter(([key, value]) => allowedFields.has(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')).map(([key, value]) => [key, String(value).slice(0, 500)]));
     const caseId = id('case');
     (await run(`INSERT INTO cases VALUES ($id,$ref,$customer_id,$service_id,$variant_id,$sales_user_id,NULL,'Draft','Normal',NULL,'SO-CONSENT-2026-01',$consent_at,$details,NULL,NULL,'missing','unpaid',NULL,NULL,$created_at,$updated_at,NULL,NULL)`,
@@ -791,6 +797,7 @@ async function routeApi(req, res, url) {
   if (caseMatch) {
     const c = (await one('SELECT * FROM cases WHERE id=$id OR ref=$id' + (db.cloud && req.method === 'POST' && caseMatch[2]!=='upload-url' ? ' FOR UPDATE' : ''), { $id: caseMatch[1] }));
     if (!c || !canSee(user, c)) return send(res, c ? 403 : 404, { error: c ? 'Not allowed' : 'Not found' });
+    if (req.method === 'POST' && user.role === 'backoffice' && !(await processingGate(c,res))) return;
     if (req.method === 'GET' && caseMatch[2] === 'download-all') {
       if (!['backoffice','admin'].includes(user.role)) return send(res, 403, { error: 'Only back office or admin can download a case bundle' });
       const documents = (await all("SELECT * FROM documents WHERE case_id=$id AND state='uploaded' ORDER BY doc_type", { $id: c.id }));
@@ -967,11 +974,7 @@ async function routeApi(req, res, url) {
     if (req.method === 'POST' && caseMatch[2] === 'verify-payment') return send(res,403,{error:'Use administrator receiving-account verification in Payments'});
     if (req.method === 'POST' && caseMatch[2] === 'payment-exception') {
       if(user.role !== 'admin') return send(res,403,{error:'Admin access required'});
-      const b=await body(req),reason=String(b.reason || '').trim().slice(0,1000);
-      if(!reason) return send(res,400,{error:'A recorded reason is required'});
-      await run('INSERT INTO payment_exceptions VALUES ($id,$user,$reason,$at) ON CONFLICT(case_id) DO UPDATE SET approved_by=$user,reason=$reason,created_at=$at',{$id:c.id,$user:user.id,$reason:reason,$at:now()});
-      await paymentSystem.audit(user,'processing-exception',c.id,reason);
-      await recomputeCase(c.id);return send(res,200,{ok:true});
+      return send(res,409,{error:'Processing before verified payment is disabled. Receive and verify the payment first.'});
     }
     if (req.method === 'POST' && caseMatch[2] === 'claim') {
       if (user.role !== 'backoffice') return send(res, 403, { error: 'Only back office can claim cases' });
@@ -1031,8 +1034,8 @@ async function routeApi(req, res, url) {
       FROM payments WHERE status IN ('PAID','verified','offline_approved') AND gateway!='demo' AND COALESCE(verified_at,created_at) >= $start`, params));
     const outstanding = (await caseRows(await all("SELECT * FROM cases WHERE payment_state!='paid' AND status!='Cancelled'"))).reduce((sum,c)=>sum+c.amounts.total,0);
     const operations = {
-      active: (await one("SELECT COUNT(*) n FROM cases WHERE status NOT IN ('Closed','Delivered','Cancelled','Rejected')")).n,
-      ready: (await one("SELECT COUNT(*) n FROM cases WHERE status='Ready for Assignment' AND backoffice_user_id IS NULL")).n,
+      active: (await one("SELECT COUNT(*) n FROM cases WHERE status NOT IN ('Closed','Delivered','Cancelled','Rejected') AND payment_state='paid'")).n,
+      ready: (await one("SELECT COUNT(*) n FROM cases WHERE status='Ready for Assignment' AND payment_state='paid' AND backoffice_user_id IS NULL")).n,
       missingDocuments: (await one("SELECT COUNT(*) n FROM cases WHERE document_state='missing' AND status NOT IN ('Closed','Cancelled')")).n,
       unpaid: (await one("SELECT COUNT(*) n FROM cases WHERE payment_state!='paid' AND status NOT IN ('Closed','Cancelled')")).n,
       followUpsDue: (await one("SELECT COUNT(*) n FROM cases WHERE follow_up_date IS NOT NULL AND follow_up_date <= date('now') AND status NOT IN ('Closed','Delivered','Cancelled','Rejected')")).n,
@@ -1056,7 +1059,7 @@ async function routeApi(req, res, url) {
       WHERE u.role='sales' AND u.active=1 GROUP BY u.id ORDER BY collected DESC,cases DESC`, params));
     const backofficePerformance = (await all(`SELECT u.id,u.name,u.role,COUNT(DISTINCT CASE WHEN c.updated_at >= $start THEN c.id END) assigned,
       SUM(CASE WHEN c.completed_at >= $start THEN 1 ELSE 0 END) completed,
-      SUM(CASE WHEN c.status NOT IN ('Closed','Delivered','Cancelled','Rejected') THEN 1 ELSE 0 END) active
+      SUM(CASE WHEN c.status NOT IN ('Closed','Delivered','Cancelled','Rejected') AND c.payment_state='paid' THEN 1 ELSE 0 END) active
       FROM users u LEFT JOIN cases c ON c.backoffice_user_id=u.id
       WHERE u.role='backoffice' AND u.active=1 GROUP BY u.id ORDER BY completed DESC,assigned DESC`, params));
     const bucket = period.group === 'day' ? "date(created_at)" : "strftime('%Y-%m',created_at)";
@@ -1113,7 +1116,7 @@ async function routeApi(req, res, url) {
       const employees = (await all("SELECT id,username,name,role,active FROM users WHERE role IN ('sales','backoffice') ORDER BY role,name")).map(employee => {
         const owned = work.filter(c => c[employee.role === 'sales' ? 'sales_user_id' : 'backoffice_user_id'] === employee.id);
         const completed = owned.filter(c => within(c.completed_at) && ['Closed','Delivered'].includes(c.status));
-        const open = owned.filter(c => !['Closed','Delivered','Cancelled','Rejected'].includes(c.status));
+        const open = owned.filter(c => !['Closed','Delivered','Cancelled','Rejected'].includes(c.status) && payments.some(payment=>payment.case_id===c.id));
         return { ...employee, cases: owned.filter(c => within(c.created_at)).length, completed: completed.length,
           collected: employee.role === 'sales' ? payments.filter(p => p.sales_user_id === employee.id && within(p.verified_at || p.created_at)).reduce((sum,p) => sum + p.amount, 0) : 0,
           handled: new Set(activity.filter(n => n.actor_id === employee.id && within(n.created_at)).map(n => n.case_id)).size,
@@ -1132,7 +1135,7 @@ function staticFile(req, res, url) {
   const path = resolve('public', url.pathname === '/' ? 'index.html' : '.' + decodeURIComponent(url.pathname));
   if (!path.startsWith(resolve('public') + '/') && !path.startsWith(resolve('public') + '\\')) { res.writeHead(403).end(); return; }
   if (!existsSync(path)) { res.writeHead(404).end('Not found'); return; }
-  const types = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm', '.ttf': 'font/ttf', '.svg': 'image/svg+xml' };
+  const types = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm', '.ttf': 'font/ttf', '.svg': 'image/svg+xml', '.pdf':'application/pdf' };
   res.writeHead(200, { 'content-type': types[extname(path)] || 'application/octet-stream' });
   res.end(readFileSync(path));
 }
@@ -1183,7 +1186,7 @@ export async function handler(req, res) {
     const paymentRequest = /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/payment-order$/.test(url.pathname);
     const readOnly = (req.method === 'GET' && (
       ['/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments'].includes(url.pathname) ||
-      /^\/api\/cases\/[^/]+$/.test(url.pathname) || /^\/api\/documents\/[^/]+\/(download|preview|view)$/.test(url.pathname)
+      /^\/api\/cases\/[^/]+$/.test(url.pathname) || /^\/api\/documents\/[^/]+\/(download|preview|view)$/.test(url.pathname) || /^\/api\/announcements(?:\/[^/]+\/image)?$/.test(url.pathname)
     )) || (req.method === 'POST' && ['/api/login','/api/logout'].includes(url.pathname));
     const route = async () => {
       // List screens do not need to reload payment configuration or hold a

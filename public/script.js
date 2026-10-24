@@ -9,6 +9,11 @@ let caseNotifications = [];
 let updatesTimer = null;
 let updatesInFlight = false;
 let caseListNeedsRender = false;
+let recentUpdatesOpen = false;
+let announcements = [];
+let announcementsUnavailable = false;
+let announcementPosting = false;
+let announcementPreviewUrl = '';
 let testPricingMode = true;
 let cloudUploads = false;
 let googleStatus = null;
@@ -57,7 +62,7 @@ const h = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;
 const dateTime = value => value ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '-';
 const roleName = role => ({admin:'Administrator',sales:'Sales employee',backoffice:'Back office'}[role] || role);
 function icon(name) {
-  const paths={dashboard:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',cases:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',completed:'<rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>',queue:'<path d="M4 5h16v14H4zM4 13h5l2 3h2l2-3h5M8 9h8"/>',payments:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',admin:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',employees:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',plus:'<path d="M12 5v14M5 12h14"/>',more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',logout:'<path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h12"/>',switch:'<path d="M4 7h15l-3-3M20 17H5l3 3M20 7v4M4 17v-4"/>'};
+  const paths={download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',dashboard:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',cases:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',completed:'<rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>',queue:'<path d="M4 5h16v14H4zM4 13h5l2 3h2l2-3h5M8 9h8"/>',payments:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',admin:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',employees:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',plus:'<path d="M12 5v14M5 12h14"/>',more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',logout:'<path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h12"/>',switch:'<path d="M4 7h15l-3-3M20 17H5l3 3M20 7v4M4 17v-4"/>'};
   return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name === 'pending' ? 'queue' : name]||paths.profile}</svg>`;
 }
 function labelTables() {
@@ -109,8 +114,10 @@ async function boot() {
 }
 
 async function load() {
-  const requests = [api('/api/services'), api('/api/cases'), api('/api/notifications')];
-  const [serviceData, caseData, noticeData] = await Promise.all(requests);
+  const requests = [api('/api/services'), api('/api/cases'), api('/api/notifications'), api('/api/announcements').catch(()=>({unavailable:true}))];
+  const [serviceData, caseData, noticeData, announcementData] = await Promise.all(requests);
+  announcements = announcementData.announcements || [];
+  announcementsUnavailable = Boolean(announcementData.unavailable);
   caseNotifications = noticeData.notifications || [];
   services = serviceData.services;
   testPricingMode = serviceData.testPricingMode;
@@ -228,8 +235,9 @@ function metricCard(label, value, detail, tone = '') {
 function counts() { return cases.reduce((result, item) => { result[item.status] = (result[item.status] || 0) + 1; return result; }, {}); }
 const isCompletedCase = item => ['Closed','Delivered'].includes(item.status);
 
-const pendingStatuses = ['Draft','Awaiting Documents','Awaiting Payment','Correction Required','Customer Action Required'];
-const isPendingCase = item => pendingStatuses.includes(item.status);
+const isPaymentConfirmed = item => item.payment?.gateway !== 'demo' && ['paid','PAID','verified','offline_approved'].includes(item.payment?.status || item.payment_state);
+const isPendingCase = item => !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && !isPaymentConfirmed(item);
+const isActiveCase = item => !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && isPaymentConfirmed(item);
 function notificationSection(notice) {
   const item = cases.find(item => item.id === notice.caseId) || {status:notice.status};
   return isCompletedCase(item) ? 'completed' : isPendingCase(item) ? 'pending' : 'cases';
@@ -258,15 +266,22 @@ async function refreshCaseUpdates() {
   const userId = me.id;
   updatesInFlight = true;
   try {
-    const [caseData,noticeData] = await Promise.all([api('/api/cases'),api('/api/notifications')]);
+    const [caseData,noticeData,announcementData] = await Promise.all([api('/api/cases'),api('/api/notifications'),api('/api/announcements').catch(()=>({unavailable:true}))]);
     if (me?.id !== userId) return;
     const casesChanged = JSON.stringify(cases) !== JSON.stringify(caseData.cases);
-    if (casesChanged) caseListNeedsRender = true;
+    const announcementsChanged = JSON.stringify(announcements) !== JSON.stringify(announcementData.announcements || announcements) || announcementsUnavailable !== Boolean(announcementData.unavailable);
+    if (!announcementData.unavailable) announcements = announcementData.announcements || [];
+    announcementsUnavailable = Boolean(announcementData.unavailable);
+    if (casesChanged || (announcementsChanged && view==='dashboard')) caseListNeedsRender = true;
     cases = caseData.cases;
     caseNotifications = noticeData.notifications || [];
     updateCaseIndicators();
     const editing = document.activeElement?.matches?.('input,select,textarea');
-    if (caseListNeedsRender && !document.querySelector('#drawer,.profile[open],.mobile-more[open]') && !editing && ['dashboard','cases','pending','completed','queue'].includes(view)) {
+    if (announcementsChanged && view==='dashboard' && document.querySelector('.announcement-composer[open]')) {
+      const feed=document.querySelector('#announcementFeed');
+      if(feed) feed.innerHTML=announcementCards();
+    }
+    if (caseListNeedsRender && !document.querySelector('#drawer,.profile[open],.mobile-more[open],.announcement-composer[open]') && !announcementPosting && !editing && ['dashboard','cases','pending','completed','queue'].includes(view)) {
       const search = document.querySelector('#caseSearch')?.value || '';
       const serviceFilter = document.querySelector('#caseServiceFilter')?.value || '';
       render();
@@ -289,26 +304,93 @@ function startCaseUpdatePolling() {
 }
 function renderPendingCases() {
   const rows = cases.filter(isPendingCase).sort((a,b) => Number(b.status === 'Correction Required') - Number(a.status === 'Correction Required') || String(b.updated_at).localeCompare(String(a.updated_at)));
-  return `${pageHead('Pending Cases','Cases awaiting documents, payment, corrections, or customer action.')} ${caseToolbar(rows,false)}<div id="caseList" class="table-shell">${rows.length ? caseTable(rows) : empty('No pending cases. All caught up.')}</div>`;
+  return `${pageHead('Pending Cases','Unpaid cases and payments awaiting verification. Payment must be confirmed before back-office processing.')} ${caseToolbar(rows,false)}<div id="caseList" class="table-shell">${rows.length ? caseTable(rows) : empty('No pending cases. All caught up.')}</div>`;
 }
 
 function renderDashboard() {
-  const c = counts();
-  const mine = (me.role === 'sales' ? cases : cases.filter(item => item.backoffice?.id === me.id || !item.backoffice)).filter(item => !isCompletedCase(item));
+  const workload = me.role === 'backoffice' ? cases.filter(item => item.backoffice?.id === me.id || !item.backoffice) : cases;
+  const mine = workload.filter(item => !isCompletedCase(item));
+  const recent = [...mine].sort((a,b)=>String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0,8);
+  const expanded = document.querySelector('#recentUpdates')?.open ?? recentUpdatesOpen;
   const title = me.role === 'sales' ? 'Sales workspace' : 'Operations workspace';
   return `${pageHead(title, 'Priorities, customer cases, and work requiring action.')}
-    <section class="metric-grid">
-      ${metricCard('Open cases', number(mine.filter(item => !['Closed','Delivered','Cancelled'].includes(item.status)).length), 'Currently active')}
+    <section class="metric-grid overview-metrics">
+      ${metricCard('Active cases', number(mine.filter(isActiveCase).length), 'Payment confirmed')}
       ${metricCard('Missing documents', number(mine.filter(item => item.document_state === 'missing').length), 'Customer follow-up needed', 'amber')}
-      ${metricCard('Payment pending', number(mine.filter(item => ['unpaid','PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(item.payment?.status || item.payment_state)).length), 'Awaiting collection', 'blue')}
-      ${metricCard('Ready to assign', number(c['Ready for Assignment'] || 0), 'Available to operations', 'green')}
+      ${metricCard('Payment pending', number(mine.filter(isPendingCase).length), 'Unpaid or awaiting verification', 'blue')}
+      ${metricCard('Ready to assign', number(mine.filter(item=>item.status==='Ready for Assignment' && isActiveCase(item)).length), 'Available to operations', 'green')}
+      <button type="button" class="metric-card green overview-completed-card" onclick="setView('completed')" aria-label="View completed cases"><span>Completed cases</span><strong>${number(workload.filter(isCompletedCase).length)}</strong><small>View completed applications →</small></button>
     </section>
-    <section class="section-head"><div><h2>Needs attention</h2><p>Most recently updated cases in your workload.</p></div><button class="text-button" onclick="setView('cases')">View all cases</button></section>
-    <div class="table-shell">${mine.length ? caseTable(mine.slice(0, 8)) : empty('No cases need attention right now.')}</div>`;
+    <details id="recentUpdates" class="intake-notices overview-updates" ${expanded ? 'open' : ''} ontoggle="rememberRecentUpdates(this)"><summary><span class="notice-symbol" aria-hidden="true">${icon('queue')}</span><span class="notice-heading"><strong>Recent Updates</strong><small>Most recently updated cases in your workload.</small></span><span class="notice-action"><span class="notice-closed">View details</span><span class="notice-open">Hide details</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></summary><div class="notice-content"><div class="table-shell">${recent.length ? caseTable(recent) : empty('No recent updates yet.')}</div><div class="overview-update-actions"><button class="text-button" onclick="setView('cases')">View all cases</button></div></div></details>${renderAnnouncements()}`;
+}
+
+function rememberRecentUpdates(disclosure) {
+  if (disclosure.isConnected) recentUpdatesOpen = disclosure.open;
+}
+
+function renderAnnouncements() {
+  return `<section class="announcements-section" aria-labelledby="announcementsTitle"><header class="announcements-heading"><div><p class="eyebrow">Team noticeboard</p><h2 id="announcementsTitle">Announcements</h2><p>News, pictures and updates from your admin.</p></div><span class="announcement-section-icon" aria-hidden="true">${icon('queue')}</span></header>${me.role==='admin' ? `<details class="announcement-composer"><summary>${icon('plus')}Post announcement</summary><form onsubmit="publishAnnouncement(event)"><fieldset><label for="announcementTitle">Title<input id="announcementTitle" name="title" maxlength="140" placeholder="What would you like to share?" required></label><label for="announcementBody">Update<textarea id="announcementBody" name="message" maxlength="4000" rows="4" placeholder="Write an update for your team (optional when adding a picture)"></textarea></label><label class="announcement-picture-label" for="announcementPicture">Picture (optional)<input id="announcementPicture" name="picture" type="file" accept="image/jpeg,image/png" onchange="previewAnnouncementPicture(this)"><small>JPG or PNG, up to 2 MB. Post text, a picture, or both.</small></label><div class="announcement-picture-preview" hidden><img alt="Selected announcement picture"><button type="button" class="quiet" onclick="clearAnnouncementPicture()">Remove picture</button></div><p id="announcementError" class="field-warning" role="alert"></p><div class="announcement-publish-actions"><small>Visible to all signed-in staff.</small><button type="submit" class="primary">Publish announcement</button></div></fieldset></form></details>` : ''}<div class="announcements-feed" id="announcementFeed">${announcementCards()}</div></section>`;
+}
+
+function announcementCards() {
+  if(announcementsUnavailable) return '<div class="announcement-empty" role="status">Announcements are temporarily unavailable. We will try again automatically.</div>';
+  if(!announcements.length) return '<div class="announcement-empty"><strong>No announcements yet</strong><p>New team updates will appear here.</p></div>';
+  return announcements.map(item=>`<article class="announcement-card"><header><span class="announcement-avatar" aria-hidden="true">${h((item.author || 'Admin').slice(0,1).toUpperCase())}</span><div><strong>${h(item.author || 'Admin')}</strong><small>${dateTime(item.created_at)}</small></div>${me.role==='admin' ? `<button class="quiet announcement-remove" type="button" onclick="removeAnnouncement('${encodeURIComponent(item.id)}',this)" aria-label="Remove announcement: ${h(item.title)}">Remove</button>` : ''}</header><h3>${h(item.title)}</h3>${item.body ? `<p class="announcement-message">${h(item.body)}</p>` : ''}${item.image_url ? `<a class="announcement-picture" href="${h(item.image_url)}" target="_blank" rel="noopener" aria-label="Open picture: ${h(item.title)}"><img src="${h(item.image_url)}" alt="${h(item.title)}" loading="lazy" decoding="async"></a>` : ''}</article>`).join('');
+}
+
+function clearAnnouncementPicture() {
+  if(announcementPreviewUrl) URL.revokeObjectURL(announcementPreviewUrl);
+  announcementPreviewUrl='';
+  const input=document.querySelector('#announcementPicture');
+  if(input) input.value='';
+  const preview=document.querySelector('.announcement-picture-preview');
+  if(preview) {preview.hidden=true;preview.querySelector('img').removeAttribute('src');}
+}
+
+function previewAnnouncementPicture(input) {
+  const file=input.files[0];
+  if(!file) return clearAnnouncementPicture();
+  const error=document.querySelector('#announcementError');
+  if(!['image/jpeg','image/png'].includes(file.type) || file.size>2000000 || !file.size) {
+    clearAnnouncementPicture();error.textContent='Choose a JPG or PNG picture up to 2 MB.';return;
+  }
+  if(announcementPreviewUrl) URL.revokeObjectURL(announcementPreviewUrl);
+  announcementPreviewUrl=URL.createObjectURL(file);
+  const preview=document.querySelector('.announcement-picture-preview');
+  preview.querySelector('img').src=announcementPreviewUrl;preview.hidden=false;error.textContent='';
+}
+
+async function publishAnnouncement(event) {
+  event.preventDefault();
+  if(me?.role!=='admin' || announcementPosting) return;
+  const form=event.target,error=form.querySelector('#announcementError');
+  const title=form.elements.title.value.trim(),message=form.elements.message.value.trim(),file=form.elements.picture.files[0];
+  if(!title || (!message && !file)) {error.textContent='Add a title and an update or picture.';return;}
+  if(file && (!['image/jpeg','image/png'].includes(file.type) || !file.size || file.size>2000000)) {error.textContent='Choose a JPG or PNG picture up to 2 MB.';return;}
+  const publishButton=form.querySelector('button[type="submit"]');
+  announcementPosting=true;form.querySelector('fieldset').disabled=true;publishButton.textContent='Publishing…';error.textContent='';
+  try {
+    const image=file?{fileName:file.name,mimeType:file.type,size:file.size,content:await fileAsBase64(file)}:undefined;
+    const result=await api('/api/announcements',{method:'POST',body:{title,body:message,...(image?{image}:{})}});
+    announcements=[result.announcement,...announcements.filter(item=>item.id!==result.announcement.id)].slice(0,30);announcementsUnavailable=false;
+    clearAnnouncementPicture();render();toast('Announcement published');
+  } catch(failure) {error.textContent=failure.message;}
+  finally {announcementPosting=false;form.querySelector('fieldset').disabled=false;publishButton.textContent='Publish announcement';}
+}
+
+async function removeAnnouncement(encodedId,button) {
+  if(me?.role!=='admin') return;
+  button.disabled=true;
+  try {
+    const announcementId=decodeURIComponent(encodedId);
+    await api(`/api/announcements/${encodeURIComponent(announcementId)}`,{method:'DELETE'});
+    announcements=announcements.filter(item=>item.id!==announcementId);
+    document.querySelector('#announcementFeed').innerHTML=announcementCards();toast('Announcement removed');
+  } catch(error) {toast(error.message);button.disabled=false;}
 }
 
 function renderCases() {
-  const activeCases = cases.filter(item => !isCompletedCase(item));
+  const activeCases = cases.filter(isActiveCase);
   return `${pageHead('Active Cases', 'Search and manage customer applications still in progress.')}
     ${caseToolbar(activeCases, false)}
     <div id="caseList" class="table-shell">${activeCases.length ? caseTable(activeCases) : empty('No active cases.')}</div>`;
@@ -318,7 +400,7 @@ function renderCompletedCases() {
   const completedCases = cases.filter(isCompletedCase);
   return `${pageHead('Completed Cases', 'Closed customer applications and their received documents.')}
     ${caseToolbar(completedCases, true)}
-    <div id="caseList" class="table-shell">${completedCases.length ? caseTable(completedCases) : empty('No completed cases yet.')}</div>`;
+    <div id="caseList" class="table-shell">${completedCases.length ? caseTable(completedCases, true) : empty('No completed cases yet.')}</div>`;
 }
 
 function caseToolbar(rows, completed) {
@@ -326,18 +408,19 @@ function caseToolbar(rows, completed) {
   return `<div class="toolbar"><div class="toolbar-controls"><label class="search"><span>Search</span><input id="caseSearch" oninput="filterCases(${completed})" placeholder="Case ID, customer, service, phone"></label>${serviceFilter}</div><span id="caseListCount" class="count-label">${number(rows.length)} ${view === 'pending' ? 'pending' : completed ? 'completed' : 'active'} cases</span></div>`;
 }
 
-function caseTable(rows) {
-  return `<table class="table case-table"><thead><tr><th>Case</th><th>Customer</th><th>Service</th><th>Status</th><th>Payment</th><th>Owner</th><th>Updated</th></tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
+function caseTable(rows, completed = false) {
+  return `<table class="table case-table"><thead><tr><th>Case</th><th>Customer</th><th>Service</th><th>Status</th><th>Payment</th><th>Owner</th><th>Updated</th>${completed ? '<th>Download file</th>' : ''}</tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
     <td><strong><button class="case-link" onclick="event.stopPropagation();openCase('${item.id}')" aria-label="Open case ${h(item.ref)}"><i class="case-update-dot" data-case-update="${item.id}" ${caseNotifications.some(notice => notice.caseId === item.id) ? '' : 'hidden'} title="Unread case update" aria-hidden="true"></i>${h(item.ref)}</button></strong><small>${h(item.priority)}</small></td>
     <td><strong>${h(item.customer.name)}</strong><small>${h(item.customer.mobile.replace(/\d(?=\d{4})/g, 'x'))}</small></td>
     <td>${h(item.service.name)}<small>${h(item.variant.name)}</small></td>
     <td>${statusBadge(item.status)}</td><td>${statusBadge(item.payment?.status || item.payment_state)}<small>${money(item.amounts.total)}</small><small>${h(item.payment?.gateway_order_id || '')}</small></td>
     <td>${h(item.backoffice?.name || 'Unassigned')}</td><td>${dateTime(item.updated_at)}</td>
+    ${completed ? `<td class="completed-download-cell">${item.received_document ? `<a class="completed-download" href="${h(item.received_document.download_url)}" download onclick="event.stopPropagation()" aria-label="Download completed document for ${h(item.ref)}">${icon('download')}<span>Download</span></a>` : '<span class="muted">Not available</span>'}</td>` : ''}
   </tr>`).join('')}</tbody></table>`;
 }
 
 function renderQueue() {
-  const rows = cases.filter(item => item.status !== 'Draft' && !isCompletedCase(item));
+  const rows = cases.filter(isActiveCase);
   const groups = ['Ready for Assignment','Assigned','Submitted to Official Portal','Document Received'];
   return `${pageHead('Operations queue', 'Claim, review, submit, and follow up on customer cases.')}
     <section class="metric-grid compact">${groups.map((status, index) => metricCard(status, number(rows.filter(item => item.status === status).length), index === 0 ? 'Unassigned work' : 'Current workload', index === 0 ? 'green' : ''))}</section>
@@ -466,10 +549,10 @@ function filterCases(completed = null) {
   const value = (document.querySelector('#caseSearch')?.value || '').toLowerCase();
   const serviceId = document.querySelector('#caseServiceFilter')?.value || '';
   const filtered = cases
-    .filter(item => view === 'pending' ? isPendingCase(item) : completed === null || isCompletedCase(item) === completed)
+    .filter(item => view === 'pending' ? isPendingCase(item) : completed ? isCompletedCase(item) : view === 'cases' || view === 'queue' ? isActiveCase(item) : completed === null || isCompletedCase(item) === completed)
     .filter(item => !serviceId || item.service.id === serviceId)
     .filter(item => [item.ref,item.customer.name,item.customer.mobile,item.service.name,item.status,statusLabel(item.status)].join(' ').toLowerCase().includes(value));
-  document.querySelector('#caseList').innerHTML = filtered.length ? caseTable(filtered) : empty('No cases match this search.');
+  document.querySelector('#caseList').innerHTML = filtered.length ? caseTable(filtered, Boolean(completed)) : empty('No cases match this search.');
   labelTables();
   const count = document.querySelector('#caseListCount');
   if (count) count.textContent = `${number(filtered.length)} ${view === 'pending' ? 'pending' : completed ? 'completed' : 'active'} cases`;
@@ -489,11 +572,29 @@ function wizardBody(service, variant) {
   if (draft.step === 3) {
     const docs = applicableDocuments(variant?.documents || [], draft.details);
     const missing = docs.filter(item => item.required && !draft.docs[item.label]);
-    return `<p class="muted">${docs.filter(item => item.required).length - missing.length} of ${docs.filter(item => item.required).length} required documents selected. Upload every required document to continue.</p><div class="upload-list">${docs.map(item => `<div class="doc"><span><strong>${h(item.label)}</strong><small>${h(item.note || (item.required ? 'Required document' : 'Optional supporting document'))}</small><em>${h(draft.docs[item.label]?.pages ? `${draft.docs[item.label].pages.length} pages selected` : draft.docs[item.label]?.fileName || 'Not selected')}</em></span>${uploadControls(encodeURIComponent(item.label), '', item.multiple)}${draft.docs[item.label] && !draft.docs[item.label].pages ? `<ul class="selected-pages"><li><span>${h(draft.docs[item.label].fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}')">Preview</button><button type="button" class="quiet" onclick="removeDraftDocument('${encodeURIComponent(item.label)}')" aria-label="Remove ${h(item.label)}">Remove</button></li></ul>` : ''}${draft.docs[item.label]?.pages ? `<ul class="selected-pages">${draft.docs[item.label].pages.map((page,index) => `<li><span>Page ${index+1}: ${h(page.fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}',${index})">Preview</button><button type="button" class="quiet" onclick="removeDraftPage('${encodeURIComponent(item.label)}',${index})" aria-label="Remove page ${index+1}">Remove</button></li>`).join('')}</ul>` : ''}</div>`).join('')}</div><div class="form-actions"><button class="quiet" onclick="wizardBack(2)">Back</button><button class="primary" onclick="saveStep3()" ${missing.length ? 'disabled' : ''}>Continue</button></div>`;
+    return `<p class="muted">${docs.filter(item => item.required).length - missing.length} of ${docs.filter(item => item.required).length} required documents selected. Upload every required document to continue.</p><div class="upload-list">${wizardDocumentUploads(service, docs)}</div><div class="form-actions"><button class="quiet" onclick="wizardBack(2)">Back</button><button class="primary" onclick="saveStep3()" ${missing.length ? 'disabled' : ''}>Continue</button></div>`;
   }
-  const amount = variant?.amounts || { serviceCharge:0, officialFee:0, tax:0, total:0 };
+  const baseAmount = variant?.amounts || { serviceCharge:0, officialFee:0, tax:0, total:0 };
+  const amount = ['income-certificate','domicile-certificate'].includes(service?.slug) ? IntakeRules.withSurcharge(baseAmount, draft.details) : baseAmount;
   const pages = Object.values(draft.docs).reduce((count,doc) => count + (doc.pages?.length || 1), 0);
-  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your case.</p></div></header><div class="intake-review-card"><div class="intake-review-service"><span>Selected service</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge</span><strong>${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div><div class="intake-review-total"><span>Total payable</span><strong>${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div><label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button><button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button></div>`;
+  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your case.</p></div></header><div class="intake-review-card"><div class="intake-review-service"><span>Selected service</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge${amount.surcharge ? ` (includes \u20B9200 ${service.slug === 'domicile-certificate' ? 'affidavit fee' : 'Talathi surcharge'})` : ''}</span><strong>${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div><div class="intake-review-total"><span>Total payable</span><strong>${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div><label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button><button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button></div>`;
+}
+
+function wizardDocumentUploads(service, docs) {
+  const cards = items => items.map(item => `<div class="doc"><span><strong>${h(item.displayLabel || item.label)}</strong><small>${h(item.note || (item.required ? 'Required document' : 'Optional supporting document'))}</small><em>${h(draft.docs[item.label]?.pages ? `${draft.docs[item.label].pages.length} pages selected` : draft.docs[item.label]?.fileName || 'Not selected')}</em></span>${uploadControls(encodeURIComponent(item.label), '', item.multiple)}${draft.docs[item.label] && !draft.docs[item.label].pages ? `<ul class="selected-pages"><li><span>${h(draft.docs[item.label].fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}')">Preview</button><button type="button" class="quiet" onclick="removeDraftDocument('${encodeURIComponent(item.label)}')" aria-label="Remove ${h(item.label)}">Remove</button></li></ul>` : ''}${draft.docs[item.label]?.pages ? `<ul class="selected-pages">${draft.docs[item.label].pages.map((page,index) => `<li><span>Page ${index+1}: ${h(page.fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}',${index})">Preview</button><button type="button" class="quiet" onclick="removeDraftPage('${encodeURIComponent(item.label)}',${index})" aria-label="Remove page ${index+1}">Remove</button></li>`).join('')}</ul>` : ''}</div>`).join('');
+  if (service?.slug !== 'caste-certificate') return cards(docs);
+  const groups = [
+    { title: "Applicant’s Documents / अर्जदाराची कागदपत्रे", labels: ['Applicant Aadhaar Card', 'Applicant School Leaving Certificate', 'Photo'] },
+    { title: "Father’s Documents / वडिलांची कागदपत्रे", labels: ['Father Aadhaar Card', 'Father School Leaving Certificate'] },
+    { title: 'Grandfather / Great-grandfather’s Documents / आजोबा / पणजोबांची कागदपत्रे', labels: ['Grandfather / Great-grandfather School Leaving Certificate'] },
+    { title: 'Other Documents / इतर कागदपत्रे' }
+  ];
+  const assigned = new Set(groups.flatMap(group => group.labels || []));
+  return groups.map(group => {
+    const items = docs.filter(item => group.labels ? group.labels.includes(item.label) : !assigned.has(item.label));
+    if (!items.length) return '';
+    return `<section class="caste-document-section"><h3>${h(group.title)}</h3><div class="upload-list">${cards(items)}</div></section>`;
+  }).join('');
 }
 
 function bindWizard() {
@@ -508,7 +609,8 @@ function bindWizard() {
     for (const field of variant.fields || []) {
       if (field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals) draft.details[field.label] = field.defaultWhen.value;
     }
-    document.querySelector('#serviceFields').innerHTML = (variant.fields || []).filter(field => !field.when || draft.details[field.when.field] === field.when.equals || (field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals)).map(field => {
+    const visibleFields = (variant.fields || []).filter(field => IntakeRules.matches(field.when, draft.details) || (field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals));
+    document.querySelector('#serviceFields').innerHTML = visibleFields.map((field, index) => {
       const key = encodeURIComponent(field.label);
       const rawValue = draft.details[field.label] || '';
       const value = h(rawValue);
@@ -517,23 +619,23 @@ function bindWizard() {
         ? `<select data-field="${key}"><option value="" disabled hidden ${!rawValue ? 'selected' : ''}>Choose…</option>${(field.options || []).map(option => `<option value="${h(option)}" ${option === rawValue ? 'selected' : ''}>${field.label === 'Ration card colour' ? ({ Yellow: '\u{1F7E1} ', Orange: '\u{1F7E0} ', White: '\u26AA ' }[option] || '') : ''}${h(field.label === 'Ration card colour' ? ({ Yellow: 'Yellow (PHH)', Orange: 'Orange (PHH/NPH)', White: 'White (APL)' }[option] || option) : option)}</option>`).join('')}</select>`
         : `<input data-field="${key}" type="${['email','date','number','tel'].includes(field.type) ? field.type : 'text'}" value="${value}" ${field.required ? 'required' : ''} ${field.min !== undefined ? `min="${h(field.min)}"` : ''} ${field.step ? `step="${h(field.step)}"` : ''} ${field.inputMode ? `inputmode="${h(field.inputMode)}"` : ''} ${field.placeholder ? `placeholder="${h(field.placeholder)}"` : ''} maxlength="500" ${/\bname\b|\bsurname\b/i.test(field.label) ? 'oninput="removeNameNumbers(this)"' : ''}>`;
       const incomeYear = service.slug === 'income-certificate' && (field.label === 'Years of Certificate Required' || field.when?.field === 'Years of Certificate Required');
-      return `<label${incomeYear ? ' class="income-year-field"' : ''}>${h(field.displayLabel || field.label)}${control}</label>`;
+      const sectionStart = field.section && visibleFields[index - 1]?.section !== field.section;
+      const sectionEnd = field.section && visibleFields[index + 1]?.section !== field.section;
+      return `${sectionStart ? `<fieldset class="intake-field-section"><legend>${h(field.section)}</legend><p>${h(field.sectionNote || '')}</p><div class="formgrid">` : ''}<label${incomeYear ? ' class="income-year-field"' : field.fullWidth ? ' class="full-width-field"' : ''}>${h(field.displayLabel || field.label)}${control}</label>${sectionEnd ? '</div></fieldset>' : ''}`;
     }).join('');
     document.querySelector('#serviceFields').querySelectorAll('[data-field]').forEach(input => input.onchange = () => {
       const label = decodeURIComponent(input.dataset.field);
       const definition = variant.fields.find(field => field.label === label);
-      if (definition.when && draft.details[definition.when.field] !== definition.when.equals) return;
+      if (!IntakeRules.matches(definition.when, draft.details)) return;
       draft.details[label] = input.value;
-      if ((variant.fields || []).some(field => field.when?.field === label)) {
-        collectFields();
-        for (const field of variant.fields) {
-          if (field.when && draft.details[field.when.field] !== field.when.equals) delete draft.details[field.label];
-        }
-        update();
+      collectFields();
+      for (const field of variant.fields) {
+        if (!IntakeRules.matches(field.when, draft.details)) delete draft.details[field.label];
       }
+      if (variant.fields.some(field => conditionUsesField(field.when, label) || conditionUsesField(field.defaultWhen, label))) update();
+      else document.querySelector('#svcInfo').innerHTML = serviceGuidance(service, variant, draft.details);
     });
-    const docs = applicableDocuments(variant.documents, draft.details);
-    document.querySelector('#svcInfo').innerHTML = `<strong>${h(service.description)}</strong><p>${docs.map(item => h(item.label)).join(' · ')}</p><small>${h(variant.instructions || 'Confirm documents and fees before submission.')}</small><span>Fees to confirm before payment</span>`;
+    document.querySelector('#svcInfo').innerHTML = serviceGuidance(service, variant, draft.details);
     if (draft.validationStep === 2) validateWizardFields(document.querySelectorAll('#serviceFields [data-field]'), false);
   };
   serviceSelect.onchange = () => { collectFields(); draft.details = {}; draft.variantId = ''; delete draft.validationStep; update(); };
@@ -541,7 +643,46 @@ function bindWizard() {
 }
 
 function applicableDocuments(documents, details) {
-  return documents.filter(item => !item.when || !Object.hasOwn(details || {}, item.when.field) || !String(details[item.when.field] || '').trim() || String(details[item.when.field]) === String(item.when.equals));
+  return documents.filter(item => IntakeRules.matches(item.when, details, true));
+}
+
+function conditionUsesField(condition, label) {
+  return Boolean(condition && (condition.field === label || (condition.all || condition.any || []).some(rule => conditionUsesField(rule, label))));
+}
+
+function serviceGuidance(service, variant, details) {
+  const key = service.id || service.slug;
+  const current = document.querySelector('#svcInfo .intake-notices');
+  const open = current?.dataset.service === key ? current.open : draft.noticeOpen?.[key];
+  return `<details class="intake-notices" data-service="${h(key)}" ${open ? 'open' : ''} ontoggle="rememberNoticeState(this)"><summary><span class="notice-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/></svg></span><span class="notice-heading"><strong>Important Notices</strong><small>कागदपत्रे व महत्त्वाच्या सूचना</small></span><span class="notice-action"><span class="notice-closed">View details</span><span class="notice-open">Hide details</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></summary><div class="notice-content">${serviceGuidanceBody(service, variant, details)}</div></details>${affidavitNotice(service, variant, details)}`;
+}
+
+function rememberNoticeState(disclosure) {
+  if (!disclosure.isConnected) return;
+  draft.noticeOpen ||= {};
+  draft.noticeOpen[disclosure.dataset.service] = disclosure.open;
+}
+
+function affidavitNotice(service, variant, details) {
+  if (service.slug !== 'domicile-certificate' || details[IntakeRules.addressProof] !== 'No') return '';
+  return `<aside class="income-fee-notice affidavit-notice" role="status"><strong>Affidavit required / प्रतिज्ञापत्र आवश्यक</strong><p>पत्त्याचा पुरावा उपलब्ध नसल्यामुळे प्रतिज्ञापत्र करावे लागेल. त्यासाठी सेवा शुल्कात अतिरिक्त ₹२०० जोडले जातील.</p><small>You will need an affidavit because address proof is unavailable. An additional ₹200 will be added to the service fee.</small><div><span>Additional affidavit fee</span><strong>₹200.00</strong></div><div><span>Total service fee</span><strong>${money((variant.amounts?.serviceCharge || 0) + 20000)}</strong></div></aside>`;
+}
+
+function serviceGuidanceBody(service, variant, details) {
+  if (service.slug === 'income-certificate') return incomeGuidance(variant, details);
+  const docs = applicableDocuments(variant.documents || [], details);
+  const notes = (variant.instructions || 'सर्व आवश्यक कागदपत्रांच्या स्पष्ट व संपूर्ण प्रती अपलोड करा. / Upload clear and complete copies of all required documents.').split('\n').filter(Boolean);
+  return `<section class="income-guidance"><header><h3>आवश्यक कागदपत्रे</h3><p>निवडलेल्या माहितीनुसार कागदपत्रांची यादी · Required documents</p></header><ul class="income-checklist">${docs.map(doc => `<li><span aria-hidden="true">✓</span><div>${h(doc.marathiLabel || doc.label)}</div></li>`).join('')}</ul><aside class="income-notes" aria-label="Important notes"><h4>महत्त्वाच्या सूचना / Important notes</h4><ul>${notes.map(note => {
+    const separator = note.search(/\s\/\s(?=[A-Z][a-z])/);
+    return separator < 0 ? `<li>${h(note)}</li>` : `<li>${h(note.slice(0, separator))}<small>${h(note.slice(separator + 3))}</small></li>`;
+  }).join('')}</ul></aside></section>`;
+}
+
+function incomeGuidance(variant, details) {
+  const docs = applicableDocuments(variant.documents, details);
+  const bringReport = details['Ration card area'] === 'City' && details[IntakeRules.available] === 'No' && details[IntakeRules.willing] === 'Yes';
+  const extra = IntakeRules.surcharge(details);
+  return `<section class="income-guidance"><header><h3>आवश्यक कागदपत्रे</h3><p>निवडलेल्या माहितीनुसार कागदपत्रांची यादी · Required documents</p></header><ul class="income-checklist">${docs.map(doc => `<li><span aria-hidden="true">✓</span><div>${h(doc.marathiLabel || doc.label)}</div></li>`).join('')}</ul><aside class="income-notes" aria-label="Important notes"><h4>महत्त्वाच्या सूचना / Important notes</h4><ul><li>पांढऱ्या रेशन कार्डधारकांसाठी फॉर्म १६ किंवा आयकर विवरणपत्र (ITR) आवश्यक आहे.<small>For white ration card holders, Form 16 or ITR is required.</small></li><li>कोणत्याही निवडलेल्या वर्षाचे उत्पन्न ₹१ लाखापेक्षा जास्त असल्यास वेतन पावती, आयकर विवरणपत्र (ITR) किंवा फॉर्म १६ यापैकी कोणताही एक पुरावा अपलोड करणे आवश्यक आहे.<small>If income exceeds ₹1 lakh in any selected year, upload any ONE: Salary/Pay Slip, ITR (Income Tax Return), or Form 16.</small></li><li>ग्रामीण रेशन कार्डधारकांसाठी तलाठी अहवाल आवश्यक आहे.<small>A Talathi report is required for rural ration card holders.</small></li></ul></aside>${bringReport ? `<section class="income-download"><h4>तलाठी अहवाल मिळवा / Obtain your Talathi report</h4><a class="primary" href="/downloads/income-certificate-form.pdf" download>अर्ज डाउनलोड करा / Download application form (PDF)</a><a href="/downloads/talathi-report-form.pdf" download>तलाठी अहवाल नमुना / Download report template (PDF)</a><ol><li>अर्ज डाउनलोड करून प्रिंट काढा व संपूर्ण माहिती भरा.<small>Download, print and complete the application form.</small></li><li>भरलेला अर्ज तलाठ्यांकडे घेऊन जा आणि अहवालावर त्यांची सही व शिक्का घ्या.<small>Take the completed form to the Talathi and obtain their signature and stamp on the report.</small></li><li>सही व शिक्का असलेला संपूर्ण अहवाल कागदपत्रे विभागात अपलोड करा.<small>Upload every page of the signed and stamped report in the Documents section.</small></li></ol></section>` : ''}${extra ? `<div class="income-fee-notice" role="status"><strong>अतिरिक्त शुल्क: ₹२०० / Additional fee: ₹200</strong><p>तलाठी अहवाल उपलब्ध नसल्यामुळे आणि तो आणण्यास नकार दिल्यामुळे मूळ सेवा शुल्कात ₹२०० जोडले जातील.</p><small>₹200 is added to the base service fee because you selected No for both report availability and willingness to bring it.</small><p><strong>Total service fee: ${money((variant.amounts?.serviceCharge || 0) + extra)}</strong></p></div>` : ''}</section>`;
 }
 
 function rerenderWizard({keepScroll=false}={}) {const scroll=keepScroll?(document.querySelector('#drawer .panel')?.scrollTop||0):0;closeDrawer();drawWizard();if(keepScroll) document.querySelector('#drawer .panel').scrollTop=scroll;}
@@ -758,7 +899,7 @@ function documentChecklist(item, documents) {
     const submitted = uploaded.some(doc => reupload.submittedDocumentIds?.includes(doc.id) || (!reupload.pending && doc.version > 1));
     const editable = !['Closed','Delivered','Cancelled'].includes(item.status);
     const highlight = pending ? 'doc-reuploaded-pending' : requested ? 'doc-reupload-requested' : submitted ? 'doc-reuploaded-submitted' : '';
-    return `<div class="doc ${highlight}"><span><strong>${h(requirement.label)}</strong><small>${uploaded.length ? requirement.multiple ? `${uploaded.length} report pages uploaded` : `Uploaded version ${uploaded[0].version}` : requirement.required ? 'Required document missing' : 'Optional supporting document'}</small>${requested && !pending ? '<span class="reupload-tag is-requested">Reupload requested</span>' : ''}${statusBadge(uploaded.length ? 'Uploaded' : requirement.required ? 'Missing' : 'Optional')}${uploaded.map((doc,index) => {
+    return `<div class="doc ${highlight}"><span><strong>${h(requirement.displayLabel || requirement.label)}</strong>${requirement.note ? `<small>${h(requirement.note)}</small>` : ''}<small>${uploaded.length ? requirement.multiple ? `${uploaded.length} report pages uploaded` : `Uploaded version ${uploaded[0].version}` : requirement.required ? 'Required document missing' : 'Optional supporting document'}</small>${requested && !pending ? '<span class="reupload-tag is-requested">Reupload requested</span>' : ''}${statusBadge(uploaded.length ? 'Uploaded' : requirement.required ? 'Missing' : 'Optional')}${uploaded.map((doc,index) => {
       const isPending = reupload.pendingDocumentIds?.includes(doc.id);
       const isSubmitted = reupload.submittedDocumentIds?.includes(doc.id) && !(requested && !isPending);
       return `<span class="document-file" data-document-id="${h(doc.id)}">${requirement.multiple ? `<small>Page ${index+1}</small>` : ''}<span class="document-file-name">${h(doc.file_name || requirement.label)}</span>${isPending ? '<span class="reupload-tag is-pending">Reuploaded &middot; not submitted</span>' : isSubmitted ? '<span class="reupload-tag is-submitted">Reuploaded &middot; submitted for review</span>' : doc.version > 1 && !reupload.pending ? '<span class="reupload-tag is-submitted">Reuploaded document</span>' : ''}${documentActions(item,doc)}</span>`;
@@ -957,7 +1098,7 @@ function casePaymentCard(item) {
   const review=raw==='AWAITING_VERIFICATION';
   const labels={PENDING:'Unpaid Payment',INITIATED:'Unpaid Payment',unpaid:'Unpaid Payment',AWAITING_VERIFICATION:'Under review',FAILED:'Claim rejected',CANCELLED:'Cancelled',EXPIRED:'Expired',REFUNDED:'Refunded'};
   const label=paid ? 'Verified' : labels[raw] || 'Unpaid Payment';
-  return `<section class="detail-section case-payment"><header class="case-payment-heading"><span class="case-payment-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/></svg></span><div><h3>Payment</h3><p>${paid ? 'Payment received and verified' : review ? 'Our team is checking the bank record' : 'Pay securely with your UPI app'}</p></div><span class="case-payment-badge ${paid ? 'is-paid' : review ? 'is-review' : ''}"><i></i>${h(label)}</span></header><div class="case-payment-content"><div class="case-payment-total"><span>${paid ? 'Amount paid' : 'Amount payable'}</span><strong>${money(payment?.amount ?? item.amounts.total)}</strong></div>${['sales','admin'].includes(me.role) ? `<button class="case-payment-button" onclick="pay('${item.id}')">${paid ? 'View receipt' : review ? 'Review payment' : 'Open UPI checkout'}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>` : ''}</div>${payment ? `<details class="case-payment-details"><summary>Payment details</summary><dl><dt>Order reference</dt><dd>${h(payment.gateway_order_id)}</dd>${payment.transaction_id ? `<dt>UTR</dt><dd>${h(payment.transaction_id)}</dd>` : ''}${payment.verified_at ? `<dt>Verified on</dt><dd>${dateTime(payment.verified_at)}</dd>` : ''}</dl></details>` : ''}${me.role==='admin' && !paid ? `<details class="case-payment-exception"><summary>Processing exception</summary><p>Allow this case to proceed before payment verification. A reason is required.</p><label>Exception reason<input id="exceptionReason" maxlength="1000" placeholder="Explain why processing should proceed"></label><button onclick="approvePaymentException('${item.id}')">Record exception</button></details>` : ''}</section>`;
+  return `<section class="detail-section case-payment"><header class="case-payment-heading"><span class="case-payment-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/></svg></span><div><h3>Payment</h3><p>${paid ? 'Payment received and verified' : review ? 'Our team is checking the bank record' : 'Pay securely with your UPI app'}</p></div><span class="case-payment-badge ${paid ? 'is-paid' : review ? 'is-review' : ''}"><i></i>${h(label)}</span></header><div class="case-payment-content"><div class="case-payment-total"><span>${paid ? 'Amount paid' : 'Amount payable'}</span><strong>${money(payment?.amount ?? item.amounts.total)}</strong></div>${['sales','admin'].includes(me.role) ? `<button class="case-payment-button" onclick="pay('${item.id}')">${paid ? 'View receipt' : review ? 'Review payment' : 'Open UPI checkout'}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>` : ''}</div>${payment ? `<details class="case-payment-details"><summary>Payment details</summary><dl><dt>Order reference</dt><dd>${h(payment.gateway_order_id)}</dd>${payment.transaction_id ? `<dt>UTR</dt><dd>${h(payment.transaction_id)}</dd>` : ''}${payment.verified_at ? `<dt>Verified on</dt><dd>${dateTime(payment.verified_at)}</dd>` : ''}</dl></details>` : ''}</section>`;
 }
 
 function caseDetail(item, documents, notes) {
@@ -971,11 +1112,12 @@ function caseDetail(item, documents, notes) {
     <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div>${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div><div class="upload-list">${documentChecklist(item, documents)}</div>${reuploadSubmissionPanel(item)}</section>
     ${receivedDocumentPanel(item, documents)}
     <section class="detail-section"><div class="panel-title"><div><h3>Timeline</h3><p>Recorded status changes and internal notes.</p></div></div><div class="timeline">${notes.length ? notes.map(note => `<div><i></i><span><strong>${h(statusLabel(note.new_status))}</strong><p>${h(note.note || 'Status updated')}</p><small>${h(note.actor)} · ${dateTime(note.created_at)}</small></span></div>`).join('') : empty('No updates yet.')}</div></section>
-    ${me.role === 'backoffice' && item.status === 'Ready for Assignment' ? `<div class="sticky-actions"><button class="primary" onclick="claim('${item.id}')">Claim case</button></div>` : ''}
+    ${me.role === 'backoffice' && isPaymentConfirmed(item) && item.status === 'Ready for Assignment' ? `<div class="sticky-actions"><button class="primary" onclick="claim('${item.id}')">Claim case</button></div>` : ''}
     ${['backoffice','admin'].includes(me.role) ? progressControls(item) : ''}`;
 }
 
 function progressControls(item) {
+  if (!isPaymentConfirmed(item)) return '';
   const next = {
     'Draft':['Awaiting Documents','Awaiting Payment','Ready for Assignment','Cancelled'], 'Awaiting Documents':['Awaiting Payment','Ready for Assignment','Correction Required','Cancelled'],
     'Awaiting Payment':['Ready for Assignment','Cancelled'], 'Ready for Assignment':['Assigned','Cancelled'], 'Assigned':['Document Review','Ready to Submit','Correction Required','Customer Action Required','Cancelled'],
@@ -1099,7 +1241,7 @@ async function saveDriveRootFolder(button) {
 }
 async function activateGoogleSheets() { try { toast('Verifying workbook and syncing cases'); const result = await api('/api/google/sheets/activate', { method:'POST' }); await load(); toast(`Google Sheets live: ${result.syncedCases} cases synced`); } catch (error) { toast(error.message); } }
 async function setAnalyticsPeriod(period) { analyticsPeriod = period; adminAnalytics = await api(`/api/admin/dashboard?period=${period}`); render(); }
-async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/logout', { method:'POST' });clearTimeout(updatesTimer);caseNotifications=[]; me = null;view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';renderLogin(); }
+async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/logout', { method:'POST' });clearTimeout(updatesTimer);caseNotifications=[];recentUpdatesOpen=false;announcements=[];announcementsUnavailable=false;announcementPosting=false;if(announcementPreviewUrl) URL.revokeObjectURL(announcementPreviewUrl);announcementPreviewUrl=''; me = null;view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';renderLogin(); }
 async function setView(next) {
   if(drawerBusy) return;
   closeDrawer();view=next;render();
@@ -1111,7 +1253,8 @@ async function setView(next) {
 }
 
 Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, previewDraftDocument, previewDocument, closeDocumentPreview, changePreviewPage, zoomDocumentPreview, uploadCaseDocument, showReuploadRequest, submitReupload, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
-Object.assign(window, { downloadCaseFiles, wizardBack, removeNameNumbers });
+Object.assign(window, { downloadCaseFiles, wizardBack, removeNameNumbers, rememberNoticeState, rememberRecentUpdates });
+Object.assign(window,{previewAnnouncementPicture,clearAnnouncementPicture,publishAnnouncement,removeAnnouncement});
 Object.assign(window, { saveDriveRootFolder });
 Object.assign(window, { toggleEmployeeDates, applyEmployeePeriod, createEmployee });
 Object.assign(window,{focusSignIn,switchAccount});
@@ -1166,7 +1309,7 @@ function renderPayments() {
       <label class="payment-search-by"><span>Search by</span><select name="searchBy" onchange="updatePaymentSearch(this.value)">${Object.entries(paymentSearchFields).map(([key,label])=>`<option value="${key}" ${key===(new URLSearchParams(paymentFilters).get('searchBy') || 'all')?'selected':''}>${label}</option>`).join('')}</select></label>
       <input id="paymentSearchInput" name="q" type="${['from','to'].includes(new URLSearchParams(paymentFilters).get('searchBy'))?'date':'search'}" aria-label="Search value" placeholder="Search payments" value="${h(new URLSearchParams(paymentFilters).get('q') || '')}">
       <button class="primary payment-search-submit" aria-label="Search payments" title="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
-    </form><div class="payment-search-actions">${paymentFilters?'<button type="button" class="quiet" onclick="resetPaymentFilters()">Clear search</button>':''}<button type="button" class="quiet payment-export-button" onclick="exportPayments()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>Export report</button></div></div>
+    </form><div class="payment-search-actions">${paymentFilters?'<button type="button" class="quiet" onclick="resetPaymentFilters()">Clear search</button>':''}${me.role !== 'sales' ? `<button type="button" class="quiet payment-export-button" onclick="exportPayments()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>Export report</button>` : ''}</div></div>
     <div class="table-shell payment-table-shell">${latest.length ? `<table class="table payment-table"><thead><tr><th><span class="visually-hidden">Select</span></th><th>Customer / case</th><th>Service</th><th>Amount</th><th>Method / UTR</th><th>Status</th><th>Employee / date</th><th>Actions</th></tr></thead><tbody>${latest.map(paymentTableRow).join('')}</tbody></table>` : '<div class="payment-empty"><span>'+icon('payments')+'</span><h3>No payments found</h3><p>Try another search or create a customer case to get started.</p></div>'}</div></section></section>`;
 }
 function paymentSettingsPanel() {
@@ -1198,6 +1341,7 @@ async function setTestPricing(enabled) {await paymentSetting({action:'test-prici
 async function saveServicePrice(event,variantId) {event.preventDefault();await paymentSetting({action:'price',variantId,price:Math.round(Number(event.target.price.value)*100)});}
 async function retryPaymentSync() {try {await api('/api/payments-sync',{method:'POST'});toast('Google Sheets retry completed; inspect integration status for failures.');} catch(e) {toast(e.message);}}
 function exportPayments() {
+  if (!me || me.role === 'sales') return;
   const columns=['id','gateway_order_id','customer_name','customer_mobile','service_name','amount','payment_method','transaction_id','employee_name','status','created_at','verified_by','verified_at'];
   const cell=value=>'"'+String(value??'').replace(/^[=+\-@\t\r]/,"'$&").replace(/"/g,'""')+'"';
   const csv=[columns.join(','),...paymentCaseRows().map(p=>columns.map(k=>cell(k==='amount' ? (p.amount/100).toFixed(2) : p[k])).join(','))].join('\r\n');
@@ -1298,8 +1442,7 @@ async function paymentAction(action,body) {
 async function submitUTR(event) {event.preventDefault();await paymentAction('submit',{utr:event.target.utr.value});}
 async function verifyUPIPayment() {await paymentAction('verify',{});}
 async function downloadReceipt() {try {const p=await api(`/api/payments/${checkout.id}/receipt`);const text=`SUCCESS ONLINE SERVICES\nVerified direct UPI receipt\nOrder: ${p.gateway_order_id}\nCustomer: ${p.customer_name}\nService: ${p.service_name}\n${p.batch ? p.items.map(item=>`Work order: ${item.ref} | ${item.customer_name} | ${item.service_name} | INR ${(item.amount/100).toFixed(2)}`).join('\n')+'\n' : ''}Amount: INR ${(p.amount/100).toFixed(2)}\nUTR: ${p.transaction_id}\nVerified at: ${p.verified_at}\nVerified by: ${p.verified_by}\n`;downloadPaymentAsset(URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),'payment-receipt.txt',true);} catch(e) {toast(e.message);}}
-async function approvePaymentException(caseId) {const reason=document.querySelector('#exceptionReason').value.trim();if(!reason) return toast('Enter a reason');try {await api(`/api/cases/${caseId}/payment-exception`,{method:'POST',body:{reason}});closeDrawer();await load();await openCase(caseId);} catch(e) {toast(e.message);}}
-Object.assign(window,{showPayment,pay,launchUPI,startManualUPI,revealPaymentUTR,paymentAction,submitUTR,verifyUPIPayment,filterPayments,resetPaymentFilters,updatePaymentSearch,exportPayments,confirmReceiver,setTestPricing,saveServicePrice,retryPaymentSync,downloadPaymentAsset,copyPayment,downloadReceipt,approvePaymentException,selectPaymentCase,paySelectedCases,reopenPayment});
+Object.assign(window,{showPayment,pay,launchUPI,startManualUPI,revealPaymentUTR,paymentAction,submitUTR,verifyUPIPayment,filterPayments,resetPaymentFilters,updatePaymentSearch,exportPayments,confirmReceiver,setTestPricing,saveServicePrice,retryPaymentSync,downloadPaymentAsset,copyPayment,downloadReceipt,selectPaymentCase,paySelectedCases,reopenPayment});
 
 
 function batchEligible(p) {

@@ -68,23 +68,68 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal(services.find(s => s.slug === 'domicile-certificate').name, 'Age Nationality & Domicile Certificate');
     assert.ok(domicile.fields.every(field => field.label !== 'Applicant birth place'));
     assert.equal(domicile.documents[1].label,'Father Aadhaar Card');
-    assert.match(domicile.documents.find(doc=>doc.label==='Photo').note,/Photo of the beneficiary/);
+    assert.match(domicile.documents.find(doc=>doc.label==='Photo').note,/photo clicked at the moment/);
     assert.match(domicile.documents.find(doc=>doc.label==='School Leaving Certificate').note,/School Leaving Certificate of the beneficiary/);
     assert.equal(domicile.amounts.total,20000);
     const domicilePayload = {variantId:domicile.id,customer:{name:'Applicant Trial',mobile:'9876543210'},consent:true};
     assert.equal((await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{'Applicant under 18?':'Yes'}}})).status,400);
     for (const applicant of ['Father','Mother','Guardian']) {
-      const result = await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{'Applicant under 18?':'Yes',Applicant:applicant}}});
+      const result = await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{'Applicant under 18?':'Yes',Applicant:applicant,'Is beneficiary birth place in Maharashtra?':'Yes','Do you have proof confirming the entered address?':'Yes'}}});
       assert.equal(result.status,201);
       assert.equal(result.data.case.details.Applicant,applicant);
     }
-    const adult = await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{'Applicant under 18?':'No',Applicant:'Father','Applicant birth date':'2000-01-01','Applicant or beneficiary':'Old field'}}});
+    const adult = await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{'Applicant under 18?':'No',Applicant:'Father','Is beneficiary birth place in Maharashtra?':'Yes','Do you have proof confirming the entered address?':'Yes','Applicant birth date':'2000-01-01','Applicant or beneficiary':'Old field','Birth certificate address':'Stale address'}}});
     assert.equal(adult.status,201);
     assert.equal(adult.data.case.details.Applicant,'Self');
     assert.equal(adult.data.case.details['Applicant birth date'],undefined);
     assert.equal(adult.data.case.details['Applicant or beneficiary'],undefined);
-    const payload = { variantId:variant.id, customer:{ name:'Trial Customer', mobile:'9876543210' }, details:{ 'Years of Certificate Required':'1 year','Reason for application':'Banking', 'Income amount required on certificate (₹)':'150000', 'Ration card colour':'Yellow', 'Ration card area':'City' }, consent:true };
+    assert.equal(adult.data.case.details['Birth certificate address'],undefined);
+    const outsideDetails = {'Do you have proof confirming the entered address?':'Yes','Applicant under 18?':'No','Is beneficiary birth place in Maharashtra?':'No','Birth certificate address':'House 10, Market Road, Belagavi, Karnataka'};
+    assert.ok(!domicile.fields.some(field=>['Birth certificate city','Birth certificate state'].includes(field.label)));
+    for (const key of ['Birth certificate address']) {
+      for (const value of ['', '   ']) assert.equal((await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{...outsideDetails,[key]:value}}})).status,400,`${key} is required outside Maharashtra`);
+    }
+    const outside = await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{...outsideDetails,'Birth certificate city':'Old city','Birth certificate state':'Old state'}}});
+    assert.equal(outside.status,201);
+    for (const [key,value] of Object.entries(outsideDetails)) assert.equal(outside.data.case.details[key],value);
+    assert.equal(outside.data.case.details['Birth certificate city'],undefined);
+    assert.equal(outside.data.case.details['Birth certificate state'],undefined);
+    for(const [answer,expected] of [['Yes',20000],['No',40000]]) {
+      const details={...outsideDetails,'Do you have proof confirming the entered address?':answer,'Ration card area':'City','Is Talathi Report available?':'No','Will you bring a signed Talathi Report?':'No'};
+      const created=await request('/api/cases',{cookie:sales,body:{...domicilePayload,details,amount:1}});
+      assert.equal(created.status,201);
+      assert.equal(created.data.case.amounts.total,expected);
+      assert.equal(created.data.case.details['Do you have proof confirming the entered address?'],answer);
+      assert.equal(created.data.case.details['Ration card area'],undefined,'Unrelated service fee selectors are discarded');
+      for(let retry=0;retry<2;retry++) {
+        const order=await request(`/api/cases/${created.data.case.id}/payment-order`,{cookie:sales,method:'POST'});
+        assert.equal(order.status,201);
+        assert.equal(order.data.amount,expected);
+        assert.equal(new URL(order.data.upiIntent).searchParams.get('am'),(expected/100).toFixed(2));
+      }
+      assert.equal((await request(`/api/cases/${created.data.case.id}`,{cookie:sales})).data.case.amounts.total,expected);
+    }
+    for(const value of [undefined,'','Maybe']) assert.equal((await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{...outsideDetails,'Do you have proof confirming the entered address?':value}}})).status,400);
+    assert.equal((await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{...outsideDetails,'Is beneficiary birth place in Maharashtra?':'Maybe'}}})).status,400);
+    const payload = { variantId:variant.id, customer:{ name:'Trial Customer', mobile:'9876543210' }, details:{ 'Years of Certificate Required':'1 year','Reason for application':'Banking', 'Income amount required on certificate (₹)':'150000', 'Ration card colour':'Yellow', 'Ration card area':'City', 'Is Talathi Report available?':'No', 'Will you bring a signed Talathi Report?':'Yes' }, consent:true };
     const annualFields = variant.fields.filter(field => field.when?.equals === '3 years');
+    assert.deepEqual(annualFields.map(field=>field.label),['2021-2022 income required (₹)','2022-2023 income required (₹)','2023-2024 income required (₹)']);
+    // The server validates the conditional questions and computes the actual checkout amount.
+    assert.equal((await request('/api/cases',{cookie:sales,body:{...payload,details:{...payload.details,'Is Talathi Report available?':''}}})).status,400);
+    for (const [available,bring,expected] of [['Yes',undefined,20000],['No','Yes',20000],['No','No',40000]]) {
+      const details={...payload.details,'Is Talathi Report available?':available,'Will you bring a signed Talathi Report?':bring};
+      const result=await request('/api/cases',{cookie:sales,body:{...payload,details}});
+      assert.equal(result.status,201);
+      assert.equal(result.data.case.amounts.total,expected);
+      const order=await request(`/api/cases/${result.data.case.id}/payment-order`,{cookie:sales,method:'POST'});
+      assert.equal(order.data.amount,expected);
+      assert.equal(new URL(order.data.upiIntent).searchParams.get('am'),(expected/100).toFixed(2));
+      if(available==='Yes') assert.equal(result.data.case.details['Will you bring a signed Talathi Report?'],undefined);
+    }
+    const formDownload=await fetch(origin+'/downloads/income-certificate-form.pdf');
+    assert.equal(formDownload.status,200);
+    assert.equal(formDownload.headers.get('content-type'),'application/pdf');
+    assert.equal(Buffer.from(await formDownload.arrayBuffer()).subarray(0,5).toString(),'%PDF-');
     assert.equal(annualFields.length, 3);
     const annualDetails = { ...payload.details, 'Years of Certificate Required':'3 years', ...Object.fromEntries(annualFields.map((field, index) => [field.label, String(100000 + index * 50000)])) };
     for (const field of annualFields) {
@@ -142,6 +187,8 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const upload = type => ({ docType:type, fileName:'test.pdf', mimeType:'application/pdf', size:pdf.length, content:pdf.toString('base64') });
     assert.equal((await request(path + '/documents', { cookie:sales, body:{...upload('Photo'), content:Buffer.from('fake').toString('base64')} })).status, 400);
     for (const type of ['Aadhaar Card','Photo','Ration Card']) assert.equal((await request(path + '/documents', { cookie:sales, body:upload(type) })).status, 201);
+    assert.equal((await request(path, {cookie:sales})).data.case.document_state, 'missing');
+    for (const type of ['Salary/Pay Slip / ITR / Form 16','Talathi Report']) assert.equal((await request(path + '/documents', {cookie:sales,body:upload(type)})).status,201);
     let item = (await request(path, { cookie:sales })).data;
     assert.equal(item.case.document_state, 'complete');
     assert.equal(item.case.status, 'Awaiting Payment');
@@ -174,7 +221,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal(zip.status, 200);
     const bytes = Buffer.from(await zip.arrayBuffer());
     assert.equal(bytes.readUInt32LE(), 0x04034b50); assert.ok(bytes.includes(Buffer.from('Trial Work/Aadhaar Card/')));
-    assert.equal(bytes.readUInt16LE(bytes.length - 12), 3);
+    assert.equal(bytes.readUInt16LE(bytes.length - 12), 5);
     const order = (await request(path + '/payment-order', { cookie:sales, method:'POST' })).data;
     assert.equal((await request(path + '/verify-payment', { cookie:sales, body:{orderId:order.orderId} })).status, 403);
     await verifyTestOrder(request,admin,sales,order.id);
@@ -232,6 +279,10 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal((await request(path+'/remove-document',{cookie:sales,body:{documentId:received.id}})).status,403);
     assert.equal((await request(received.download_url, { cookie:sales })).status, 403);
     assert.equal((await request(path + '/submit-received-document', { cookie:office, method:'POST' })).status, 200);
+    const completedRow=(await request('/api/cases',{cookie:sales})).data.cases.find(c=>c.id===caseId);
+    assert.equal(completedRow.received_document.id,received.id);
+    assert.equal(completedRow.received_document.download_url,received.download_url);
+    assert.equal(completedRow.received_document.storage_path,undefined);
     assert.equal((await request(received.download_url, { cookie:sales })).status, 200);
     assert.equal((await request(path + '/documents', { cookie:office, body:upload('Photo') })).status, 409);
     assert.equal((await request(path+'/remove-document',{cookie:office,body:{documentId:received.id}})).status,409);
@@ -239,7 +290,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const mirror = JSON.parse(readFileSync(join(root, 'docs', 'Success Online Operations.json')));
     assert.equal(mirror.allCases[created.data.case.ref].status, 'Closed');
     assert.deepEqual(mirror.allCases[created.data.case.ref].missingDocuments, []);
-    assert.equal(mirror.documents[created.data.case.ref].length, 8, 'The mirror retains all three replacement versions in the document history');
+    assert.equal(mirror.documents[created.data.case.ref].length, 10, 'The mirror retains the conditional proofs and all three replacement versions in the document history');
     // Force an incomplete already-assigned legacy record: API must still prevent progression.
     const db = new DatabaseSync(join(root, 'test.sqlite'));
     // Completion/collection events count even when the case was opened earlier.

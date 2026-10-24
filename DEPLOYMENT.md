@@ -5,6 +5,12 @@ website** setup, follow [supabase/README.md](supabase/README.md). The committed
 `vercel.json` supports this setup. Configure the private environment variables and
 run `npm run setup:supabase` before deploying.
 
+For an existing database, run `node scripts/setup-announcements.js` before deploying
+the announcements feature. This adds the announcements table and private access
+rules without changing service prices, cases or existing posts. Administrators
+publish text and JPG/PNG pictures (up to 2 MB) from Overview → Announcements;
+all signed-in staff can read posts, while only admins can publish or remove them.
+
 The instructions below are the optional legacy SQLite backend deployment.
 
 ## Legacy client trial deployment
@@ -51,7 +57,7 @@ Paste [google-apps-script/script.js](google-apps-script/script.js) into Apps Scr
 1. Sign in as sales, choose each service, and confirm required/conditional checklist items.
 2. Continue stays disabled until all required files are selected. Invalid formats and files over 10 MB are rejected. Pending upload failures leave a recoverable case and retry does not create another case.
 3. On a phone, use the single Upload document picker. The device/browser determines which file, photo library and camera sources are available.
-4. Checkout is created with intake. Forward processing requires complete documents and an admin-verified receiving-account payment or a recorded admin exception.
+4. Checkout is created with intake. Forward processing requires complete documents and an admin-verified receiving-account payment. Unpaid and awaiting-verification cases remain Pending; administrator exceptions cannot bypass this requirement.
 5. Back office opens a case and chooses Download all files. Supporting browsers show a save-location picker; other browsers follow their download settings. Extracting the ZIP creates the named folder with a subfolder per document type.
 6. Process through Document Received, upload the final document, and submit it. Sales can then download the final document.
 7. After Google reconnection, confirm new service tabs, Required Documents / Uploaded Required Documents / Missing Documents / Drive Folder columns, and the Documents register. Verify a Drive-backed individual download and ZIP from the hosted domain.

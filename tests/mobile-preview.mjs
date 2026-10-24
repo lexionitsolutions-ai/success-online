@@ -18,7 +18,7 @@ let previewPDF='%PDF-1.4\n';const previewOffsets=[0];
 for(const [index,object] of previewObjects.entries()) {previewOffsets.push(Buffer.byteLength(previewPDF));previewPDF+=`${index+1} 0 obj\n${object}\nendobj\n`;}
 const previewXref=Buffer.byteLength(previewPDF);
 previewPDF+=`xref\n0 ${previewObjects.length+1}\n0000000000 65535 f \n${previewOffsets.slice(1).map(offset=>String(offset).padStart(10,'0')+' 00000 n \n').join('')}trailer\n<< /Size ${previewObjects.length+1} /Root 1 0 R >>\nstartxref\n${previewXref}\n%%EOF`;
-const cases=[{id:'case1',ref:'SO-2026-000128',customer:{name:'Aarav Mehta',mobile:'9876543210'},service:{id:'svc0',name:'Income Certificate'},variant:services[0].variants[0],sales:employee('sales'),backoffice:employee('backoffice'),status:'Awaiting Documents',document_state:'missing',payment_state:'unpaid',priority:'Normal',created_at:'2026-10-12T03:30:00Z',updated_at:'2026-10-12T04:30:00Z',amounts,details:{}},{id:'case2',ref:'SO-2026-000127',customer:{name:'Priya Sharma',mobile:'9876543211'},service:{id:'svc1',name:'Age, Nationality & Domicile Certificate'},variant:services[1].variants[0],sales:employee('sales'),backoffice:null,status:'Ready for Assignment',document_state:'complete',payment_state:'paid',priority:'Normal',created_at:'2026-10-11T03:30:00Z',updated_at:'2026-10-12T02:30:00Z',amounts,details:{}}];
+const cases=[{id:'case1',ref:'SO-2026-000128',customer:{name:'Aarav Mehta',mobile:'9876543210'},service:{id:'svc0',name:'Income Certificate'},variant:services[0].variants[0],sales:employee('sales'),backoffice:employee('backoffice'),status:'Awaiting Documents',document_state:'missing',payment_state:'unpaid',priority:'Normal',created_at:'2026-10-12T03:30:00Z',updated_at:'2026-10-12T04:30:00Z',amounts,details:{}},{id:'case2',ref:'SO-2026-000127',customer:{name:'Priya Sharma',mobile:'9876543211'},service:{id:'svc1',name:'Age Nationality & Domicile Certificate'},variant:services[1].variants[0],sales:employee('sales'),backoffice:null,status:'Ready for Assignment',document_state:'complete',payment_state:'paid',priority:'Normal',created_at:'2026-10-11T03:30:00Z',updated_at:'2026-10-12T02:30:00Z',amounts,details:{}}];
 try {
   for(const width of (process.env.PREVIEW_WIDTHS||'320,390,430,768,1280').split(',').map(Number)) for(const role of (process.env.PREVIEW_ROLES||'sales,backoffice,admin').split(',')) {
     const context=await browser.newContext({viewport:{width,height:844},isMobile:width<=900,hasTouch:width<=900});
@@ -33,6 +33,7 @@ try {
       if(path==='/api/me') return json({user:employee(role)},signedIn?200:401);
       if(path==='/api/login') {signedIn=true;return json({user:employee(role)});}
       if(path==='/api/logout') {signedIn=false;return json({ok:true});}
+      if(path==='/api/announcements') return json({announcements:[]});
       if(path==='/api/notifications') return json({notifications:contextNotices});
       if(path==='/api/notifications/read') {const ids=route.request().postDataJSON().ids;contextNotices=contextNotices.filter(notice=>!ids.includes(notice.id));return json({ok:true});}
       if(path==='/api/services') return json({services,demoPayments:true,cloudUploads:process.env.CLOUD_PREVIEW==='1'});
@@ -46,7 +47,7 @@ try {
       if(path==='/api/admin/dashboard') return json({metrics:{collected:500000,payments:12,businessRevenue:200000,newCases:15,completed:9,outstanding:150000},operations:{active:12,ready:3,missingDocuments:4,unpaid:5,followUpsDue:1,syncFailures:0},trend:[],statusBreakdown:[],servicePerformance:[],staffPerformance:{sales:[{...employee('sales'),cases:12,completed:7,collected:500000}],backoffice:[{...employee('backoffice'),assigned:8,completed:7,active:3}]},recentPayments:[]});
       if(path.startsWith('/api/google')) return json({configured:false,connected:false,live:false});
       if(path.startsWith('/vendor/pdfjs/') && !path.includes('..')) return route.fulfill({contentType:path.endsWith('.mjs')?'application/javascript':path.endsWith('.wasm')?'application/wasm':'application/octet-stream',body:readFileSync(join('public',path.slice(1)))});
-      const file={'/':'index.html','/script.js':'script.js','/styles.css':'styles.css','/mobile.css':'mobile.css','/dashboard.css':'dashboard.css'}[path];
+      const file={'/':'index.html','/intake-rules.js':'intake-rules.js','/script.js':'script.js','/styles.css':'styles.css','/mobile.css':'mobile.css','/dashboard.css':'dashboard.css'}[path];
       if(file) return route.fulfill({contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:readFileSync(join('public',file),'utf8')});
       return route.abort();
     });
@@ -54,6 +55,19 @@ try {
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
     await page.goto('https://mobile-preview.test');
     await page.locator('.profile-button').waitFor();
+    const recentSummary=page.locator('#recentUpdates>summary');
+    assert.equal(await page.locator('#recentUpdates').evaluate(el=>el.open),false);
+    assert.equal(await page.locator('#recentUpdates .table-shell').isVisible(),false);
+    assert.match(await recentSummary.innerText(),/Recent Updates/);
+    await recentSummary.focus();await page.keyboard.press('Enter');
+    assert.equal(await page.locator('#recentUpdates .table-shell').isVisible(),true);
+    await page.evaluate(()=>window.setView('dashboard'));
+    assert.equal(await page.locator('#recentUpdates').evaluate(el=>el.open),true);
+    await recentSummary.click();
+    assert.equal(await page.locator('#recentUpdates .table-shell').isVisible(),false);
+    await page.getByRole('button',{name:'View completed cases',exact:true}).click();
+    await page.getByRole('heading',{name:'Completed Cases',exact:true}).waitFor();
+    await page.evaluate(()=>window.setView('dashboard'));
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Dashboard overflows at '+width);
     const profileBox=await page.locator('.profile-button').boundingBox();
     assert.ok(profileBox.x+profileBox.width>width-40,'Profile must be at the right edge');
@@ -82,8 +96,9 @@ try {
       assert.match(await page.locator('.correction-notice').innerText(),/Replace the blurry/);
       await pendingNav.locator('.nav-update-dot').waitFor({state:'detached'});
       await page.locator('#drawer').getByRole('button',{name:'Close',exact:true}).click();
-      contextCases[0].status='Awaiting Documents';
+      contextCases[0].status='Awaiting Documents';contextCases[0].payment_state='paid';
     }
+    contextCases[0].payment_state='paid';
     await page.evaluate(()=>window.setView('cases'));
     await page.locator('.case-table').waitFor();
     const fits=await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1);
@@ -180,9 +195,11 @@ try {
       await under18.selectOption('Yes');
       assert.deepEqual(await applicant.locator('option').allTextContents(),['Choose…','Father','Mother','Guardian']);
       await applicant.selectOption('Mother');
+      await page.locator('[data-field="Is%20beneficiary%20birth%20place%20in%20Maharashtra%3F"]').selectOption('Yes');
+      await page.locator('[data-field="Do%20you%20have%20proof%20confirming%20the%20entered%20address%3F"]').selectOption('Yes');
       await page.locator('#drawer').getByRole('button',{name:'Continue',exact:true}).click();
       assert.equal(await page.locator('.upload-list .doc strong').nth(1).innerText(),'Father Aadhaar Card');
-      assert.match(await page.locator('.doc').filter({has:page.getByText('Photo',{exact:true})}).innerText(),/Photo of the beneficiary/);
+      assert.match(await page.locator('.doc').filter({has:page.getByText('Live Photo',{exact:true})}).innerText(),/photo clicked at the moment/);
       assert.match(await page.locator('.doc').filter({has:page.getByText('School Leaving Certificate',{exact:true})}).innerText(),/School Leaving Certificate of the beneficiary/);
       assert.equal(await page.locator('.doc').first().evaluate(el=>getComputedStyle(el).borderTopColor),'rgb(174, 189, 208)');
       await page.screenshot({path:join(root,`domicile-documents-${width}.png`)});

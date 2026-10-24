@@ -78,7 +78,7 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const {services,cloudUploads} = (await request('/api/services',{cookie:accounts.sales})).data;
     assert.equal(cloudUploads,true);
     const variant = services.find(s=>s.slug==='income-certificate').variants[0];
-    const payload = {variantId:variant.id,customer:{name:'Cloud Trial',mobile:'9876543210'},details:{'Years of Certificate Required':'1 year','Reason for application':'Banking','Ration card colour':'Yellow','Ration card area':'City'},consent:true};
+    const payload = {variantId:variant.id,customer:{name:'Cloud Trial',mobile:'9876543210'},details:{'Years of Certificate Required':'1 year','Reason for application':'Banking','Ration card colour':'Yellow','Ration card area':'City','Is Talathi Report available?':'No','Will you bring a signed Talathi Report?':'Yes'},consent:true};
     const created = await request('/api/cases',{cookie:accounts.sales,body:payload});
     assert.equal(created.status,201,JSON.stringify(created.data));
     const path = '/api/cases/'+created.data.case.id;
@@ -118,9 +118,9 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const bad = await upload('Photo',Buffer.from('not a pdf'));
     assert.equal(bad.result.status,400);
     // A new valid upload supersedes a failed intent of the same type.
-    for (const type of ['Photo','Ration Card']) assert.equal((await upload(type)).result.status,201);
+    for (const type of ['Photo','Ration Card','Talathi Report']) assert.equal((await upload(type)).result.status,201);
     const detail = await request(path,{cookie:accounts.sales});
-    assert.equal(detail.data.documents.length,3);
+    assert.equal(detail.data.documents.length,4);
     const doc = detail.data.documents[0];
     const download = await request(doc.download_url,{cookie:accounts.backoffice});
     assert.equal(download.status,302);

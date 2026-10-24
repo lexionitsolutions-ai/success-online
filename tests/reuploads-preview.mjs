@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
+import {confirmations} from './payment-fixture.js';
 
 const root=mkdtempSync(join(tmpdir(),'reupload-browser-'));
 const port=46000+Math.floor(Math.random()*2000), origin=`http://localhost:${port}`;
@@ -19,6 +20,7 @@ try {
   browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{})});
   const admin=await browser.newContext();
   await admin.request.post(origin+'/api/login',{data:{username:'admin01',password:'Demo@12345'}});
+  await admin.request.post(origin+'/api/payment-settings',{data:{action:'enable-receiver',ownerConfirmed:true,notes:'Synthetic isolated browser test'}});
   const services=await (await admin.request.get(origin+'/api/services')).json();
   const variant=services.services.find(service=>service.slug==='pf-assistance').variants[0];
   for(const width of [390,1280]) {
@@ -28,7 +30,8 @@ try {
     const created=await (await sales.request.post(origin+'/api/cases',{data:{variantId:variant.id,customer:{name:'Reupload Test',mobile:'9876543210'},consent:true}})).json();
     const id=created.case.id, path=origin+'/api/cases/'+id;
     assert.equal((await sales.request.post(path+'/documents',{data:{docType:'Bank Passbook',fileName:'original.png',mimeType:'image/png',size:png.length,content:png.toString('base64')}})).status(),201);
-    assert.equal((await admin.request.post(path+'/payment-exception',{data:{reason:'Isolated browser test exception'}})).status(),200);
+    assert.equal((await sales.request.post(origin+`/api/payments/${created.case.payment.id}/submit`,{data:{utr:String(900000000000+width)}})).status(),200);
+    assert.equal((await admin.request.post(origin+`/api/payments/${created.case.payment.id}/verify`,{data:confirmations})).status(),200);
     assert.equal((await office.request.post(path+'/claim',{data:{}})).status(),200);
     const officePage=await office.newPage(),salesPage=await sales.newPage(),errors=[];
     officePage.on('pageerror',error=>errors.push(error.message));salesPage.on('pageerror',error=>errors.push(error.message));
