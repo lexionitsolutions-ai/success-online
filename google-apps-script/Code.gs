@@ -133,7 +133,7 @@ const SHEET_HEADERS = {
     "Documents",
     "Updated"
   ],
-  "Gazette Notification": [
+  "Gazette": [
     "Case ID",
     "Customer Name",
     "Phone",
@@ -153,7 +153,17 @@ const SHEET_HEADERS = {
     "Documents",
     "Updated"
   ],
-  "Shop Act / Udyam Aadhaar": [
+  "Shop Act": [
+    "Case ID",
+    "Customer Name",
+    "Phone",
+    "Service",
+    "Status",
+    "Payment",
+    "Documents",
+    "Updated"
+  ],
+  "Udyam Aadhaar Certificate": [
     "Case ID",
     "Customer Name",
     "Phone",

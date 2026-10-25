@@ -108,6 +108,8 @@ async function seed() {
 }
 
 async function seedServiceCatalog() {
+  // Preserve existing Shop Act case, upload and payment links when splitting the combined service.
+  await run("UPDATE services SET slug='shop-act',name='Shop Act' WHERE slug='shop-act-udyam' AND NOT EXISTS (SELECT 1 FROM services WHERE slug='shop-act')");
   const activeSlugs = serviceCatalog.map(service => service.slug);
   await run(`UPDATE services SET active=0 WHERE slug NOT IN (${activeSlugs.map((_, i) => `$s${i}`).join(',')})`, Object.fromEntries(activeSlugs.map((slug, i) => [`$s${i}`, slug])));
   for (const service of serviceCatalog) {
@@ -764,17 +766,21 @@ async function routeApi(req, res, url) {
     if (b.customerId && !(await one('SELECT id FROM customers WHERE id=$id AND ($admin=1 OR created_by=$user)', { $id: b.customerId, $admin: user.role === 'admin' ? 1 : 0, $user: user.id }))) return send(res, 404, { error: 'Customer not found' });
     const fields = json(variant, 'fields_json', []);
     b.details ||= {};
+    globalThis.IntakeRules.applyComputed(fields, b.details);
     for (const field of fields) {
       if (field.defaultWhen && b.details[field.defaultWhen.field] === field.defaultWhen.equals) b.details[field.label] = field.defaultWhen.value;
     }
     for (const field of fields) {
       if (!matchesIntake(field.when, b.details)) continue;
       const value = String(b.details?.[field.label] ?? '').trim();
-      if (/\bname\b|\bsurname\b/i.test(field.label) && /\p{N}/u.test(value)) return send(res, 400, { error: `${field.label} cannot contain numbers` });
+      if (!field.allowNumbers && /\bname\b|\bsurname\b/i.test(field.label) && /\p{N}/u.test(value)) return send(res, 400, { error: `${field.label} cannot contain numbers` });
+      if (field.marathiInput && /[A-Za-z]/.test(value)) return send(res, 400, { error: `Enter ${field.label} in Marathi` });
       if (field.required && !value) return send(res, 400, { error: `Enter ${field.label}` });
       if (field.type === 'select' && !field.options.includes(value)) return send(res, 400, { error: `Choose ${field.label}` });
       if (value && field.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return send(res, 400, { error: `Invalid ${field.label}` });
+      if (value && field.pattern && !new RegExp(`^(?:${field.pattern})$`, 'u').test(value)) return send(res, 400, { error: `Invalid ${field.label}` });
       if (value && field.type === 'number' && (!Number.isFinite(Number(value)) || Number(value) < 0)) return send(res, 400, { error: `Invalid ${field.label}` });
+      if (value && field.type === 'number' && ((field.min !== undefined && Number(value) < field.min) || (field.step === '1' && !Number.isInteger(Number(value))))) return send(res, 400, { error: `Invalid ${field.label}` });
     }
     // Supabase is the primary store; Google availability must not block intake.
     if (process.env.DRIVE_MODE === 'live' && !storageEnabled()) await verifyDriveRoot();
@@ -1141,7 +1147,7 @@ function staticFile(req, res, url) {
 }
 
 async function preserveServicePrices() {
-  for(const v of await all('SELECT v.*,s.slug service_slug FROM variants v JOIN services s ON s.id=v.service_id')) await run('INSERT INTO service_prices(variant_id,price,original_price,original_config) VALUES ($id,$price,$price,$original) ON CONFLICT(variant_id) DO NOTHING',{$id:v.id,$price:v.service_charge,$original:JSON.stringify({serviceCharge:v.service_charge,officialFee:v.official_fee,taxRate:v.tax_rate,...(['income-certificate','domicile-certificate'].includes(v.service_slug) ? {testPricingExempt:true} : {})})});
+  for(const v of await all('SELECT v.*,s.slug service_slug FROM variants v JOIN services s ON s.id=v.service_id')) await run('INSERT INTO service_prices(variant_id,price,original_price,original_config) VALUES ($id,$price,$price,$original) ON CONFLICT(variant_id) DO NOTHING',{$id:v.id,$price:v.service_charge,$original:JSON.stringify({serviceCharge:v.service_charge,officialFee:v.official_fee,taxRate:v.tax_rate,...(['income-certificate','domicile-certificate','caste-certificate','police-clearance'].includes(v.service_slug) ? {testPricingExempt:true} : {})})});
 }
 let initialization;
 export async function initialize({setup = false} = {}) {

@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+
+test('Marathi phonetic input converts words, preserves native text and handles editing',()=>{
+  const listeners={};
+  const context=vm.createContext({Event,document:{addEventListener:(name,fn)=>listeners[name]=fn}});
+  vm.runInContext(readFileSync('public/vendor/sanscript.js','utf8'),context);
+  vm.runInContext(readFileSync('public/marathi-input.js','utf8'),context);
+  const {convert,commit}=context.MarathiInput;
+  assert.equal(convert('raahul suresh paaTiila'),'राहुल सुरेश पाटील');
+  assert.equal(convert('राम पाटील'),'राम पाटील');
+  assert.equal(convert('राम raahul'),'राम राहुल');
+  let preview='';
+  const output={set textContent(value){preview=value;}};
+  const input={value:'raama ',selectionStart:6,matches:()=>true,dispatchEvent(){},closest:()=>({querySelector:()=>output}),setSelectionRange(start,end){this.selectionStart=start;this.selectionEnd=end;}};
+  listeners.input({target:input,data:' ',isComposing:true});
+  assert.equal(input.value,'raama ','Native IME composition is left alone');
+  listeners.input({target:input,data:'a',isComposing:false});
+  assert.equal(input.value,'raama ');
+  assert.match(preview,/राम/);
+  listeners.input({target:input,data:' ',isComposing:false});
+  assert.equal(input.value,'राम ');
+  assert.equal(input.selectionStart,4);
+  input.value='raahul पाटील';input.selectionStart=6;
+  commit(input);
+  assert.equal(input.value,'राहुल पाटील');
+  assert.equal(input.selectionStart,5);
+});

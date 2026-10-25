@@ -23,5 +23,12 @@ globalThis.IntakeRules = (() => {
     const extra = surcharge(details);
     return { ...amounts, serviceCharge: amounts.serviceCharge + extra, total: amounts.total + extra, surcharge: extra };
   }
-  return { matches, surcharge, withSurcharge, available, willing, addressProof };
+  function applyComputed(fields, details) {
+    for (const field of fields) {
+      if (!field.computedSum) continue;
+      const values = field.computedSum.map(label => String(details[label] ?? '').trim());
+      details[field.label] = values.every(value => value !== '' && Number.isFinite(Number(value))) ? String(values.reduce((sum, value) => sum + Number(value), 0)) : '';
+    }
+  }
+  return { matches, surcharge, withSurcharge, available, willing, addressProof, applyComputed };
 })();

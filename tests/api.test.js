@@ -50,20 +50,85 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     for (const dates of ['from=2026-02-30&to=2026-03-01','from=2026-10-12&to=2026-10-01','from=&to=']) assert.equal((await request('/api/admin/employees?period=custom&' + dates, {cookie:admin})).status, 400);
     for (const path of ['/api/me','/api/google/status','/api/google/sheets/status','/api/admin/dashboard?period=week','/api/customers?q=test','/api/cases']) assert.equal((await request(path, { cookie:admin })).status, 200, path);
     const services = (await request('/api/services', { cookie:sales })).data.services;
-    assert.equal(services.length, 15);
-    assert.ok(services.every(service => service.variants.every(variant => variant.fields.every(field => field.type !== 'email'))));
+    assert.equal(services.length, 16);
+    assert.ok(services.filter(service=>!['shop-act','udyam-aadhaar'].includes(service.slug)).every(service => service.variants.every(variant => variant.fields.every(field => field.type !== 'email'))));
     assert.equal((await request('/api/admin/employees', { cookie:admin, body:{...employeeBody, name:'Employee123', username:'invalid.name'} })).status, 400);
     // Exercise checklist enforcement for every service using its conditional selectors.
     for (const service of services) {
       const v = service.variants[0];
       const details = Object.fromEntries(v.fields.filter(f => f.type === 'select').map(f => [f.label, f.options[0]]));
+      if (service.slug === 'gazette') for (const field of v.fields.filter(f=>f.when?.equals==='English')) details[field.label]='Test';
+      if (service.slug === 'ews-certificate') details['Applicant caste']='Test Caste';
+      if (service.slug === 'shop-act') Object.assign(details, {'Shop name':'Shop 123','Business email':'shop@example.com','Business start date':'2026-10-01','Shop address':'Kolhapur','Male workers':'0','Female workers':'0','Business type':'Retail','Business mobile number':'9876543210','Owner / partner names':'Asha Patil','Years at Aadhaar address':'5','Shop size (sq. ft.)':'250','Business investment':'100000','GST registered?':'No'});
+      if (service.slug === 'udyam-aadhaar') Object.assign(details, {'Shop name':'Enterprise 123','Business email':'udyam@example.com','Business start date':'2026-10-01','Shop address':'Kolhapur','Number of workers':'0','Business type':'Retail','Business mobile number':'9876543210','Owner / partner names':'Asha Patil','Business investment':'100000','GST registered?':'No'});
+      if (service.slug === 'police-clearance') for (const person of [1, 2]) {
+        details[`Reference ${person} name`] = 'Known Person';
+        details[`Reference ${person} contact number`] = '9876543210';
+      }
       const r = await request('/api/cases', { cookie:sales, body:{ variantId:v.id, customer:{ name:'Checklist Trial', mobile:'9876543210' }, details, consent:true } });
       assert.equal(r.status, 201, service.name);
       const order=await request(`/api/cases/${r.data.case.id}/payment-order`,{cookie:sales,method:'POST'});
-      const expected = ['income-certificate','domicile-certificate'].includes(service.slug) ? 20000 : 100;
+      const expected = service.slug==='police-clearance' ? 30000 : service.slug==='caste-certificate' ? 40000 : ['income-certificate','domicile-certificate'].includes(service.slug) ? 20000 : 100;
       assert.equal(order.status,201,service.name);assert.equal(order.data.amount,expected);assert.equal(new URL(order.data.upiIntent).searchParams.get('am'),(expected/100).toFixed(2));
     }
+    assert.ok(!services.some(service=>service.slug==='shop-act-udyam'));
+    const validity = services.find(service=>service.slug==='caste-validity').variants[0];
+    assert.deepEqual(validity.fields.map(field=>field.label),['Caste Validity Certificate required for','Applicant under 18?']);
+    assert.equal(validity.documents.length,12);
+    assert.equal(validity.documents.filter(doc=>doc.required).length,11);
+    assert.equal(new Set(validity.documents.map(doc=>doc.section)).size,5);
+    assert.equal(validity.documents.find(doc=>doc.label==='Family Member Caste Validity Record').required,false);
+    const validityPayload={variantId:validity.id,customer:{name:'Validity Trial',mobile:'9876543210'},consent:true};
+    for (const details of [{},{'Caste Validity Certificate required for':'Other','Applicant under 18?':'Yes'},{'Caste Validity Certificate required for':'Job','Applicant under 18?':'Maybe'}]) {
+      assert.equal((await request('/api/cases',{cookie:sales,body:{...validityPayload,details}})).status,400);
+    }
+    assert.equal(services.find(service=>service.slug==='udyam-aadhaar').name,'Udyam Aadhaar Certificate');
+    const shop = services.find(service=>service.slug==='shop-act').variants[0];
+    const shopDetails = {'Shop name':'Shop 123','Business email':'shop@example.com','Business start date':'2026-10-01','Shop address':'Kolhapur','Owned or rented':'Rented','Male workers':'2','Female workers':'3','Number of workers':'999','Business type':'Grocery shop','Business mobile number':'9876543210','Ownership type':'Partnership','Owner / partner names':'Asha Patil, Ram Patil','Years at Aadhaar address':'5','Shop size (sq. ft.)':'250.50','Business investment':'100000','GST registered?':'Yes','GST number':'27ABCDE1234F1Z5'};
+    const shopPayload = {variantId:shop.id,customer:{name:'Shop Trial',mobile:'9876543210'},consent:true};
+    for (const [label,value] of [['Business email','bad-email'],['Business mobile number','123'],['Male workers','-1'],['Female workers','1.5'],['Shop size (sq. ft.)','0'],['GST number','']]) {
+      assert.equal((await request('/api/cases',{cookie:sales,body:{...shopPayload,details:{...shopDetails,[label]:value}}})).status,400,label);
+    }
+    const shopCase = await request('/api/cases',{cookie:sales,body:{...shopPayload,details:shopDetails}});
+    assert.equal(shopCase.status,201);
+    assert.equal(shopCase.data.case.details['Number of workers'],'5');
+    assert.equal(shopCase.data.case.details['Shop name'],'Shop 123');
+    const shopPdf=Buffer.from('%PDF-1.4\nshop proof\n%%EOF');
+    for (const fileName of ['owner.pdf','partner.pdf']) assert.equal((await request(`/api/cases/${shopCase.data.case.id}/documents`,{cookie:sales,body:{docType:'Owner Aadhaar Card',fileName,mimeType:'application/pdf',size:shopPdf.length,content:shopPdf.toString('base64')}})).status,201);
+    const shopSaved=await request(`/api/cases/${shopCase.data.case.id}`,{cookie:sales});
+    assert.equal(shopSaved.data.documents.filter(doc=>doc.doc_type==='Owner Aadhaar Card').length,2);
+    const police = services.find(s => s.slug === 'police-clearance').variants[0];
+    const policeDetails = {'Reason for clearance':'Job','Company or organisation name':'Example Company','Reference 1 name':'First Person','Reference 1 contact number':'9876543210','Reference 2 name':'Second Person','Reference 2 contact number':'9123456780'};
+    const policePayload = {variantId:police.id,customer:{name:'Police Trial',mobile:'9876543210'},consent:true};
+    for (const label of ['Reference 1 name','Reference 1 contact number','Reference 2 name','Reference 2 contact number']) {
+      assert.equal((await request('/api/cases',{cookie:sales,body:{...policePayload,details:{...policeDetails,[label]:' '}}})).status,400,label);
+    }
+    for (const label of ['Reference 1 contact number','Reference 2 contact number']) {
+      assert.equal((await request('/api/cases',{cookie:sales,body:{...policePayload,details:{...policeDetails,[label]:'not-a-number'}}})).status,400,label);
+    }
+    assert.equal((await request('/api/cases',{cookie:sales,body:{...policePayload,details:{...policeDetails,'Reason for clearance':'Invalid'}}})).status,400);
+    const policeCase = await request('/api/cases',{cookie:sales,body:{...policePayload,details:policeDetails}});
+    assert.equal(policeCase.status,201);
+    assert.deepEqual(policeCase.data.case.details,policeDetails);
+    assert.equal(policeCase.data.case.amounts.total,30000);
+    assert.deepEqual(police.documents.map(doc=>doc.displayLabel || doc.label),['Aadhaar Card','PAN Card','School Leaving / Birth / SSC Certificate','Live Photo','Electricity Bill / Light Bill','Office Letter / Self Declaration','Signature on White Paper']);
+    assert.ok(police.documents.every(doc=>doc.required));
     const variant = services.find(s => s.slug === 'income-certificate').variants[0];
+    const gazetteService=services.find(s=>s.slug==='gazette');
+    assert.equal(gazetteService.name,'Gazette');
+    const gazette=gazetteService.variants[0];
+    const gazettePayload={variantId:gazette.id,customer:{name:'Gazette Trial',mobile:'9876543210'},consent:true};
+    assert.equal((await request('/api/cases',{cookie:sales,body:{...gazettePayload,details:{'Gazette language':'English'}}})).status,400);
+    const marathiDetails={'Gazette language':'Marathi','Reason for name change':'Marriage',...Object.fromEntries(gazette.fields.filter(f=>f.marathiInput).map(f=>[f.label,'राम']))};
+    const invalidMarathi={...marathiDetails,'Old first name (Marathi)':'Ram'};
+    assert.equal((await request('/api/cases',{cookie:sales,body:{...gazettePayload,details:invalidMarathi}})).status,400);
+    const marathiCase=await request('/api/cases',{cookie:sales,body:{...gazettePayload,details:{...marathiDetails,'Old first name (English)':'Discard'}}});
+    assert.equal(marathiCase.status,201);
+    assert.equal(marathiCase.data.case.details['Old first name (Marathi)'],'राम');
+    assert.equal(marathiCase.data.case.details['Old first name (English)'],undefined);
+    const caste=services.find(s=>s.slug==='caste-certificate').variants[0];
+    assert.equal(caste.amounts.total,40000);
+    assert.equal(caste.documents.find(d=>d.label==='Income Certificate').required,true);
     const domicile = services.find(s => s.slug === 'domicile-certificate').variants[0];
     assert.equal(services.find(s => s.slug === 'domicile-certificate').name, 'Age Nationality & Domicile Certificate');
     assert.ok(domicile.fields.every(field => field.label !== 'Applicant birth place'));
@@ -352,7 +417,7 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     const zip = await fetch(origin + `/api/cases/${c.id}/download-all`,{headers:{cookie}});
     assert.equal(zip.status,200); assert.equal(Buffer.from(await zip.arrayBuffer()).readUInt32LE(),0x04034b50);
     const sync = await api('/api/google/sheets/activate', undefined, 'POST');
-    assert.equal(sync.syncedCases,1); assert.equal(sync.workbook.tabs.length,23);
+    assert.equal(sync.syncedCases,1); assert.equal(sync.workbook.tabs.length,24);
     assert.ok(sync.workbook.tabs.includes('Documents'));
     assert.ok(sync.workbook.tabs.includes('Income Certificate'));
     await api('/api/payment-settings',{action:'confirm-receiver',utr:'100000000001',amount:1,received:true,correctRecipient:true,notes:'Synthetic fixture, not a real transfer'});

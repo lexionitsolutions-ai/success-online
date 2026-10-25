@@ -582,6 +582,7 @@ function wizardBody(service, variant) {
 
 function wizardDocumentUploads(service, docs) {
   const cards = items => items.map(item => `<div class="doc"><span><strong>${h(item.displayLabel || item.label)}</strong><small>${h(item.note || (item.required ? 'Required document' : 'Optional supporting document'))}</small><em>${h(draft.docs[item.label]?.pages ? `${draft.docs[item.label].pages.length} pages selected` : draft.docs[item.label]?.fileName || 'Not selected')}</em></span>${uploadControls(encodeURIComponent(item.label), '', item.multiple)}${draft.docs[item.label] && !draft.docs[item.label].pages ? `<ul class="selected-pages"><li><span>${h(draft.docs[item.label].fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}')">Preview</button><button type="button" class="quiet" onclick="removeDraftDocument('${encodeURIComponent(item.label)}')" aria-label="Remove ${h(item.label)}">Remove</button></li></ul>` : ''}${draft.docs[item.label]?.pages ? `<ul class="selected-pages">${draft.docs[item.label].pages.map((page,index) => `<li><span>Page ${index+1}: ${h(page.fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}',${index})">Preview</button><button type="button" class="quiet" onclick="removeDraftPage('${encodeURIComponent(item.label)}',${index})" aria-label="Remove page ${index+1}">Remove</button></li>`).join('')}</ul>` : ''}</div>`).join('');
+  if (docs.some(item => item.section)) return groupedDocumentCards(docs, item => cards([item]));
   if (service?.slug !== 'caste-certificate') return cards(docs);
   const groups = [
     { title: "Applicant’s Documents / अर्जदाराची कागदपत्रे", labels: ['Applicant Aadhaar Card', 'Applicant School Leaving Certificate', 'Photo'] },
@@ -609,19 +610,20 @@ function bindWizard() {
     for (const field of variant.fields || []) {
       if (field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals) draft.details[field.label] = field.defaultWhen.value;
     }
+    IntakeRules.applyComputed(variant.fields || [], draft.details);
     const visibleFields = (variant.fields || []).filter(field => IntakeRules.matches(field.when, draft.details) || (field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals));
     document.querySelector('#serviceFields').innerHTML = visibleFields.map((field, index) => {
       const key = encodeURIComponent(field.label);
       const rawValue = draft.details[field.label] || '';
       const value = h(rawValue);
-      const automatic = field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals;
+      const automatic = field.computedSum || (field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals);
       const control = automatic ? `<input data-field="${key}" value="${value}" readonly aria-readonly="true">` : field.type === 'select'
-        ? `<select data-field="${key}"><option value="" disabled hidden ${!rawValue ? 'selected' : ''}>Choose…</option>${(field.options || []).map(option => `<option value="${h(option)}" ${option === rawValue ? 'selected' : ''}>${field.label === 'Ration card colour' ? ({ Yellow: '\u{1F7E1} ', Orange: '\u{1F7E0} ', White: '\u26AA ' }[option] || '') : ''}${h(field.label === 'Ration card colour' ? ({ Yellow: 'Yellow (PHH)', Orange: 'Orange (PHH/NPH)', White: 'White (APL)' }[option] || option) : option)}</option>`).join('')}</select>`
-        : `<input data-field="${key}" type="${['email','date','number','tel'].includes(field.type) ? field.type : 'text'}" value="${value}" ${field.required ? 'required' : ''} ${field.min !== undefined ? `min="${h(field.min)}"` : ''} ${field.step ? `step="${h(field.step)}"` : ''} ${field.inputMode ? `inputmode="${h(field.inputMode)}"` : ''} ${field.placeholder ? `placeholder="${h(field.placeholder)}"` : ''} maxlength="500" ${/\bname\b|\bsurname\b/i.test(field.label) ? 'oninput="removeNameNumbers(this)"' : ''}>`;
+        ? `<select data-field="${key}"><option value="" disabled hidden ${!rawValue ? 'selected' : ''}>Choose…</option>${(field.options || []).map(option => `<option value="${h(option)}" ${option === rawValue ? 'selected' : ''}>${field.label === 'Ration card colour' ? ({ Yellow: '\u{1F7E1} ', Orange: '\u{1F7E0} ', White: '\u26AA ' }[option] || '') : ''}${h(field.label === 'Ration card colour' ? ({ Yellow: 'Yellow (PHH)', Orange: 'Orange (PHH/NPH)', White: 'White (APL)' }[option] || option) : (field.optionLabels?.[option] || option))}</option>`).join('')}</select>`
+        : `<input data-field="${key}" type="${['email','date','number','tel'].includes(field.type) ? field.type : 'text'}" value="${value}" ${field.required ? 'required' : ''} ${field.allowNumbers ? 'data-allow-numbers="true"' : ''} ${field.min !== undefined ? `min="${h(field.min)}"` : ''} ${field.step ? `step="${h(field.step)}"` : ''} ${field.inputMode ? `inputmode="${h(field.inputMode)}"` : ''} ${field.placeholder ? `placeholder="${h(field.placeholder)}"` : ''} ${field.pattern ? `pattern="${h(field.pattern)}"` : ''} maxlength="500" ${!field.allowNumbers && /\bname\b|\bsurname\b/i.test(field.label) ? 'oninput="removeNameNumbers(this)"' : ''}>`;
       const incomeYear = service.slug === 'income-certificate' && (field.label === 'Years of Certificate Required' || field.when?.field === 'Years of Certificate Required');
       const sectionStart = field.section && visibleFields[index - 1]?.section !== field.section;
       const sectionEnd = field.section && visibleFields[index + 1]?.section !== field.section;
-      return `${sectionStart ? `<fieldset class="intake-field-section"><legend>${h(field.section)}</legend><p>${h(field.sectionNote || '')}</p><div class="formgrid">` : ''}<label${incomeYear ? ' class="income-year-field"' : field.fullWidth ? ' class="full-width-field"' : ''}>${h(field.displayLabel || field.label)}${control}</label>${sectionEnd ? '</div></fieldset>' : ''}`;
+      return `${sectionStart ? `<fieldset class="intake-field-section"><legend>${h(field.section)}</legend><p>${h(field.sectionNote || '')}</p><div class="formgrid">` : ''}<label${incomeYear ? ' class="income-year-field"' : field.fullWidth ? ' class="full-width-field"' : ''}>${h(field.displayLabel || field.label)}${field.marathiInput ? control.replace('<input ', '<input data-marathi-input lang="mr" spellcheck="false" autocomplete="off" ') + '<small class="marathi-preview" aria-live="polite"></small>' : control}</label>${sectionEnd ? '</div></fieldset>' : ''}`;
     }).join('');
     document.querySelector('#serviceFields').querySelectorAll('[data-field]').forEach(input => input.onchange = () => {
       const label = decodeURIComponent(input.dataset.field);
@@ -636,6 +638,14 @@ function bindWizard() {
       else document.querySelector('#svcInfo').innerHTML = serviceGuidance(service, variant, draft.details);
     });
     document.querySelector('#svcInfo').innerHTML = serviceGuidance(service, variant, draft.details);
+    for (const input of document.querySelectorAll('#serviceFields [data-field]')) input.addEventListener('input', () => {
+      collectFields();
+      IntakeRules.applyComputed(variant.fields || [], draft.details);
+      for (const output of document.querySelectorAll('#serviceFields [data-field]')) {
+        const label = decodeURIComponent(output.dataset.field);
+        if (variant.fields.some(field => field.label === label && field.computedSum)) output.value = draft.details[label];
+      }
+    });
     if (draft.validationStep === 2) validateWizardFields(document.querySelectorAll('#serviceFields [data-field]'), false);
   };
   serviceSelect.onchange = () => { collectFields(); draft.details = {}; draft.variantId = ''; delete draft.validationStep; update(); };
@@ -672,9 +682,10 @@ function serviceGuidanceBody(service, variant, details) {
   if (service.slug === 'income-certificate') return incomeGuidance(variant, details);
   const docs = applicableDocuments(variant.documents || [], details);
   const notes = (variant.instructions || 'सर्व आवश्यक कागदपत्रांच्या स्पष्ट व संपूर्ण प्रती अपलोड करा. / Upload clear and complete copies of all required documents.').split('\n').filter(Boolean);
-  return `<section class="income-guidance"><header><h3>आवश्यक कागदपत्रे</h3><p>निवडलेल्या माहितीनुसार कागदपत्रांची यादी · Required documents</p></header><ul class="income-checklist">${docs.map(doc => `<li><span aria-hidden="true">✓</span><div>${h(doc.marathiLabel || doc.label)}</div></li>`).join('')}</ul><aside class="income-notes" aria-label="Important notes"><h4>महत्त्वाच्या सूचना / Important notes</h4><ul>${notes.map(note => {
+  return `<section class="income-guidance"><header><h3>आवश्यक कागदपत्रे</h3><p>निवडलेल्या माहितीनुसार कागदपत्रांची यादी · Required documents</p></header><ul class="income-checklist">${docs.map(doc => `<li><span aria-hidden="true">✓</span><div>${h(doc.marathiLabel || doc.displayLabel || doc.label)}</div></li>`).join('')}</ul><aside class="income-notes" aria-label="Important notes"><h4>महत्त्वाच्या सूचना / Important notes</h4><ul>${notes.map(note => {
     const separator = note.search(/\s\/\s(?=[A-Z][a-z])/);
-    return separator < 0 ? `<li>${h(note)}</li>` : `<li>${h(note.slice(0, separator))}<small>${h(note.slice(separator + 3))}</small></li>`;
+    const highlight = service.slug === 'caste-validity' && /^(SEBC|VJNT|SC\s*\/)/.test(note) ? ' class="historical-proof-note"' : '';
+    return separator < 0 ? `<li${highlight}>${h(note)}</li>` : `<li${highlight}>${h(note.slice(0, separator))}<small>${h(note.slice(separator + 3))}</small></li>`;
   }).join('')}</ul></aside></section>`;
 }
 
@@ -682,17 +693,18 @@ function incomeGuidance(variant, details) {
   const docs = applicableDocuments(variant.documents, details);
   const bringReport = details['Ration card area'] === 'City' && details[IntakeRules.available] === 'No' && details[IntakeRules.willing] === 'Yes';
   const extra = IntakeRules.surcharge(details);
-  return `<section class="income-guidance"><header><h3>आवश्यक कागदपत्रे</h3><p>निवडलेल्या माहितीनुसार कागदपत्रांची यादी · Required documents</p></header><ul class="income-checklist">${docs.map(doc => `<li><span aria-hidden="true">✓</span><div>${h(doc.marathiLabel || doc.label)}</div></li>`).join('')}</ul><aside class="income-notes" aria-label="Important notes"><h4>महत्त्वाच्या सूचना / Important notes</h4><ul><li>पांढऱ्या रेशन कार्डधारकांसाठी फॉर्म १६ किंवा आयकर विवरणपत्र (ITR) आवश्यक आहे.<small>For white ration card holders, Form 16 or ITR is required.</small></li><li>कोणत्याही निवडलेल्या वर्षाचे उत्पन्न ₹१ लाखापेक्षा जास्त असल्यास वेतन पावती, आयकर विवरणपत्र (ITR) किंवा फॉर्म १६ यापैकी कोणताही एक पुरावा अपलोड करणे आवश्यक आहे.<small>If income exceeds ₹1 lakh in any selected year, upload any ONE: Salary/Pay Slip, ITR (Income Tax Return), or Form 16.</small></li><li>ग्रामीण रेशन कार्डधारकांसाठी तलाठी अहवाल आवश्यक आहे.<small>A Talathi report is required for rural ration card holders.</small></li></ul></aside>${bringReport ? `<section class="income-download"><h4>तलाठी अहवाल मिळवा / Obtain your Talathi report</h4><a class="primary" href="/downloads/income-certificate-form.pdf" download>अर्ज डाउनलोड करा / Download application form (PDF)</a><a href="/downloads/talathi-report-form.pdf" download>तलाठी अहवाल नमुना / Download report template (PDF)</a><ol><li>अर्ज डाउनलोड करून प्रिंट काढा व संपूर्ण माहिती भरा.<small>Download, print and complete the application form.</small></li><li>भरलेला अर्ज तलाठ्यांकडे घेऊन जा आणि अहवालावर त्यांची सही व शिक्का घ्या.<small>Take the completed form to the Talathi and obtain their signature and stamp on the report.</small></li><li>सही व शिक्का असलेला संपूर्ण अहवाल कागदपत्रे विभागात अपलोड करा.<small>Upload every page of the signed and stamped report in the Documents section.</small></li></ol></section>` : ''}${extra ? `<div class="income-fee-notice" role="status"><strong>अतिरिक्त शुल्क: ₹२०० / Additional fee: ₹200</strong><p>तलाठी अहवाल उपलब्ध नसल्यामुळे आणि तो आणण्यास नकार दिल्यामुळे मूळ सेवा शुल्कात ₹२०० जोडले जातील.</p><small>₹200 is added to the base service fee because you selected No for both report availability and willingness to bring it.</small><p><strong>Total service fee: ${money((variant.amounts?.serviceCharge || 0) + extra)}</strong></p></div>` : ''}</section>`;
+  return `<section class="income-guidance"><header><h3>आवश्यक कागदपत्रे</h3><p>निवडलेल्या माहितीनुसार कागदपत्रांची यादी · Required documents</p></header><ul class="income-checklist">${docs.map(doc => `<li><span aria-hidden="true">✓</span><div>${h(doc.marathiLabel || doc.displayLabel || doc.label)}</div></li>`).join('')}</ul><aside class="income-notes" aria-label="Important notes"><h4>महत्त्वाच्या सूचना / Important notes</h4><ul><li>पांढऱ्या रेशन कार्डधारकांसाठी फॉर्म १६ किंवा आयकर विवरणपत्र (ITR) आवश्यक आहे.<small>For white ration card holders, Form 16 or ITR is required.</small></li><li>कोणत्याही निवडलेल्या वर्षाचे उत्पन्न ₹१ लाखापेक्षा जास्त असल्यास वेतन पावती, आयकर विवरणपत्र (ITR) किंवा फॉर्म १६ यापैकी कोणताही एक पुरावा अपलोड करणे आवश्यक आहे.<small>If income exceeds ₹1 lakh in any selected year, upload any ONE: Salary/Pay Slip, ITR (Income Tax Return), or Form 16.</small></li><li>ग्रामीण रेशन कार्डधारकांसाठी तलाठी अहवाल आवश्यक आहे.<small>A Talathi report is required for rural ration card holders.</small></li></ul></aside>${bringReport ? `<section class="income-download"><h4>तलाठी अहवाल मिळवा / Obtain your Talathi report</h4><a class="primary" href="/downloads/income-certificate-form.pdf" download>अर्ज डाउनलोड करा / Download application form (PDF)</a><a href="/downloads/talathi-report-form.pdf" download>तलाठी अहवाल नमुना / Download report template (PDF)</a><ol><li>अर्ज डाउनलोड करून प्रिंट काढा व संपूर्ण माहिती भरा.<small>Download, print and complete the application form.</small></li><li>भरलेला अर्ज तलाठ्यांकडे घेऊन जा आणि अहवालावर त्यांची सही व शिक्का घ्या.<small>Take the completed form to the Talathi and obtain their signature and stamp on the report.</small></li><li>सही व शिक्का असलेला संपूर्ण अहवाल कागदपत्रे विभागात अपलोड करा.<small>Upload every page of the signed and stamped report in the Documents section.</small></li></ol></section>` : ''}${extra ? `<div class="income-fee-notice" role="status"><strong>अतिरिक्त शुल्क: ₹२०० / Additional fee: ₹200</strong><p>तलाठी अहवाल उपलब्ध नसल्यामुळे आणि तो आणण्यास नकार दिल्यामुळे मूळ सेवा शुल्कात ₹२०० जोडले जातील.</p><small>₹200 is added to the base service fee because you selected No for both report availability and willingness to bring it.</small><p><strong>Total service fee: ${money((variant.amounts?.serviceCharge || 0) + extra)}</strong></p></div>` : ''}</section>`;
 }
 
 function rerenderWizard({keepScroll=false}={}) {const scroll=keepScroll?(document.querySelector('#drawer .panel')?.scrollTop||0):0;closeDrawer();drawWizard();if(keepScroll) document.querySelector('#drawer .panel').scrollTop=scroll;}
 function fieldWarning(input) {
   const label = input.dataset.field ? decodeURIComponent(input.dataset.field) : ({ name: 'Full name', mobile: 'Mobile number' }[input.id] || input.name || 'this field');
   const value = input.value.trim();
+  if (input.dataset.marathiInput !== undefined && /[A-Za-z]/.test(value)) return 'Please enter this name in Marathi.';
   const required = input.required || input.tagName === 'SELECT' || ['name', 'mobile'].includes(input.id);
   if (required && !value) return `${input.tagName === 'SELECT' ? 'Please choose' : 'Please enter'} ${label}.`;
   if (input.id === 'mobile' && !/^[6-9]\d{9}$/.test(value)) return 'Enter a valid 10-digit Indian mobile number.';
-  if ((input.id === 'name' || /\bname\b|\bsurname\b/i.test(input.dataset.field ? decodeURIComponent(input.dataset.field) : '')) && /\p{N}/u.test(value)) return 'Name cannot contain numbers.';
+  if (!input.dataset.allowNumbers && (input.id === 'name' || /\bname\b|\bsurname\b/i.test(input.dataset.field ? decodeURIComponent(input.dataset.field) : '')) && /\p{N}/u.test(value)) return 'Name cannot contain numbers.';
   if (!input.checkValidity()) return input.validationMessage || `Check ${label}.`;
   return '';
 }
@@ -723,6 +735,7 @@ function showFieldWarning(input) {
 function validateWizardFields(inputs, focus = true) {
   let firstInvalid;
   for (const input of inputs) {
+    globalThis.MarathiInput?.commit(input);
     if (!showFieldWarning(input) && !firstInvalid) firstInvalid = input;
   }
   if (focus) firstInvalid?.focus();
@@ -758,7 +771,7 @@ function saveStep3() {
 function wizardBack(step) { draft.step = step; rerenderWizard(); }
 function uploadControls(encodedType, caseId = '', multiple = false) {
   const handler = caseId ? `uploadCaseDocument('${caseId}','${encodedType}',this)` : multiple ? `pickDocs('${encodedType}',this.files)` : `pickDoc('${encodedType}',this.files[0])`;
-  return `<span class="upload-options"><label class="file-action">${multiple ? 'Add report pages' : 'Upload document'}<input type="file" ${multiple ? 'multiple' : ''} accept="image/jpeg,image/png,application/pdf" onchange="${handler}"></label></span>`;
+  return `<span class="upload-options"><label class="file-action">${multiple ? 'Add files' : 'Upload document'}<input type="file" ${multiple ? 'multiple' : ''} accept="image/jpeg,image/png,application/pdf" onchange="${handler}"></label></span>`;
 }
 function validateFile(file) {
   if (!['image/jpeg','image/png','application/pdf'].includes(file.type) || !file.size || file.size > 10_000_000) throw new Error('Choose JPG, PNG, or PDF up to 10 MB');
@@ -779,13 +792,13 @@ async function pickDocs(encodedType, files) {
   const selected = Array.from(files);
   try { selected.forEach(validateFile); } catch (error) { return toast(error.message); }
   const type = decodeURIComponent(encodedType);
-  setDrawerBusy(`Preparing ${selected.length} report pages...`);
+  setDrawerBusy(`Preparing ${selected.length} files...`);
   try {
     const pages = [];
     for (const file of selected) pages.push({fileName:file.name,mimeType:file.type,size:file.size,...(cloudUploads ? {file} : {content:await fileAsBase64(file)})});
     const existing = draft.docs[type];
     draft.docs[type] = {pages:[...(existing?.pages || (existing ? [existing] : [])),...pages]};
-    toast(`${pages.length} report pages added`);
+    toast(`${pages.length} files added`);
   } catch (error) { toast(error.message); }
   finally { setDrawerBusy(); rerenderWizard({keepScroll:true}); }
 }
@@ -889,22 +902,27 @@ async function openCase(caseId) {
   } catch (error) { toast(error.message); }
 }
 
+function groupedDocumentCards(requirements, card) {
+  if (!requirements.some(requirement => requirement.section)) return requirements.map(card).join('');
+  const sections = [...new Set(requirements.map(requirement => requirement.section || 'Other Documents'))];
+  return sections.map(section => `<section class="caste-document-section"><h3>${h(section)}</h3><div class="upload-list">${requirements.filter(requirement => (requirement.section || 'Other Documents') === section).map(card).join('')}</div></section>`).join('');
+}
 function documentChecklist(item, documents) {
   const active = documents.filter(document => document.state !== 'replaced');
   const reupload = item.reupload || {};
-  return applicableDocuments(item.variant.documents || [], item.details || {}).map(requirement => {
+  return groupedDocumentCards(applicableDocuments(item.variant.documents || [], item.details || {}), requirement => {
     const uploaded = active.filter(document => document.doc_type === requirement.label);
     const requested = reupload.pending && reupload.requestedTypes?.includes(requirement.label);
     const pending = uploaded.some(doc => reupload.pendingDocumentIds?.includes(doc.id));
     const submitted = uploaded.some(doc => reupload.submittedDocumentIds?.includes(doc.id) || (!reupload.pending && doc.version > 1));
     const editable = !['Closed','Delivered','Cancelled'].includes(item.status);
     const highlight = pending ? 'doc-reuploaded-pending' : requested ? 'doc-reupload-requested' : submitted ? 'doc-reuploaded-submitted' : '';
-    return `<div class="doc ${highlight}"><span><strong>${h(requirement.displayLabel || requirement.label)}</strong>${requirement.note ? `<small>${h(requirement.note)}</small>` : ''}<small>${uploaded.length ? requirement.multiple ? `${uploaded.length} report pages uploaded` : `Uploaded version ${uploaded[0].version}` : requirement.required ? 'Required document missing' : 'Optional supporting document'}</small>${requested && !pending ? '<span class="reupload-tag is-requested">Reupload requested</span>' : ''}${statusBadge(uploaded.length ? 'Uploaded' : requirement.required ? 'Missing' : 'Optional')}${uploaded.map((doc,index) => {
+    return `<div class="doc ${highlight}"><span><strong>${h(requirement.displayLabel || requirement.label)}</strong>${requirement.note ? `<small>${h(requirement.note)}</small>` : ''}<small>${uploaded.length ? requirement.multiple ? `${uploaded.length} files uploaded` : `Uploaded version ${uploaded[0].version}` : requirement.required ? 'Required document missing' : 'Optional supporting document'}</small>${requested && !pending ? '<span class="reupload-tag is-requested">Reupload requested</span>' : ''}${statusBadge(uploaded.length ? 'Uploaded' : requirement.required ? 'Missing' : 'Optional')}${uploaded.map((doc,index) => {
       const isPending = reupload.pendingDocumentIds?.includes(doc.id);
       const isSubmitted = reupload.submittedDocumentIds?.includes(doc.id) && !(requested && !isPending);
       return `<span class="document-file" data-document-id="${h(doc.id)}">${requirement.multiple ? `<small>Page ${index+1}</small>` : ''}<span class="document-file-name">${h(doc.file_name || requirement.label)}</span>${isPending ? '<span class="reupload-tag is-pending">Reuploaded &middot; not submitted</span>' : isSubmitted ? '<span class="reupload-tag is-submitted">Reuploaded &middot; submitted for review</span>' : doc.version > 1 && !reupload.pending ? '<span class="reupload-tag is-submitted">Reuploaded document</span>' : ''}${documentActions(item,doc)}</span>`;
     }).join('')}</span>${editable ? `<span class="document-upload-actions">${uploadControls(encodeURIComponent(requirement.label), item.id, requirement.multiple)}${['backoffice','admin'].includes(me.role) ? `<button type="button" class="quiet request-reupload-button" onclick="showReuploadRequest('${item.id}','${encodeURIComponent(requirement.label)}',this)">Request reupload</button>` : ''}</span>` : ''}</div>`;
-  }).join('');
+  });
 }
 function reuploadSubmissionPanel(item) {
   const state = item.reupload;

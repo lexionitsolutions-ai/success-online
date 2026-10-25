@@ -40,3 +40,5 @@
 
 .caste-document-section{min-width:0;padding:18px;border:1px solid var(--line);border-radius:12px;background:#f8faff}.caste-document-section>h3{margin:0 0 16px;font-size:16px;line-height:1.6;color:var(--ink);overflow-wrap:anywhere}.caste-document-section .doc{background:#fff}.caste-document-section+.caste-document-section{margin-top:8px}
 @media(max-width:600px){.caste-document-section{padding:12px}.caste-document-section>h3{font-size:15px}}
+.income-notes li.historical-proof-note{list-style:none;margin:10px 0;padding:12px 14px;border:1px solid #e6bd58;border-left:4px solid #b77908;border-radius:8px;background:#fff4cd;color:#664400;font-weight:700;line-height:1.7;overflow-wrap:anywhere}
+.income-notes li.historical-proof-note small{display:block;margin-top:4px;color:#664400;font-weight:500}
