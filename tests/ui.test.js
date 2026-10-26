@@ -7,7 +7,7 @@ import {serviceCatalog} from '../service-catalog.js';
 function client() {
   const context = vm.createContext({
     document: { querySelector: selector => selector === '#consent' ? { checked: true } : null,addEventListener() {} },
-    window: {}, URL, URLSearchParams, console, setTimeout, clearTimeout
+    window: {}, crypto, URL, URLSearchParams, console, setTimeout, clearTimeout
   });
   vm.runInContext(readFileSync('public/intake-rules.js', 'utf8'), context);
   vm.runInContext(readFileSync('public/app.js', 'utf8').replace(/boot\(\);\s*$/, ''), context);
@@ -170,10 +170,10 @@ test('pending and active cases follow verified payment, including correction and
   run("cases=[{id:'c1',status:'Correction Required',payment_state:'unpaid'},{id:'c2',status:'Closed',payment_state:'paid'},{id:'c3',status:'Assigned',payment_state:'paid'}];caseNotifications=[{id:'n1',caseId:'c1',status:'Assigned'}];");
   assert.equal(run("isPendingCase({status:'Awaiting Documents'})"),true);
   assert.equal(run("isPendingCase({status:'Correction Required'})"),true);
-  assert.equal(run("isPendingCase({status:'Assigned',payment_state:'paid'})"),false);
+  assert.equal(run("isPendingCase({status:'Assigned',payment_state:'paid',document_state:'complete'})"),false);
   assert.equal(run("isPendingCase({status:'Ready for Assignment',payment:{status:'AWAITING_VERIFICATION'}})"),true);
-  assert.equal(run("isActiveCase({status:'Correction Required',payment_state:'paid'})"),true);
-  assert.equal(run("isActiveCase({status:'Awaiting Documents',payment_state:'paid'})"),true);
+  assert.equal(run("isActiveCase({status:'Correction Required',payment_state:'paid',document_state:'complete'})"),true);
+  assert.equal(run("isActiveCase({status:'Awaiting Documents',payment_state:'paid',document_state:'missing'})"),false);
   assert.equal(run("isActiveCase({status:'Submitted to Official Portal',payment_state:'unpaid'})"),false);
   assert.equal(run("isActiveCase({status:'Ready for Assignment',payment:{status:'paid',gateway:'demo'}})"),false);
   assert.equal(run("isPendingCase({status:'Closed'})"),false);
@@ -324,63 +324,67 @@ test('intake cannot continue while a selected file is being read', async () => {
   assert.equal(run('draft.docs.Photo.content'), 'encoded');
 });
 
-test('case creation waits for all uploads and retries without duplicating the case', async () => {
-  const { run } = client();
+function prepareBackgroundUploadTest(run, labels) {
   run(`
-    draftMissing = () => [];
-    draft.docs = { Aadhaar: {content:'first'}, Photo: {content:'second'} };
-    let creates = 0, uploads = [], failed = false;
-    api = async (path, options) => {
-      if (path === '/api/cases') { creates++; return {case:{id:'case1',ref:'SO1'}}; }
-      if(path.endsWith('/payment-order')) return {};
-      uploads.push(options.body.docType);
-      if (options.body.docType === 'Photo' && !failed) { failed = true; throw new Error('Upload interrupted'); }
-      return {};
-    };
+    me={id:'sales1',role:'sales'};draftMissing=()=>[];
+    openUploadQueueDB=async()=>({});uploadJobStorage=async()=>{};
+    renderBackgroundUploads=()=>{};waitForUploadRetry=async()=>{};
+    refreshCaseUpdates=async()=>{};pay=async()=>{};
+    draft.serviceId='svc';draft.variantId='variant';
+    services=[{id:'svc',variants:[{id:'variant',documents:${JSON.stringify(labels.map(label=>({label,multiple:true})))}}]}];
   `);
-  await run('submitCase()');
-  assert.equal(run('creates'), 1);
-  assert.equal(run('draft.uploaded.Aadhaar'), 'first');
-  assert.equal(run('draft.uploaded.Photo'), undefined);
-  assert.equal(run('drawerBusy'), false);
-  await run('submitCase()');
-  assert.equal(run('creates'), 1);
-  assert.equal(run('uploads.join(",")'), 'Aadhaar,Photo,Photo');
-  assert.equal(run('draft.uploaded.Photo'), 'second');
-});
+}
+async function finishBackgroundJobs(run) {
+  for(let attempt=0;attempt<100 && run('runningUploadJobs.size');attempt++) await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(run('runningUploadJobs.size'),0);
+}
 
-test('intake overlaps at most three uploads, finishes all workers, and offers another case without checkout',async()=>{
-  const {run}=client();
+test('case creation opens checkout while document uploads are still pending',async()=>{
+  const {run}=client();prepareBackgroundUploadTest(run,['A','B']);
   run(`
-    draftMissing=()=>[];
-    draft.docs=Object.fromEntries(['A','B','C','D','E','F'].map(key=>[key,{content:key}]));
-    let active=0,peak=0,completed=0,nextCases=0,checkouts=0;
-    api=async()=>({case:{id:'case1',ref:'SO1'}});
-    uploadDocument=async()=>{active++;peak=Math.max(peak,active);await new Promise(resolve=>setTimeout(resolve,15));active--;completed++;};
-    startCase=()=>{nextCases++;};
+    draft.docs={A:{content:'a',size:1,fileName:'a.pdf',mimeType:'application/pdf'},B:{content:'b',size:1,fileName:'b.pdf',mimeType:'application/pdf'}};
+    let creates=0,checkouts=0,completed=0;const release=[];
+    api=async path=>{if(path==='/api/cases'){creates++;return {case:{id:'case1',ref:'SO1'}};}return {case:{uploads:{complete:true}}};};
+    uploadDocument=async()=>{await new Promise(resolve=>release.push(resolve));completed++;return {documentId:'d'+completed};};
     pay=async()=>{checkouts++;};
   `);
-  await run("submitCase('another')");
-  assert.equal(run('peak'),3);assert.equal(run('completed'),6);assert.equal(run('active'),0);
-  assert.equal(run('nextCases'),1);assert.equal(run('checkouts'),0);
+  await run('submitCase()');
+  assert.equal(run('creates'),1);assert.equal(run('checkouts'),1);assert.equal(run('completed'),0);assert.equal(run('drawerBusy'),false);
+  run('release.forEach(resolve=>resolve())');await finishBackgroundJobs(run);
+  assert.equal(run('completed'),2);assert.equal(run('uploadJobs.size'),0);
 });
 
-test('report pages retry independently without duplicating already uploaded pages',async()=>{
-  const {run}=client();
+test('background transfers retry failed files without duplicating the case or successful pages',async()=>{
+  const {run}=client();prepareBackgroundUploadTest(run,['Report']);
   run(`
-    draftMissing=()=>[];
-    draft.docs={'Talathi Report':{pages:[{content:'page1'},{content:'page2'},{content:'page3'}]}};
-    api=async()=>({case:{id:'case1',ref:'SO1'}});
-    let failed=false;
-    const pages=[];
-    uploadDocument=async(id,type,doc)=>{pages.push(doc.content);if(doc.content==='page2' && !failed){failed=true;throw Error('Interrupted');}};
-    pay=async()=>{};
+    draft.docs={Report:{pages:[{content:'page1'},{content:'page2'},{content:'page3'}]}};
+    let creates=0;const pages=[];let fail=true;
+    api=async path=>{if(path==='/api/cases'){creates++;return {case:{id:'case1',ref:'SO1'}};}return {case:{uploads:{complete:true}}};};
+    uploadDocument=async(id,type,doc)=>{pages.push(doc.content);if(doc.content==='page2'&&fail)throw Error('Network interrupted');return {documentId:doc.content};};
   `);
-  await run('submitCase()');
-  await run('submitCase()');
+  await run('submitCase()');await finishBackgroundJobs(run);
+  assert.equal(run('uploadJobs.get("case1").state'),'error');
   assert.equal(run("pages.filter(page=>page==='page1').length"),1);
-  assert.equal(run("pages.filter(page=>page==='page2').length"),2);
+  run('fail=false');await run('runUploadJob("case1")');
+  assert.equal(run('creates'),1);
+  assert.equal(run("pages.filter(page=>page==='page1').length"),1);
   assert.equal(run("pages.filter(page=>page==='page3').length"),1);
+  assert.equal(run('uploadJobs.size'),0);
+});
+
+test('background intake overlaps at most three transfers and opens another case immediately',async()=>{
+  const {run}=client();prepareBackgroundUploadTest(run,['A','B','C','D','E','F']);
+  run(`
+    draft.docs=Object.fromEntries(['A','B','C','D','E','F'].map(key=>[key,{content:key}]));
+    let active=0,peak=0,completed=0,nextCases=0,checkouts=0;
+    api=async path=>path==='/api/cases'?{case:{id:'case1',ref:'SO1'}}:{case:{uploads:{complete:true}}};
+    uploadDocument=async()=>{active++;peak=Math.max(peak,active);await new Promise(resolve=>setTimeout(resolve,15));active--;completed++;return {documentId:'d'+completed};};
+    startCase=()=>{nextCases++;draft={customer:{},details:{},docs:{}};};pay=async()=>{checkouts++;};
+  `);
+  await run("submitCase('another')");
+  assert.equal(run('nextCases'),1);assert.equal(run('completed'),0);
+  await finishBackgroundJobs(run);
+  assert.equal(run('peak'),3);assert.equal(run('completed'),6);assert.equal(run('checkouts'),0);
 });
 
 test('removing a staged file after a partial save removes its saved copy and clears retry state',async()=>{
@@ -412,17 +416,16 @@ test('saved document removal controls cover intake and received files before cas
   assert.doesNotMatch(run('documentActions(item,doc)'),/removeSavedDocument/);
 });
 
-test('cloud intake waits for concurrent uploads before final mirror scheduling',async()=>{
-  const {run}=client();
+test('background intake finalizes only after the server confirms every file',async()=>{
+  const {run}=client();prepareBackgroundUploadTest(run,['A','B','C']);
   run(`
-    cloudUploads=true;draftMissing=()=>[];
-    draft.docs={A:{file:{},size:1},B:{file:{},size:1},C:{file:{},size:1}};
+    cloudUploads=true;draft.docs={A:{file:{},size:1},B:{file:{},size:1},C:{file:{},size:1}};
     const intakeCalls=[];let finished=0;
-    api=async(path)=>{intakeCalls.push(path);if(path.endsWith('finish-uploads') && finished!==3) throw Error('Finalized before uploads');return {case:{id:'case1',ref:'SO1'}};};
-    uploadDocument=async(id,type,document,options)=>{if(!options.deferMirrors) throw Error('Intake must defer Google');await new Promise(resolve=>setTimeout(resolve,5));finished++;};
-    pay=async()=>{};
+    api=async path=>{intakeCalls.push(path);if(path.endsWith('finish-uploads')){if(finished!==3)throw Error('Finalized too early');return {case:{uploads:{complete:true}}};}return {case:{id:'case1',ref:'SO1'}};};
+    uploadDocument=async(id,type,doc,options)=>{if(!options.deferMirrors||!options.uploadKey)throw Error('Missing upload manifest key');await new Promise(resolve=>setTimeout(resolve,5));finished++;return {documentId:type};};
   `);
-  await run('submitCase()');
+  await run('submitCase()');assert.equal(run('finished'),0);
+  await finishBackgroundJobs(run);
   assert.equal(run('finished'),3);
   assert.equal(run("intakeCalls.filter(path=>path.endsWith('finish-uploads')).length"),1);
 });

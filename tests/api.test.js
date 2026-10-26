@@ -447,6 +447,7 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     const services = (await api('/api/services')).services;
     const variant = services.find(s => s.slug === 'pf-assistance').variants[0];
     const c = (await api('/api/cases',{variantId:variant.id,details:pfDetails,customer:{name:'Drive Trial',mobile:'9876543210'},consent:true})).case;
+    const countStoredCases=()=>{const db=new DatabaseSync(join(root,'test.sqlite'));try{return db.prepare('SELECT COUNT(*) n FROM cases').get().n;}finally{db.close();}};
     const pdf = Buffer.from('%PDF-1.4\nmock-drive-file\n%%EOF');
     await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
     const documents = (await api(`/api/cases/${c.id}`)).documents;
@@ -485,7 +486,7 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     const failedCase = await fetch(origin + '/api/cases', {method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({variantId:variant.id,details:pfDetails,customer:{name:'Retry Trial',mobile:'9876543210'},consent:true})});
     assert.equal(failedCase.status,409);
     assert.equal((await failedCase.json()).code,'GOOGLE_RECONNECT_REQUIRED');
-    assert.equal((await api('/api/cases')).cases.length,1, 'Expired authorization must not save another case');
+    assert.equal(countStoredCases(),1, 'Expired authorization must not save another case');
     const state = await api('/api/google/status');
     assert.equal(state.reconnectRequired,true); assert.equal(state.connected,false);
     const failedUpload = await fetch(origin + `/api/cases/${c.id}/documents`, {method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')})});
@@ -494,12 +495,12 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     unlinkSync(join(root,'revoked')); // Simulate successful Google reconnection.
     await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
     assert.equal((await api('/api/google/status')).reconnectRequired,false);
-    assert.equal((await api('/api/cases')).cases.length,1);
+    assert.equal(countStoredCases(),1);
     writeFileSync(join(root,'revoked'),'missing-root');
     const missingRoot = await fetch(origin + '/api/cases',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({variantId:variant.id,details:pfDetails,customer:{name:'Root Trial',mobile:'9876543210'},consent:true})});
     assert.equal(missingRoot.status,409);
     assert.equal((await missingRoot.json()).code,'GOOGLE_ROOT_FOLDER_INVALID');
-    assert.equal((await api('/api/cases')).cases.length,1,'Missing root must not save a new case');
+    assert.equal(countStoredCases(),1,'Missing root must not save a new case');
     assert.equal((await api('/api/google/status')).folderInvalid,true);
     for (const folder of ['missing-folder','read-only-folder']) {
       const invalid = await fetch(origin + '/api/google/root-folder',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({folder})});

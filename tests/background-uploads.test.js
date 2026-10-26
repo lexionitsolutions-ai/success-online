@@ -1,0 +1,55 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtempSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {randomUUID} from 'node:crypto';
+import {DatabaseSync} from 'node:sqlite';
+import {confirmTestReceiver,verifyTestOrder} from './payment-fixture.js';
+import {pfDetails} from './pf-fixture.js';
+
+test('a paid case remains hidden until every selected file and optional page is confirmed and finalized',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'background-intake-')),port=33000+Math.floor(Math.random()*9000),origin=`http://localhost:${port}`,path=join(root,'test.sqlite');
+  const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),DATABASE_PATH:path,STORAGE_PATH:join(root,'docs'),DRIVE_MODE:'demo',SHEETS_MODE:'demo',SESSION_SECRET:'isolated-background-upload-secret-32-characters',APP_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
+  let errors='';child.stderr.on('data',data=>errors+=data);
+  try {
+    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(errors||'Startup timeout')),15000);child.stdout.on('data',data=>{if(String(data).includes('running')){clearTimeout(timer);resolve();}});child.on('exit',()=>{clearTimeout(timer);reject(Error(errors));});});
+    const request=async(url,{cookie,body,method=body?'POST':'GET'}={})=>{const response=await fetch(origin+url,{method,headers:{'content-type':'application/json',...(cookie?{cookie}:{})},body:body?JSON.stringify(body):undefined});return {response,status:response.status,data:await response.json()};};
+    const login=async username=>(await request('/api/login',{body:{username,password:'Demo@12345'}})).response.headers.get('set-cookie').split(';')[0];
+    const sales=await login('sales01'),admin=await login('admin01'),office=await login('backoffice01');
+    await confirmTestReceiver(request,admin);
+    const variant=(await request('/api/services',{cookie:sales})).data.services.find(service=>service.slug==='pf-assistance').variants[0];
+    const pdf=Buffer.from('%PDF-1.4\nbackground fixture\n%%EOF');
+    const manifest=[...variant.documents.filter(doc=>doc.required).map(doc=>doc.label),'Other Supporting Documents','Other Supporting Documents'].map((docType,index)=>({key:randomUUID(),docType,fileName:`proof-${index}.pdf`,mimeType:'application/pdf',size:pdf.length}));
+    const payload={clientRequestId:randomUUID(),variantId:variant.id,customer:{name:'Background Trial',mobile:'9876543210'},details:pfDetails,consent:true,uploadManifest:manifest};
+    const created=await request('/api/cases',{cookie:sales,body:payload});
+    assert.equal(created.status,201,JSON.stringify(created.data));
+    const c=created.data.case;
+    assert.equal((await request('/api/cases',{cookie:sales,body:payload})).data.case.id,c.id);
+    const db=new DatabaseSync(path);assert.equal(db.prepare('SELECT COUNT(*) n FROM cases').get().n,1);db.close();
+    await verifyTestOrder(request,admin,sales,c.payment.id);
+    const hidden=async()=>{for(const cookie of [admin,office])assert.ok(!(await request('/api/cases',{cookie})).data.cases.some(item=>item.id===c.id));};
+    await hidden();
+    assert.ok((await request('/api/cases',{cookie:sales})).data.cases.some(item=>item.id===c.id));
+    const upload=entry=>request(`/api/cases/${c.id}/documents`,{cookie:sales,body:{...entry,uploadKey:entry.key,content:pdf.toString('base64'),deferMirrors:true}});
+    for(const entry of manifest.slice(0,-1))assert.equal((await upload(entry)).status,201);
+    await hidden();
+    assert.equal((await request(`/api/cases/${c.id}/finish-uploads`,{cookie:sales,body:{}})).status,409,'The last optional page is still required because it was selected');
+    assert.equal((await request(`/api/cases/${c.id}/claim`,{cookie:office,method:'POST'})).status,409);
+    const last=await upload(manifest.at(-1));assert.equal(last.status,201);
+    assert.equal((await upload(manifest.at(-1))).data.documentId,last.data.documentId,'Retries return the same document receipt');
+    await hidden();
+    const detail=(await request(`/api/cases/${c.id}`,{cookie:sales})).data;
+    assert.equal(detail.documents.length,manifest.length);
+    assert.equal(detail.case.uploads.completed,manifest.length);
+    assert.equal(detail.case.document_state,'missing','Final acknowledgement is still required');
+    const finalized=await request(`/api/cases/${c.id}/finish-uploads`,{cookie:sales,body:{}});
+    assert.equal(finalized.status,200);
+    assert.equal(finalized.data.case.uploads.complete,true);
+    assert.equal(finalized.data.case.status,'Ready for Assignment');
+    for(const cookie of [admin,office])assert.ok((await request('/api/cases',{cookie})).data.cases.some(item=>item.id===c.id));
+    assert.equal((await request(`/api/cases/${c.id}/claim`,{cookie:office,method:'POST'})).status,200);
+    assert.equal((await request(`/api/cases/${c.id}/finish-uploads`,{cookie:sales,body:{}})).status,200,'Finalization can be retried safely');
+  } finally {child.kill();}
+});

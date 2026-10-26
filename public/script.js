@@ -306,6 +306,7 @@ async function load() {
   if(me.role==='admin') await loadViewData();
   else googleStatus=sheetsStatus=adminAnalytics=employeeData=null;
   render();
+  void restoreUploadJobs();
 }
 
 async function loadViewData() {
@@ -391,6 +392,7 @@ function render() {
   const content = view === 'pending' ? renderPendingCases() : view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : renderDashboard();
   app.innerHTML = shell(content);
   labelTables();
+  renderBackgroundUploads();
 }
 
 function pageHead(title, description, action = '') {
@@ -415,8 +417,8 @@ function counts() { return cases.reduce((result, item) => { result[item.status] 
 const isCompletedCase = item => ['Closed','Delivered'].includes(item.status);
 
 const isPaymentConfirmed = item => item.payment?.gateway !== 'demo' && ['paid','PAID','verified','offline_approved'].includes(item.payment?.status || item.payment_state);
-const isPendingCase = item => !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && !isPaymentConfirmed(item);
-const isActiveCase = item => !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && isPaymentConfirmed(item);
+const isPendingCase = item => !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && (!isPaymentConfirmed(item) || item.document_state !== 'complete');
+const isActiveCase = item => !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && isPaymentConfirmed(item) && item.document_state === 'complete';
 function notificationSection(notice) {
   const item = cases.find(item => item.id === notice.caseId) || {status:notice.status};
   return isCompletedCase(item) ? 'completed' : isPendingCase(item) ? 'pending' : 'cases';
@@ -483,7 +485,7 @@ function startCaseUpdatePolling() {
 }
 function renderPendingCases() {
   const rows = cases.filter(isPendingCase).sort((a,b) => Number(b.status === 'Correction Required') - Number(a.status === 'Correction Required') || String(b.updated_at).localeCompare(String(a.updated_at)));
-  return `${pageHead('Pending Cases','Unpaid cases and payments awaiting verification. Payment must be confirmed before back-office processing.')} ${caseToolbar(rows,false)}<div id="caseList" class="table-shell">${rows.length ? caseTable(rows) : empty('No pending cases. All caught up.')}</div>`;
+  return `${pageHead('Pending Cases','Cases awaiting payment verification or completed document uploads. Both must finish before operations can see the case.')} ${caseToolbar(rows,false)}<div id="caseList" class="table-shell">${rows.length ? caseTable(rows) : empty('No pending cases. All caught up.')}</div>`;
 }
 
 function renderDashboard() {
@@ -494,9 +496,9 @@ function renderDashboard() {
   const title = me.role === 'sales' ? 'Sales workspace' : 'Operations workspace';
   return `${pageHead(title, 'Priorities, customer cases, and work requiring action.')}
     <section class="metric-grid overview-metrics">
-      ${metricCard('Active cases', number(mine.filter(isActiveCase).length), 'Payment confirmed')}
+      ${metricCard('Active cases', number(mine.filter(isActiveCase).length), 'Payment and documents complete')}
       ${metricCard('Missing documents', number(mine.filter(item => item.document_state === 'missing').length), 'Customer follow-up needed', 'amber')}
-      ${metricCard('Payment pending', number(mine.filter(isPendingCase).length), 'Unpaid or awaiting verification', 'blue')}
+      ${metricCard('Cases pending', number(mine.filter(isPendingCase).length), 'Payment or documents pending', 'blue')}
       ${metricCard('Ready to assign', number(mine.filter(item=>item.status==='Ready for Assignment' && isActiveCase(item)).length), 'Available to operations', 'green')}
       <button type="button" class="metric-card green overview-completed-card" onclick="setView('completed')" aria-label="View completed cases"><span>Completed cases</span><strong>${number(workload.filter(isCompletedCase).length)}</strong><small>View completed applications →</small></button>
     </section>
@@ -1024,61 +1026,133 @@ async function removeSavedDocument(caseId, documentId) {
   } catch (error) { toast(error.message); }
   finally { setDrawerBusy(); }
 }
-async function submitCase(nextAction='pay') {
-  if (drawerBusy || draft.submitting) return;
-  if (!document.querySelector('#consent').checked) return toast('Consent is required');
-  if (draftMissing().length) return toast('Upload all required documents to create this case');
-  if (draft.submitting) return;
-  draft.submitting = true;
-  setDrawerBusy('Creating case… Please keep this form open.');
+const uploadJobs = new Map(), runningUploadJobs = new Set();
+let uploadQueueDB, restoredUploadOwner;
+function openUploadQueueDB() {
+  if (uploadQueueDB) return uploadQueueDB;
+  uploadQueueDB = new Promise((resolve,reject) => {
+    if (typeof indexedDB === 'undefined') return reject(new Error('Background uploads require browser storage. Enable storage for this site and retry.'));
+    const request = indexedDB.open('success-online-document-uploads',1);
+    request.onupgradeneeded = () => request.result.createObjectStore('jobs',{keyPath:'id'});
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(new Error('Could not open background upload storage. Keep this form open and retry.'));
+  }).catch(error=>{uploadQueueDB=null;throw error;});
+  return uploadQueueDB;
+}
+async function uploadJobStorage(mode, action) {
+  const db = await openUploadQueueDB();
+  return new Promise((resolve,reject)=>{
+    const transaction = db.transaction('jobs',mode);
+    const request = action(transaction.objectStore('jobs'));
+    transaction.oncomplete=()=>resolve(request.result);
+    transaction.onerror=transaction.onabort=()=>reject(new Error('Could not save the document upload queue. Free browser storage and retry.'));
+  });
+}
+const saveUploadJob = job => uploadJobStorage('readwrite',store=>store.put(job));
+const deleteUploadJob = id => uploadJobStorage('readwrite',store=>store.delete(id));
+function renderBackgroundUploads() {
+  document.querySelector('#backgroundUploads')?.remove();
+  const jobs = [...uploadJobs.values()].filter(job=>job.ownerId===me?.id);
+  if (!jobs.length) return;
+  document.body.insertAdjacentHTML('beforeend',`<details id="backgroundUploads" class="background-uploads" ${jobs.some(job=>job.state==='error')?'open':''}><summary>Document uploads · ${jobs.length} case${jobs.length===1?'':'s'}</summary><p>You can keep working. Uploads resume in this browser after a refresh.</p>${jobs.map(job=>`<div class="background-upload-job"><strong>${h(job.ref)}</strong><span role="status">${job.files.filter(file=>file.documentId).length} / ${job.files.length} files uploaded${job.state==='error'?' — needs retry':''}</span>${job.error?`<p>${h(job.error)}</p>`:''}${job.state==='error'?`<button type="button" class="quiet" onclick="retryUploadJob('${job.id}')">Retry uploads</button>`:''}</div>`).join('')}</details>`);
+}
+async function restoreUploadJobs() {
+  if (!me?.id || restoredUploadOwner===me.id) return;
+  const ownerId=me.id;
+  restoredUploadOwner=ownerId;
   try {
-    const created = draft.createdCase || (await api('/api/cases', { method:'POST', body:{ customer:draft.customer, variantId:draft.variantId, details:draft.details, consent:true } })).case;
-    draft.createdCase = created;
-    draft.uploaded ||= {};
-    draft.uploadedIds ||= {};
-    let completed = 0;
-    const entries = Object.entries(draft.docs).flatMap(([type,doc]) => doc.pages ? doc.pages.map((page,index) => [type,page,page.uploadKey ||= `${type}:${Date.now()}:${index}`]) : [[type,doc,type]]), total = entries.length;
-    const uploadChains = new Map();
-    let cursor=0, failure;
-    // Three transfers can overlap without flooding a mobile connection.
+    const saved=await uploadJobStorage('readonly',store=>store.getAll());
+    if(me?.id!==ownerId) return;
+    for(const savedJob of saved.filter(job=>job.ownerId===ownerId)) {const job=uploadJobs.get(savedJob.id)||savedJob;if(!runningUploadJobs.has(job.id))job.state='queued';uploadJobs.set(job.id,job);void runUploadJob(job.id);}
+    renderBackgroundUploads();
+  } catch(error) {restoredUploadOwner=null;}
+}
+async function runUploadJob(id) {
+  const job=uploadJobs.get(id);
+  if (!job || runningUploadJobs.size || job.ownerId!==me?.id) return;
+  runningUploadJobs.add(id);
+  job.state='uploading';delete job.error;
+  renderBackgroundUploads();
+  let cursor=0, failure;
+  const chains=new Map();
+  try {
     const worker=async()=>{
-      while(cursor<entries.length && !failure) {
-        const [docType,document,uploadKey]=entries[cursor++], identity=document.file || document.content;
-        if(draft.uploaded[uploadKey]===identity) {completed++;continue;}
-        setDrawerBusy(`Uploading documents: ${completed} of ${total} complete...`);
-        try {
-          const transfer = (uploadChains.get(docType) || Promise.resolve()).then(() => {
-            if (failure) throw failure;
-            return uploadDocument(created.id,docType,document,{deferMirrors:cloudUploads});
-          });
-          uploadChains.set(docType,transfer);
-          const result = await transfer;
-          if (result?.documentId) draft.uploadedIds[uploadKey] = result.documentId;
-          draft.uploaded[uploadKey]=identity;
-          completed++;
-          setDrawerBusy(`Uploading documents: ${completed} of ${total} complete...`);
-        } catch(error) {failure ||= error;}
+      while(cursor<job.files.length && me?.id===job.ownerId) {
+        const file=job.files[cursor++];
+        if(file.documentId)continue;
+        const transfer=(chains.get(file.docType)||Promise.resolve()).catch(()=>{}).then(async()=>{
+          for(let attempt=0;attempt<3;attempt++) {
+            if(me?.id!==job.ownerId)throw new Error('Sign in to the original account to resume these uploads.');
+            try {
+              const result=await uploadDocument(job.id,file.docType,file.document,{deferMirrors:true,uploadKey:file.key,cloud:job.cloud});
+              if(!result?.documentId)throw new Error('The server has not confirmed this document. Retry the upload.');
+              file.documentId=result.documentId;
+              await saveUploadJob(job);
+              renderBackgroundUploads();
+              return;
+            } catch(error) {
+              if(/expired|signature|token/i.test(error.message)){delete file.document.cloudAuthorization;delete file.document.cloudTransferred;}
+              if(attempt===2)throw error;
+              await waitForUploadRetry(attempt);
+            }
+          }
+        });
+        chains.set(file.docType,transfer);
+        try {await transfer;} catch(error){failure ||= error;}
       }
     };
-    await Promise.all(Array.from({length:Math.min(3,total)},worker));
-    if(failure) throw failure;
-    if(cloudUploads) await api(`/api/cases/${created.id}/finish-uploads`,{method:'POST',body:{}});
-    setDrawerBusy(); closeDrawer(); toast(`Created ${created.ref}`);
+    await Promise.all(Array.from({length:Math.min(3,job.files.length)},worker));
+    if(me?.id!==job.ownerId)throw new Error('Sign in to the original account to resume these uploads.');
+    if(failure)throw failure;
+    const result=await api(`/api/cases/${job.id}/finish-uploads`,{method:'POST',body:{}});
+    if(!result.case?.uploads?.complete)throw new Error('Uploads have not been confirmed. Retry to finish this case.');
+    await deleteUploadJob(job.id);
+    uploadJobs.delete(job.id);
+    toast(`All documents uploaded for ${job.ref}. The case reaches operations after payment is verified.`);
     void refreshCaseUpdates();
-    if(nextAction==='another') startCase();
-    else if(nextAction==='later') {toast('Case saved. Select unpaid cases in Payments to pay them together.');await setView('payments');}
+  } catch(error) {
+    job.state='error';job.error=error.message;
+    try{await saveUploadJob(job);}catch{}
+  } finally {
+    runningUploadJobs.delete(id);renderBackgroundUploads();
+    const next=[...uploadJobs.values()].find(job=>job.ownerId===me?.id && job.state==='queued');
+    if(next)void runUploadJob(next.id);
+  }
+}
+async function waitForUploadRetry(attempt) {await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)));}
+function retryUploadJob(id) {void runUploadJob(id);}
+Object.assign(window,{retryUploadJob});
+if(typeof window.addEventListener==='function')window.addEventListener('online',()=>{for(const job of uploadJobs.values())if(job.ownerId===me?.id)void runUploadJob(job.id);});
+
+async function submitCase(nextAction='pay') {
+  if (drawerBusy || draft.submitting) return;
+  if (!document.querySelector('#consent').checked) return toast('Please confirm customer consent');
+  if (draftMissing().length) return toast('Upload all required documents to continue');
+  const intake = draft;
+  intake.submitting = true;
+  setDrawerBusy('Saving case...');
+  try {
+    const allowed = new Set(applicableDocuments(services.find(s=>s.id===intake.serviceId)?.variants.find(v=>v.id===intake.variantId)?.documents || [], intake.details).map(doc=>doc.label));
+    intake.clientRequestId ||= crypto.randomUUID();
+    const files = Object.entries(intake.docs).filter(([type])=>allowed.has(type)).flatMap(([docType,doc])=>(doc.pages || [doc]).map(document=>({key:document.uploadKey ||= crypto.randomUUID(),docType,document})));
+    const uploadManifest = files.map(({key,docType,document})=>({key,docType,fileName:document.fileName,mimeType:document.mimeType,size:document.size}));
+    // Confirm durable browser storage before creating a case or closing its form.
+    await openUploadQueueDB();
+    const created = intake.createdCase || (await api('/api/cases',{method:'POST',body:{customer:intake.customer,variantId:intake.variantId,details:intake.details,consent:true,clientRequestId:intake.clientRequestId,uploadManifest}})).case;
+    intake.createdCase = created;
+    const job = {id:created.id,ref:created.ref,ownerId:me.id,files,cloud:cloudUploads,state:'queued'};
+    await saveUploadJob(job);
+    uploadJobs.set(job.id,job);
+    setDrawerBusy(); closeDrawer();
+    toast(`Created ${created.ref}. Documents are uploading in the background.`);
+    void runUploadJob(job.id);
+    void refreshCaseUpdates();
+    if (nextAction==='another') startCase();
+    else if (nextAction==='later') await setView('payments');
     else await pay(created.id);
   } catch (error) {
-    toast(error.message + (draft.createdCase ? ` Case ${draft.createdCase.ref} is saved; retry pending uploads after fixing the issue.` : ''));
-    const actions = document.querySelector('#wizard .form-actions');
-    document.querySelector('#uploadRecovery')?.remove();
-    if (actions) {
-      actions.insertAdjacentHTML('beforebegin', `<div id="uploadRecovery" class="summary-box" role="alert"><strong>${draft.createdCase ? `Case ${h(draft.createdCase.ref)} saved — uploads pending` : 'Case has not been created'}</strong><p>${h(error.message)}</p>${error.code === 'GOOGLE_RECONNECT_REQUIRED' ? '<p>Keep this form open. In another tab, an admin should open Business analytics and reconnect Google Drive. Then retry here.</p>' : error.code === 'GOOGLE_ROOT_FOLDER_INVALID' ? '<p>Keep this form open. In another tab, an admin should open Business analytics, paste the correct Main Google Drive folder link, and click Verify and save folder. Then retry here.</p>' : ''}</div>`);
-      const button = actions.querySelector('button.primary');
-      if (button) button.textContent = draft.createdCase ? 'Retry pending uploads' : 'Retry create case';
-    }
-  }
-  finally { draft.submitting = false; setDrawerBusy(); }
+    toast(error.message + (intake.createdCase ? ` Case ${intake.createdCase.ref} is saved. Retry to start its document uploads.` : ''));
+  } finally {intake.submitting=false;setDrawerBusy();}
 }
 
 async function openCase(caseId) {
@@ -1389,16 +1463,20 @@ async function fileAsBase64(file) {
   for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
   return btoa(binary);
 }
-async function uploadDocument(caseId, docType, document, {deferMirrors=false} = {}) {
-  if (!cloudUploads) return api(`/api/cases/${caseId}/documents`, {method:'POST',body:{docType,...document}});
+async function uploadDocument(caseId, docType, document, {deferMirrors=false,uploadKey,cloud=cloudUploads} = {}) {
+  if (!cloud) return api(`/api/cases/${caseId}/documents`, {method:'POST',body:{docType,...document,...(uploadKey?{uploadKey}:{}),...(deferMirrors?{deferMirrors:true}:{})}});
   const metadata = {docType,fileName:document.fileName,mimeType:document.mimeType,size:document.size};
   document.cloudAuthorization ||= await api(`/api/cases/${caseId}/upload-url`, {method:'POST',body:metadata});
   if (!document.cloudTransferred) {
     const response = await fetch(document.cloudAuthorization.uploadUrl, {method:'PUT',headers:{'content-type':document.mimeType},body:document.file});
+    if ([401,403].includes(response.status)) {
+      delete document.cloudAuthorization;delete document.cloudTransferred;
+      throw new Error('Upload authorization expired. Retrying with a new authorization.');
+    }
     if (!response.ok && response.status !== 409) throw new Error('Document upload failed. Retry the pending upload.');
     document.cloudTransferred = true;
   }
-  return api(`/api/cases/${caseId}/documents`, {method:'POST',body:{uploadId:document.cloudAuthorization.uploadId,...(deferMirrors?{deferMirrors:true}:{})}});
+  return api(`/api/cases/${caseId}/documents`, {method:'POST',body:{uploadId:document.cloudAuthorization.uploadId,...(uploadKey?{uploadKey}:{}),...(deferMirrors?{deferMirrors:true}:{})}});
 }
 async function uploadCaseDocument(caseId, encodedType, input) {
   const files = Array.from(input.files || []);
@@ -1468,7 +1546,7 @@ async function saveDriveRootFolder(button) {
 }
 async function activateGoogleSheets() { try { toast('Verifying workbook and syncing cases'); const result = await api('/api/google/sheets/activate', { method:'POST' }); await load(); toast(`Google Sheets live: ${result.syncedCases} cases synced`); } catch (error) { toast(error.message); } }
 async function setAnalyticsPeriod(period) { analyticsPeriod = period; adminAnalytics = await api(`/api/admin/dashboard?period=${period}`); render(); }
-async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/logout', { method:'POST' });clearTimeout(updatesTimer);caseNotifications=[];recentUpdatesOpen=false;announcements=[];announcementsUnavailable=false;announcementPosting=false;if(announcementPreviewUrl) URL.revokeObjectURL(announcementPreviewUrl);announcementPreviewUrl=''; me = null;view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';renderLogin(); }
+async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/logout', { method:'POST' });clearTimeout(updatesTimer);caseNotifications=[];recentUpdatesOpen=false;announcements=[];announcementsUnavailable=false;announcementPosting=false;if(announcementPreviewUrl) URL.revokeObjectURL(announcementPreviewUrl);announcementPreviewUrl=''; me = null;restoredUploadOwner=null;renderBackgroundUploads();view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';renderLogin(); }
 async function setView(next) {
   if(drawerBusy) return;
   closeDrawer();view=next;render();

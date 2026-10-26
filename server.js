@@ -15,6 +15,7 @@ import { storage, storageEnabled, signedDownload, signedPreview, readStorage, wr
 import { serviceCatalog } from './service-catalog.js';
 import { syncServiceForms } from './service-catalog-sync.js';
 import { PF_PASSWORD_KEY, encryptPFPassword, decryptPFPassword, publicCaseDetails } from './pf-credentials.js';
+import { INTAKE_UPLOADS, createUploadBatch, uploadBatchState, uploadManifestEntry } from './intake-uploads.js';
 import { sheetHeaders, serviceTabs } from './operations-schema.js';
 import { createPayments, paymentSchema, paymentConfig, priceAmounts } from './payments.js';
 import { correctionStatuses, reuploadState } from './reuploads.js';
@@ -483,12 +484,13 @@ async function caseRows(rows) {
   const have=new Map();
   for(const document of documents) {if(!have.has(document.case_id)) have.set(document.case_id,new Set());have.get(document.case_id).add(document.doc_type);}
   return rows.map(c=>{
-    const variant=variantMap.get(c.variant_id),details=publicCaseDetails(json(c,'details_json',{}));
+    const variant=variantMap.get(c.variant_id),rawDetails=json(c,'details_json',{}),details=publicCaseDetails(rawDetails);
+    const uploads=uploadBatchState(rawDetails,documents.filter(doc=>doc.case_id===c.id));
     const payment=payments.find(p=>p.case_id===c.id && ['PAID','verified','offline_approved'].includes(p.status)) || payments.find(p=>p.case_id===c.id);
     const requirements=json(variant,'documents_json',[]);
     const received=documents.find(doc=>doc.case_id===c.id && doc.doc_type===RECEIVED_DOCUMENT_TYPE);
-    const missing=requirements.some(d=>d.required && matchesIntake(d.when, details, true) && !have.get(c.id)?.has(d.label));
-    return {...c,details_json:JSON.stringify(details),payment_state:payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received ? publicDocument(received) : null,amounts:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : amounts(variant,details),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
+    const missing=(uploads && !uploads.complete) || requirements.some(d=>d.required && matchesIntake(d.when, details, true) && !have.get(c.id)?.has(d.label));
+    return {...c,uploads,details_json:JSON.stringify(details),payment_state:payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received ? publicDocument(received) : null,amounts:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : amounts(variant,details),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
   });
 }
 function amounts(v, details = {}) { const p=servicePrices.get(v.id);const base=priceAmounts(v,p?.price,p?.original);return json(v,'fields_json',[]).some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base,details) : base; }
@@ -515,13 +517,14 @@ function analyticsPeriod(key) {
   return { key: period, start: new Date(date.getTime() - indiaOffset).toISOString(), end: now(), group: ['week','month'].includes(period) ? 'day' : 'month' };
 }
 async function recomputeCase(id, {sync=true} = {}) {
-  const c = (await one('SELECT * FROM cases WHERE id=$id', { $id: id }));
+  const c = (await one('SELECT * FROM cases WHERE id=$id' + (db.cloud ? ' FOR UPDATE' : ''), { $id: id }));
   const docsReq = json((await one('SELECT documents_json FROM variants WHERE id=$id', { $id: c.variant_id })), 'documents_json', []);
   const docs = (await all('SELECT * FROM documents WHERE case_id=$id AND state!=$state', { $id: id, $state: 'replaced' }));
   const have = new Set(docs.map(d => d.doc_type));
   const details = json(c, 'details_json', {});
   const requiredDocs = docsReq.filter(d => d.required && matchesIntake(d.when, details, true));
-  const documentState = requiredDocs.every(d => have.has(d.label)) ? 'complete' : 'missing';
+  const uploads = uploadBatchState(details, docs);
+  const documentState = requiredDocs.every(d => have.has(d.label)) && (!uploads || uploads.complete) ? 'complete' : 'missing';
   const paid = (await one("SELECT * FROM payments WHERE case_id=$id AND status IN ('PAID','verified','offline_approved') AND gateway!='demo'", { $id: id }));
   const latest = await one("SELECT status FROM payments WHERE case_id=$id AND gateway='direct_upi' ORDER BY created_at DESC LIMIT 1",{$id:id});
   const paymentState = paid ? 'paid' : latest?.status || 'unpaid';
@@ -534,7 +537,7 @@ async function recomputeCase(id, {sync=true} = {}) {
 }
 function canSee(user, c) { return user.role === 'admin' || user.role === 'backoffice' || c.sales_user_id === user.id; }
 async function notifyCaseUpdate(c, actor, title, status = c.status) {
-  const recipients = await all("SELECT id FROM users WHERE active=1 AND id!=$actor AND (role='admin' OR id=$sales OR id=$backoffice OR (role='backoffice' AND $unassigned=1 AND $ready=1))",{$actor:actor.id,$sales:c.sales_user_id,$backoffice:c.backoffice_user_id || '',$unassigned:c.backoffice_user_id ? 0 : 1,$ready:status === 'Ready for Assignment' ? 1 : 0});
+  const recipients = await all("SELECT id FROM users WHERE active=1 AND id!=$actor AND (id=$sales OR ($visible=1 AND (role='admin' OR id=$backoffice OR (role='backoffice' AND $unassigned=1 AND $ready=1))))",{$visible:c.payment_state === 'paid' && c.document_state === 'complete' ? 1 : 0,$actor:actor.id,$sales:c.sales_user_id,$backoffice:c.backoffice_user_id || '',$unassigned:c.backoffice_user_id ? 0 : 1,$ready:status === 'Ready for Assignment' ? 1 : 0});
   for (const recipient of recipients) await run('INSERT INTO notifications VALUES ($id,$user,$title,$body,NULL,$at)',{$id:id('notice'),$user:recipient.id,$title:title,$body:JSON.stringify({caseId:c.id,ref:c.ref,status,actor:actor.name}),$at:now()});
 }
 function publicDocument(document) {
@@ -582,7 +585,17 @@ async function missingDocuments(c) {
   const have = new Set((await all("SELECT doc_type FROM documents WHERE case_id=$id AND state='uploaded'", { $id: c.id })).map(d => d.doc_type));
   return requirements.filter(d => d.required && matchesIntake(d.when, details, true) && !have.has(d.label)).map(d => d.label);
 }
+async function recordIntakeUpload(c, metadata, documentId) {
+  if (!metadata.uploadKey) return;
+  const details = json(c,'details_json',{});
+  const file = uploadManifestEntry(details,metadata.uploadKey,metadata);
+  file.documentId = documentId;
+  c.details_json = JSON.stringify(details);
+  await run('UPDATE cases SET details_json=$details WHERE id=$id',{$details:c.details_json,$id:c.id});
+}
 async function documentGate(c, res) {
+  const batch = uploadBatchState(json(c,'details_json',{}), await all("SELECT id,state FROM documents WHERE case_id=$id AND state='uploaded'",{$id:c.id}));
+  if (batch && !batch.complete) {send(res,409,{error:'All selected documents must finish uploading before this case can proceed.'});return false;}
   const pending = await one('SELECT id FROM upload_intents WHERE case_id=$id AND completed_at IS NULL AND expires_at>$at LIMIT 1', { $id:c.id, $at:now() });
   if (pending) { send(res,409,{error:'Wait for all pending document uploads to finish before proceeding.'}); return false; }
   const missing = (await missingDocuments(c));
@@ -756,10 +769,18 @@ async function routeApi(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/cases') {
     const where = user.role === 'sales' ? 'WHERE sales_user_id=$uid' : user.role === 'backoffice' ? "WHERE status!='Draft' AND EXISTS (SELECT 1 FROM payments p WHERE p.case_id=cases.id AND p.status IN ('PAID','verified','offline_approved') AND p.gateway!='demo') AND (backoffice_user_id=$uid OR backoffice_user_id IS NULL)" : '';
     const params = user.role === 'admin' ? {} : { $uid: user.id };
-    return send(res, 200, { cases: await caseRows(await all(`SELECT * FROM cases ${where} ORDER BY updated_at DESC`, params)) });
+    const listed = await caseRows(await all(`SELECT * FROM cases ${where} ORDER BY updated_at DESC`, params));
+    return send(res, 200, { cases: user.role === 'sales' ? listed : listed.filter(item => item.payment_state === 'paid' && item.document_state === 'complete' && (!item.uploads || item.uploads.complete)) });
   }
   if (req.method === 'POST' && url.pathname === '/api/cases') return body(req).then(async b => {
     if (user.role !== 'sales' && user.role !== 'admin') return send(res, 403, { error: 'Only sales or admin can create cases' });
+    if (b.clientRequestId !== undefined && !/^[a-f0-9-]{36}$/i.test(b.clientRequestId)) return send(res,400,{error:'Invalid case request identifier.'});
+    const caseId = b.clientRequestId ? `case_${b.clientRequestId}` : id('case');
+    if (b.clientRequestId) {
+      if (db.cloud) await one('SELECT pg_advisory_xact_lock(hashtext($key))',{$key:caseId});
+      const existing = await one('SELECT * FROM cases WHERE id=$id',{$id:caseId});
+      if (existing) return existing.sales_user_id === user.id && existing.variant_id === b.variantId ? send(res,200,{case:await caseRow(existing)}) : send(res,409,{error:'Case request already exists.'});
+    }
     const variant = (await one('SELECT * FROM variants WHERE id=$id', { $id: b.variantId }));
     if (!variant || !variant.active) return send(res, 400, { error: 'Choose an active service request type' });
     if (b.consent !== true) return send(res, 400, { error: 'Customer consent is required' });
@@ -785,6 +806,7 @@ async function routeApi(req, res, url) {
       if (value && field.type === 'number' && (!Number.isFinite(Number(value)) || Number(value) < 0)) return send(res, 400, { error: `Invalid ${field.label}` });
       if (value && field.type === 'number' && ((field.min !== undefined && Number(value) < field.min) || (field.step === '1' && !Number.isInteger(Number(value))))) return send(res, 400, { error: `Invalid ${field.label}` });
     }
+    const batch = createUploadBatch(b.uploadManifest, json(variant,'documents_json',[]),b.details,matchesIntake);
     // Supabase is the primary store; Google availability must not block intake.
     if (process.env.DRIVE_MODE === 'live' && !storageEnabled()) await verifyDriveRoot();
     let customerId = b.customerId;
@@ -794,7 +816,7 @@ async function routeApi(req, res, url) {
     }
     const allowedFields = new Set(fields.filter(field => matchesIntake(field.when, b.details) || (field.defaultWhen && b.details?.[field.defaultWhen.field] === field.defaultWhen.equals)).map(field => field.label).filter(label => !/password/i.test(label)));
     const details = Object.fromEntries(Object.entries(b.details || {}).filter(([key, value]) => allowedFields.has(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')).map(([key, value]) => [key, String(value).slice(0, 500)]));
-    const caseId = id('case');
+    if (batch) details[INTAKE_UPLOADS] = batch;
     const passwordField = fields.find(field => field.sensitive && field.type === 'password');
     if (passwordField && b.details[passwordField.label]) details[PF_PASSWORD_KEY] = encryptPFPassword(String(b.details[passwordField.label]), SESSION_SECRET, caseId);
     (await run(`INSERT INTO cases VALUES ($id,$ref,$customer_id,$service_id,$variant_id,$sales_user_id,NULL,'Draft','Normal',NULL,'SO-CONSENT-2026-01',$consent_at,$details,NULL,NULL,'missing','unpaid',NULL,NULL,$created_at,$updated_at,NULL,NULL)`,
@@ -875,6 +897,7 @@ async function routeApi(req, res, url) {
       return send(res,200,detail);
     }
     if (req.method === 'POST' && caseMatch[2] === 'remove-document') {
+      if (json(c,'details_json',{})[INTAKE_UPLOADS]?.finalized === false) return send(res,409,{error:'Wait for the original document uploads to finish before removing files.'});
       if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res,409,{error:'This case is closed for document changes'});
       const b = await body(req);
       if (typeof b.documentId !== 'string' || !b.documentId) return send(res,400,{error:'Choose a document to remove'});
@@ -890,10 +913,21 @@ async function routeApi(req, res, url) {
       return send(res,200,{ok:true,case:await caseRow(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}))});
     }
     if (req.method === 'POST' && caseMatch[2] === 'finish-uploads') {
+      const details = json(c,'details_json',{}), batch = details[INTAKE_UPLOADS];
+      if (batch) {
+        const state = uploadBatchState(details, await all("SELECT id,state FROM documents WHERE case_id=$id AND state='uploaded'",{$id:c.id}));
+        if (state.completed !== state.total) return send(res,409,{error:`Documents are still uploading: ${state.completed} of ${state.total} complete.`,uploads:state});
+        const missing = await missingDocuments(c);
+        if (missing.length) return send(res,409,{error:'Required documents are missing.',missingDocuments:missing});
+        batch.finalized = true;
+        c.details_json = JSON.stringify(details);
+        await run('UPDATE cases SET details_json=$details WHERE id=$id',{$details:c.details_json,$id:c.id});
+        await run('UPDATE upload_intents SET expires_at=$at WHERE case_id=$id AND completed_at IS NULL',{$at:now(),$id:c.id});
+      }
       deferredDrive.getStore()?.add(c.id);
       await recomputeCase(c.id);
       await notifyCaseUpdate(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}),user,'Documents updated');
-      return send(res,200,{ok:true});
+      return send(res,200,{ok:true,case:await caseRow(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}))});
     }
     if (req.method === 'POST' && caseMatch[2] === 'upload-url') {
       const b = await body(req);
@@ -912,14 +946,22 @@ async function routeApi(req, res, url) {
       let intent;
       if (b.uploadId) {
         intent = await one('SELECT * FROM upload_intents WHERE id=$id AND case_id=$case AND user_id=$user',{$id:b.uploadId,$case:c.id,$user:user.id});
+        if (intent) Object.assign(b,{docType:intent.doc_type,fileName:intent.file_name,mimeType:intent.mime_type,size:intent.size});
         if (!intent) return send(res,404,{error:'Upload authorization not found.'});
         if (intent.completed_at) {
           const saved = await one('SELECT id FROM documents WHERE storage_path=$path',{$path:`supabase://${intent.storage_path}`});
+          if (saved?.id) await recordIntakeUpload(c,b,saved.id);
           return send(res,200,{ok:true,documentId:saved?.id,case:await caseRow(c)});
         }
         if (intent.expires_at < now()) return send(res,409,{error:'Upload authorization expired. Select the file again.'});
         Object.assign(b,{docType:intent.doc_type,fileName:intent.file_name,mimeType:intent.mime_type,size:intent.size});
       } else if (process.env.VERCEL) return send(res,400,{error:'Use the signed cloud upload flow for documents.'});
+      if (json(c,'details_json',{})[INTAKE_UPLOADS]?.finalized === false && !b.uploadKey) return send(res,409,{error:'This case is still uploading its original documents. Use the background upload queue to retry.'});
+      const manifestFile = uploadManifestEntry(json(c,'details_json',{}), b.uploadKey, b);
+      if (manifestFile?.documentId && await one("SELECT id FROM documents WHERE id=$id AND case_id=$case AND state='uploaded'",{$id:manifestFile.documentId,$case:c.id})) {
+        if (intent) await run('UPDATE upload_intents SET completed_at=$at WHERE id=$id',{$at:now(),$id:intent.id});
+        return send(res,200,{ok:true,documentId:manifestFile.documentId});
+      }
       if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res, 409, { error: 'This case is closed for uploads' });
       const variant = (await one('SELECT documents_json FROM variants WHERE id=$id', { $id: c.variant_id }));
       const allowed = json(variant, 'documents_json', []).map(d => d.label);
@@ -936,6 +978,7 @@ async function routeApi(req, res, url) {
       const safeName = `${b.docType}${multiple ? ' - ' + randomUUID().slice(0,8) : ''} - ${customer.name} - ${c.ref}${extname(b.fileName) || '.bin'}`.replace(/[\\/:*?"<>|]/g, '-');
       const content = intent ? await readStorage(intent.storage_path) : Buffer.from(b.content || '', 'base64');
       if (!content.length || content.length > 10_000_000) return send(res, 400, { error: 'Uploaded file content is empty or exceeds 10 MB' });
+      if (manifestFile && content.length !== manifestFile.size) return send(res,400,{error:'Upload size does not match the saved document manifest.'});
       if (intent && content.length !== intent.size) return send(res,400,{error:'Upload size does not match the selected document.'});
       const signatureOK = b.mimeType === 'application/pdf' ? content.subarray(0, 5).toString() === '%PDF-' : b.mimeType === 'image/png' ? content.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : content[0] === 255 && content[1] === 216 && content[2] === 255;
       if (!signatureOK) return send(res, 400, { error: 'File content does not match JPG, PNG, or PDF format' });
@@ -977,6 +1020,7 @@ async function routeApi(req, res, url) {
       }
       if (googleSyncError && googleSyncError!=='GOOGLE_SYNC_PENDING') await run('INSERT INTO sync_jobs VALUES ($id,$type,$entity,$status,1,$error,$at,$at)',{$id:id('sync'),$type:'drive',$entity:documentId,$status:'failed',$error:googleSyncError,$at:now()});
       if (intent) await run('UPDATE upload_intents SET completed_at=$at WHERE id=$id',{$id:intent.id,$at:now()});
+      await recordIntakeUpload(c,b,documentId);
       if (intent && !multiple) await run('UPDATE upload_intents SET expires_at=$at WHERE case_id=$case AND doc_type=$type AND completed_at IS NULL',{$at:now(),$case:c.id,$type:b.docType});
       if (b.deferMirrors) return send(res,201,{ok:true,documentId,googleSyncPending:Boolean(googleSyncError)});
       await recomputeCase(c.id);

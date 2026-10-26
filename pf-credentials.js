@@ -17,7 +17,7 @@ export function decryptPFPassword(encrypted, secret, caseId) {
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
 }
 export function publicCaseDetails(details) {
-  const visible = Object.fromEntries(Object.entries(details).filter(([key]) => key !== PF_PASSWORD_KEY && !/password/i.test(key)));
+  const visible = Object.fromEntries(Object.entries(details).filter(([key]) => key !== PF_PASSWORD_KEY && !key.startsWith('_intake') && !/password/i.test(key)));
   if (details[PF_PASSWORD_KEY]) visible.Password = '••••••••';
   return visible;
 }
