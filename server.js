@@ -13,6 +13,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { waitUntil } from '@vercel/functions';
 import { storage, storageEnabled, signedDownload, signedPreview, readStorage, writeStorage, downloadFileLimit } from './storage.js';
 import { serviceCatalog } from './service-catalog.js';
+import { syncServiceForms } from './service-catalog-sync.js';
+import { PF_PASSWORD_KEY, encryptPFPassword, decryptPFPassword, publicCaseDetails } from './pf-credentials.js';
 import { sheetHeaders, serviceTabs } from './operations-schema.js';
 import { createPayments, paymentSchema, paymentConfig, priceAmounts } from './payments.js';
 import { correctionStatuses, reuploadState } from './reuploads.js';
@@ -481,12 +483,12 @@ async function caseRows(rows) {
   const have=new Map();
   for(const document of documents) {if(!have.has(document.case_id)) have.set(document.case_id,new Set());have.get(document.case_id).add(document.doc_type);}
   return rows.map(c=>{
-    const variant=variantMap.get(c.variant_id),details=json(c,'details_json',{});
+    const variant=variantMap.get(c.variant_id),details=publicCaseDetails(json(c,'details_json',{}));
     const payment=payments.find(p=>p.case_id===c.id && ['PAID','verified','offline_approved'].includes(p.status)) || payments.find(p=>p.case_id===c.id);
     const requirements=json(variant,'documents_json',[]);
     const received=documents.find(doc=>doc.case_id===c.id && doc.doc_type===RECEIVED_DOCUMENT_TYPE);
     const missing=requirements.some(d=>d.required && matchesIntake(d.when, details, true) && !have.get(c.id)?.has(d.label));
-    return {...c,payment_state:payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received ? publicDocument(received) : null,amounts:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : amounts(variant,details),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
+    return {...c,details_json:JSON.stringify(details),payment_state:payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received ? publicDocument(received) : null,amounts:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : amounts(variant,details),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
   });
 }
 function amounts(v, details = {}) { const p=servicePrices.get(v.id);const base=priceAmounts(v,p?.price,p?.original);return json(v,'fields_json',[]).some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base,details) : base; }
@@ -766,6 +768,7 @@ async function routeApi(req, res, url) {
     if (b.customerId && !(await one('SELECT id FROM customers WHERE id=$id AND ($admin=1 OR created_by=$user)', { $id: b.customerId, $admin: user.role === 'admin' ? 1 : 0, $user: user.id }))) return send(res, 404, { error: 'Customer not found' });
     const fields = json(variant, 'fields_json', []);
     b.details ||= {};
+    if (globalThis.IntakeRules.missingAnswerGroups(fields, b.details).length) return send(res, 400, {error:'Answer at least one ration card question to continue.'});
     globalThis.IntakeRules.applyComputed(fields, b.details);
     for (const field of fields) {
       if (field.defaultWhen && b.details[field.defaultWhen.field] === field.defaultWhen.equals) b.details[field.label] = field.defaultWhen.value;
@@ -776,7 +779,7 @@ async function routeApi(req, res, url) {
       if (!field.allowNumbers && /\bname\b|\bsurname\b/i.test(field.label) && /\p{N}/u.test(value)) return send(res, 400, { error: `${field.label} cannot contain numbers` });
       if (field.marathiInput && /[A-Za-z]/.test(value)) return send(res, 400, { error: `Enter ${field.label} in Marathi` });
       if (field.required && !value) return send(res, 400, { error: `Enter ${field.label}` });
-      if (field.type === 'select' && !field.options.includes(value)) return send(res, 400, { error: `Choose ${field.label}` });
+      if (field.type === 'select' && (value || !field.optional) && !field.options.includes(value)) return send(res, 400, { error: `Choose ${field.label}` });
       if (value && field.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return send(res, 400, { error: `Invalid ${field.label}` });
       if (value && field.pattern && !new RegExp(`^(?:${field.pattern})$`, 'u').test(value)) return send(res, 400, { error: `Invalid ${field.label}` });
       if (value && field.type === 'number' && (!Number.isFinite(Number(value)) || Number(value) < 0)) return send(res, 400, { error: `Invalid ${field.label}` });
@@ -792,6 +795,8 @@ async function routeApi(req, res, url) {
     const allowedFields = new Set(fields.filter(field => matchesIntake(field.when, b.details) || (field.defaultWhen && b.details?.[field.defaultWhen.field] === field.defaultWhen.equals)).map(field => field.label).filter(label => !/password/i.test(label)));
     const details = Object.fromEntries(Object.entries(b.details || {}).filter(([key, value]) => allowedFields.has(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')).map(([key, value]) => [key, String(value).slice(0, 500)]));
     const caseId = id('case');
+    const passwordField = fields.find(field => field.sensitive && field.type === 'password');
+    if (passwordField && b.details[passwordField.label]) details[PF_PASSWORD_KEY] = encryptPFPassword(String(b.details[passwordField.label]), SESSION_SECRET, caseId);
     (await run(`INSERT INTO cases VALUES ($id,$ref,$customer_id,$service_id,$variant_id,$sales_user_id,NULL,'Draft','Normal',NULL,'SO-CONSENT-2026-01',$consent_at,$details,NULL,NULL,'missing','unpaid',NULL,NULL,$created_at,$updated_at,NULL,NULL)`,
       { $id: caseId, $ref: (await nextCaseRef()), $customer_id: customerId, $service_id: variant.service_id, $variant_id: variant.id, $sales_user_id: user.id, $consent_at: b.consent ? now() : null, $details: JSON.stringify(details), $created_at: now(), $updated_at: now() }));
     await paymentSystem.createOrder(await one('SELECT * FROM cases WHERE id=$id',{$id:caseId}),user);
@@ -803,6 +808,13 @@ async function routeApi(req, res, url) {
   if (caseMatch) {
     const c = (await one('SELECT * FROM cases WHERE id=$id OR ref=$id' + (db.cloud && req.method === 'POST' && caseMatch[2]!=='upload-url' ? ' FOR UPDATE' : ''), { $id: caseMatch[1] }));
     if (!c || !canSee(user, c)) return send(res, c ? 403 : 404, { error: c ? 'Not allowed' : 'Not found' });
+    if (req.method === 'POST' && caseMatch[2] === 'pf-password') {
+      if (!(user.role === 'admin' || (user.role === 'backoffice' && c.backoffice_user_id === user.id))) return send(res,403,{error:'Only the administrator or assigned back-office employee may view the PF password.'});
+      const encrypted = json(c,'details_json',{})[PF_PASSWORD_KEY];
+      if (!encrypted) return send(res,404,{error:'No PF password is saved for this case.'});
+      await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:id('aud'),$actor:user.id,$action:'case.pf_password.view',$type:'case',$entity:c.id,$reason:'',$at:now()});
+      return send(res,200,{password:decryptPFPassword(encrypted,SESSION_SECRET,c.id)});
+    }
     if (req.method === 'POST' && user.role === 'backoffice' && !(await processingGate(c,res))) return;
     if (req.method === 'GET' && caseMatch[2] === 'download-all') {
       if (!['backoffice','admin'].includes(user.role)) return send(res, 403, { error: 'Only back office or admin can download a case bundle' });
@@ -1151,6 +1163,7 @@ async function preserveServicePrices() {
 }
 let initialization;
 export async function initialize({setup = false} = {}) {
+  if (db.cloud && !setup) await syncServiceForms(db);
   if (setup || !db.cloud) {
     if (!db.cloud) await migrate();
     await db.transaction(async () => {

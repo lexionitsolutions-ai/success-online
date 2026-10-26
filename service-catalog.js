@@ -14,6 +14,8 @@ const today = new Date();
 const financialYear = Number(today.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', year: 'numeric' })) - (Number(today.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', month: 'numeric' })) < 4 ? 1 : 0);
 const incomeYears = ['2021-2022', '2022-2023', '2023-2024'];
 const singleIncomeYear = `${financialYear - 1}-${financialYear}`;
+const rationYes = label => ({ field: label, equals: 'Yes', defaultValue: 'No' });
+const rationProof = (label, marathiLabel, note = '', when, section = 'Common Documents / अनिवार्य कागदपत्रे') => ({ ...doc(label, note, when), displayLabel: `${label} / ${marathiLabel}`, marathiLabel, section });
 
 export const serviceCatalog = [
   {
@@ -144,7 +146,10 @@ export const serviceCatalog = [
       ...[doc('Applicant Aadhaar Card'), doc('Applicant School Leaving Certificate'), doc('Applicant Photo'), doc('Applicant Caste Certificate'), doc('Form 15A')].map(item => ({ ...item, section: 'Applicant / अर्जदार' })),
       ...[doc('Father School Leaving Certificate / Bonafide', 'Upload either a School Leaving Certificate or Bonafide. / शाळा सोडल्याचा दाखला किंवा बोनाफाईड अपलोड करा.'), doc('Ration Card'), doc('Father Photo'), doc('Father Aadhaar Card')].map(item => ({ ...item, section: 'Father / वडील' })),
       { ...doc('Relative School Leaving Certificate / Bonafide (pre-1967)', 'Upload a School Leaving Certificate or Bonafide of a grandfather, paternal aunt, or paternal uncle. / आजोबा, आत्या किंवा चुलते यांचा शाळा सोडल्याचा दाखला किंवा बोनाफाईड अपलोड करा.'), displayLabel: 'Grandfather / Aunt / Uncle - School Leaving Certificate / Bonafide', marathiLabel: 'आजोबा / आत्या / चुलते - शाळा सोडल्याचा दाखला / बोनाफाईड', section: 'Grandfather / Aunt / Uncle / आजोबा / आत्या / चुलते' },
-      { ...doc('Historical Revenue Proof (pre-1967)', 'Upload any ONE: Property Card, House Assessment, or Electoral Roll. / प्रॉपर्टी कार्ड, घर आकारणी किंवा मतदान यादी यापैकी कोणताही एक पुरावा अपलोड करा.'), displayLabel: 'Property Card / House Assessment / Electoral Roll', marathiLabel: 'प्रॉपर्टी कार्ड / घर आकारणी / मतदान यादी (कोणतेही एक)', section: 'Revenue Proof / महसूल पुरावा' },
+      { ...doc('Historical Revenue Proof (pre-1967)', 'Upload any ONE: Property Card, House Assessment, or Electoral Roll. / प्रॉपर्टी कार्ड, घर आकारणी किंवा मतदान यादी यापैकी कोणताही एक पुरावा अपलोड करा.'), displayLabel: 'Property Card / House Assessment / Electoral Roll', marathiLabel: 'प्रॉपर्टी कार्ड / घर आकारणी / मतदान यादी (कोणतेही एक)', section: 'Revenue Proof / महसूल पुरावा', highlightedNotes: [
+        { number: 10, marathi: 'चालू वर्षाचा घराचा असेसमेंट उतारा (एकूण क्षेत्रफळ १००० चौ. फुटांच्या आत असणे आवश्यक).', english: 'Current house assessment extract (the total area must be less than 1,000 sq. ft.).' },
+        { number: 11, marathi: 'वडिलांचे आधार कार्ड (अर्जदाराचे वय १८ वर्षांपेक्षा कमी असल्यास आवश्यक).', english: 'Father’s Aadhaar card (required if the applicant is under 18 years of age).' }
+      ] },
       { ...doc('Family Member Caste Validity Record', 'Upload only if a family member already has caste validity. / घरातील कोणाची जात पडताळणी झाली असल्यास प्रमाणपत्र अपलोड करा.'), required: false, section: 'Family Caste Validity (if available) / घरातील जात वैधता (असल्यास)' }
     ]
   },
@@ -165,28 +170,85 @@ export const serviceCatalog = [
   },
   {
     name: 'Passport', slug: 'passport', description: 'Passport application assistance.',
-    fields: [field('Mobile', 'tel'), field('Qualification'), field('Father name'), field('Mother name'), field('Husband / Wife name'), field('Emergency contact name'), field('Emergency contact number', 'tel'), field('Police Station'), field('Birth place')],
-    documents: [doc('Aadhaar Card'), doc('PAN Card')]
+    fields: [
+      { ...field('Mobile', 'tel'), required: true, displayLabel: 'Mobile number / मोबाईल नंबर', inputMode: 'numeric', digitsOnly: true, maxLength: 10, pattern: '[6-9][0-9]{9}', placeholder: '10-digit mobile number / १० अंकी मोबाईल नंबर' },
+      { ...field('Email', 'email'), required: true, displayLabel: 'Email address / ईमेल पत्ता' },
+      { ...field('Passport application type', 'select', ['New', 'Renew']), required: true, fullWidth: true, displayLabel: 'Are you applying for a new passport or renewing an existing passport? / तुम्हाला नवीन पासपोर्ट काढायचा आहे की सध्याच्या पासपोर्टचे नूतनीकरण करायचे आहे?', optionLabels: { New: 'New / नवीन', Renew: 'Renew / नूतनीकरण' } },
+      { ...field('Applicant under 18?', 'select', ['Yes', 'No']), required: true, fullWidth: true, displayLabel: 'Is the applicant under 18 years of age? / अर्जदाराचे वय १८ वर्षांपेक्षा कमी आहे का?', optionLabels: { Yes: 'Yes / होय', No: 'No / नाही' } },
+      { ...field('Name change or correction?', 'select', ['Yes', 'No']), required: true, fullWidth: true, displayLabel: 'Does the applicant need a name change or correction in the passport (for example, after marriage or to correct a spelling mistake)? / अर्जदाराच्या पासपोर्टवरील नावात बदल किंवा दुरुस्ती करायची आहे का (उदा. लग्नानंतर नाव बदलणे किंवा नावातील चूक दुरुस्त करणे)?', optionLabels: { Yes: 'Yes / होय', No: 'No / नाही' }, note: 'If Yes, upload a document showing the new or corrected name, such as a Gazette notification or an updated Aadhaar card, in the Documents step. / होय निवडल्यास, नवीन किंवा दुरुस्त नाव नमूद असलेला पुरावा, उदा. राजपत्र (गॅझेट) किंवा अद्ययावत आधार कार्ड, कागदपत्रे विभागात अपलोड करा.' }
+    ],
+    documents: [doc('Aadhaar Card'), doc('PAN Card'),
+      { ...doc('Old Passport', 'Upload your existing / old passport for renewal. / नूतनीकरणासाठी तुमचा सध्याचा / जुना पासपोर्ट अपलोड करा.', { field: 'Passport application type', equals: 'Renew' }), displayLabel: 'Old Passport / जुना पासपोर्ट', multiple: true },
+      { ...doc('Name Change / Correction Proof', 'Upload any ONE document confirming the new or corrected name, such as a Gazette notification or an updated Aadhaar card. / नवीन किंवा दुरुस्त नावाची पुष्टी करणारा कोणताही एक पुरावा, उदा. राजपत्र (गॅझेट) किंवा अद्ययावत आधार कार्ड, अपलोड करा.', { field: 'Name change or correction?', equals: 'Yes' }), displayLabel: 'Name Change / Correction Proof / नाव बदलाचा किंवा दुरुस्तीचा पुरावा' }
+    ]
   },
   {
     name: 'Voting Card', slug: 'voting-card', description: 'Voter ID card application assistance.',
-    fields: [field('Mobile', 'tel')],
-    documents: [doc('Aadhaar Card'), doc('Photo')]
+    fields: [
+      { ...field('Mobile', 'tel'), required: true, displayLabel: 'Mobile number / मोबाईल नंबर', inputMode: 'numeric', digitsOnly: true, maxLength: 10, pattern: '[6-9][0-9]{9}', placeholder: '10-digit mobile number / १० अंकी मोबाईल नंबर' },
+      { ...field('Voting card application type', 'select', ['New', 'Correction', 'Renew']), required: true, fullWidth: true, displayLabel: 'Are you applying for a new voting card, correcting an existing card, or renewing / replacing a card? / तुम्हाला नवीन मतदार ओळखपत्र काढायचे आहे, सध्याच्या ओळखपत्रात दुरुस्ती करायची आहे की नूतनीकरण / बदली ओळखपत्र हवे आहे?', optionLabels: { New: 'New voting card / नवीन मतदार ओळखपत्र', Correction: 'Correction in voting card / मतदार ओळखपत्रात दुरुस्ती', Renew: 'Renew / Replace voting card / नूतनीकरण / बदली मतदार ओळखपत्र' } },
+      { ...field('Voting card field to correct', 'select', ['Name', 'Gender', 'Date of birth / Age', 'Relationship type', 'Relative name', 'Address', 'Mobile number', 'Photograph']), required: true, fullWidth: true, when: { field: 'Voting card application type', equals: 'Correction' }, displayLabel: 'Which detail needs to be corrected? / कोणत्या माहितीत दुरुस्ती करायची आहे?', optionLabels: { Name: 'Name / नाव', Gender: 'Gender / लिंग', 'Date of birth / Age': 'Date of birth / Age / जन्मतारीख / वय', 'Relationship type': 'Relationship type (father / mother / spouse) / नात्याचा प्रकार (वडील / आई / पती किंवा पत्नी)', 'Relative name': 'Relative’s name / नातेवाईकाचे नाव', Address: 'Address / पत्ता', 'Mobile number': 'Mobile number / मोबाईल नंबर', Photograph: 'Photograph / छायाचित्र' }, note: 'Choose the detail that is incorrect, then enter the correct information below. For a photograph change, describe the change and upload the new photograph in Documents. / चुकीची माहिती निवडा आणि खाली योग्य माहिती भरा. छायाचित्र बदलायचे असल्यास बदलाचे वर्णन करा व कागदपत्रे विभागात नवीन छायाचित्र अपलोड करा.' },
+      ...[
+        ['Name', 'Corrected applicant name', 'What should the applicant’s name be corrected to? / अर्जदाराचे योग्य नाव काय असावे?', 'Enter the full correct name / संपूर्ण योग्य नाव भरा'],
+        ['Gender', 'Corrected gender', 'What should the gender be corrected to? / योग्य लिंग काय असावे?', 'e.g. Male, Female, Transgender / उदा. पुरुष, स्त्री, तृतीयपंथी'],
+        ['Date of birth / Age', 'Corrected date of birth or age', 'What is the correct date of birth or age? / योग्य जन्मतारीख किंवा वय काय आहे?', 'DD/MM/YYYY or age in years / दिनांक/महिना/वर्ष किंवा पूर्ण वय'],
+        ['Relationship type', 'Corrected relationship type', 'What is the correct relationship type? / नात्याचा योग्य प्रकार कोणता आहे?', 'e.g. Father, Mother, Husband, Wife / उदा. वडील, आई, पती, पत्नी'],
+        ['Relative name', 'Corrected relative name', 'What should the relative’s name be corrected to? / नातेवाईकाचे योग्य नाव काय असावे?', 'Enter the relative’s full correct name / नातेवाईकाचे संपूर्ण योग्य नाव भरा'],
+        ['Address', 'Corrected address', 'What is the correct full address? / योग्य संपूर्ण पत्ता काय आहे?', 'House, street, village/city, district, state and PIN code / घर, रस्ता, गाव/शहर, जिल्हा, राज्य व पिन कोड'],
+        ['Mobile number', 'Corrected mobile number', 'What is the correct mobile number? / योग्य मोबाईल नंबर काय आहे?', '10-digit mobile number / १० अंकी मोबाईल नंबर'],
+        ['Photograph', 'Photograph correction details', 'Describe the photograph change required. / छायाचित्रात कोणता बदल हवा आहे ते लिहा.', 'Describe the replacement photograph / नवीन छायाचित्राबद्दल माहिती लिहा']
+      ].map(([choice, label, displayLabel, placeholder]) => ({ ...field(label, choice === 'Mobile number' ? 'tel' : 'text'), required: true, fullWidth: true, displayLabel, placeholder, when: { all: [{ field: 'Voting card application type', equals: 'Correction' }, { field: 'Voting card field to correct', equals: choice }] }, ...(choice === 'Mobile number' ? { digitsOnly: true, maxLength: 10, inputMode: 'numeric', pattern: '[6-9][0-9]{9}' } : {}) }))
+    ],
+    documents: [doc('Aadhaar Card'), doc('Photo'), { ...doc('Old Voting Card', 'Upload the old / previous voting card for renewal or replacement. / नूतनीकरण किंवा बदलीसाठी जुने / पूर्वीचे मतदार ओळखपत्र अपलोड करा.', { field: 'Voting card application type', equals: 'Renew' }), displayLabel: 'Old / Previous Voting Card / जुने / पूर्वीचे मतदार ओळखपत्र', marathiLabel: 'जुने / पूर्वीचे मतदार ओळखपत्र', multiple: true }]
   },
   {
     name: 'PAN Card', slug: 'pan', description: 'PAN card application assistance.',
     documents: [doc('Aadhaar Card'), doc('Photo'), doc('Signature Image'), doc('Any One Date of Birth Proof', 'Birth certificate, driving licence, or voter ID card. Date of birth must be shown.')]
   },
   {
-    name: 'PF Assistance', slug: 'pf-assistance', description: 'PF account assistance.',
-    instructions: 'The source checklist requests UAN and password. For security, do not upload or save a password here. The customer should enter it directly in the official portal during an assisted session.',
-    fields: [],
-    documents: [doc('Bank Passbook')]
+    name: 'PF Working (Provident Fund)', slug: 'pf-assistance', description: 'Provident Fund service requests.',
+    fields: [
+      { ...field('UAN No', 'text'), required: true, digitsOnly: true, maxLength: 12, inputMode: 'numeric', pattern: '[0-9]{12}', displayLabel: 'UAN No / यूएएन क्रमांक', placeholder: '12-digit UAN number / १२ अंकी यूएएन क्रमांक' },
+      { ...field('Password', 'password'), required: true, sensitive: true, maxLength: 128, displayLabel: 'Password / पासवर्ड' },
+      { ...field('PF work required', 'textarea'), required: true, fullWidth: true, displayLabel: 'What work would you like us to complete on your PF account? / तुमच्या पीएफ खात्याशी संबंधित कोणते काम करून हवे आहे?', placeholder: 'Describe the PF work you need / आवश्यक पीएफ कामाची माहिती लिहा' },
+      { ...field('PF profile updated?', 'select', ['Yes', 'No']), required: true, displayLabel: 'Is your PF profile updated? / तुमचे पीएफ प्रोफाइल अद्ययावत आहे का?', optionLabels: { Yes: 'Yes / होय', No: 'No / नाही' } },
+      { ...field('PF email', 'email'), required: true, displayLabel: 'Email address / ईमेल पत्ता', when: { field: 'PF profile updated?', equals: 'Yes' } }
+    ],
+    documents: [doc('Aadhaar Card'), doc('PAN Card'), doc('Photo'), doc('Bank Passbook'), { ...doc('Other Supporting Documents', 'Upload any additional documents needed for the requested PF work. This upload is optional. / आवश्यक पीएफ कामासाठी लागणारी इतर कागदपत्रे येथे अपलोड करा. ही कागदपत्रे ऐच्छिक आहेत.'), required: false, multiple: true, displayLabel: 'Other Documents (optional) / इतर कागदपत्रे (ऐच्छिक)', marathiLabel: 'इतर कागदपत्रे (ऐच्छिक)' }]
   },
   {
     name: 'Ration Card', slug: 'ration-card', description: 'Ration card member, unit, and detail update assistance.',
-    fields: [field('Unit change', 'select', ['No change', 'Unit decreased', 'Unit increased'])],
-    documents: [doc('Aadhaar, PAN and Photo for All Members'), doc('Electricity Bill'), doc('Income Certificate'), doc('Death Certificate / Marriage Certificate', 'Required when the unit is decreased.', { field: 'Unit change', equals: 'Unit decreased' }), doc('Name Change Record / Birth Certificate', 'Required when the unit is increased.', { field: 'Unit change', equals: 'Unit increased' })]
+    fields: [
+      ...[
+        ['Add a member?', 'Do you want to add a member’s name (other than due to marriage)? / विवाहाव्यतिरिक्त इतर कारणासाठी रेशन कार्डमध्ये नाव वाढवायचे आहे का?'],
+        ['Add a member due to marriage?', 'Do you want to add a member’s name due to marriage? / विवाहामुळे रेशन कार्डमध्ये नाव वाढवायचे आहे का?'],
+        ['Remove a member?', 'Do you want to remove a member’s name (due to death or separation)? / मृत्यू किंवा विभक्त रेशन कार्ड करण्यासाठी नाव कमी करायचे आहे का?'],
+        ['Remove a member due to marriage?', 'Do you want to remove a member’s name due to marriage? / विवाहामुळे रेशन कार्डमधून नाव कमी करायचे आहे का?'],
+        ['Change ration card address?', 'Do you want to change the address on the ration card? / रेशन कार्डवरील पत्ता बदलायचा आहे का?']
+      ].map(([label, displayLabel]) => ({ ...field(label, 'select', ['Yes', 'No']), optional: true, answerGroup: 'ration-card', fullWidth: true, displayLabel, optionLabels: { Yes: 'Yes / होय', No: 'No / नाही' } })),
+      { ...field('Ration card residence', 'select', ['Owned', 'Rented']), optional: true, answerGroup: 'ration-card', displayLabel: 'Do you live in your own home or a rented home? / तुम्ही स्वतःच्या घरात राहता की भाड्याच्या घरात?', optionLabels: { Owned: 'Owned / स्वतःचे घर', Rented: 'Rented / भाड्याचे घर' } },
+      { ...field('Is the ration card white?', 'select', ['Yes', 'No']), optional: true, answerGroup: 'ration-card', displayLabel: 'Is your ration card white? / तुमचे रेशन कार्ड पांढरे आहे का?', optionLabels: { Yes: 'Yes / होय', No: 'No / नाही' }, note: 'Answer at least one question to continue. Leave questions that do not apply unanswered; their extra documents will not be required. / पुढे जाण्यासाठी किमान एका प्रश्नाचे उत्तर द्या. लागू नसलेले प्रश्न रिकामे ठेवू शकता; त्यांची अतिरिक्त कागदपत्रे आवश्यक नसतील.' }
+    ],
+    documents: [
+      { ...rationProof('All Members Aadhaar Cards', 'रेशन कार्डमधील सर्व सदस्यांची आधार कार्डे', 'Upload Aadhaar cards for EVERY member of the ration card. Add separate files or a combined PDF. / रेशन कार्डमधील प्रत्येक सदस्याचे आधार कार्ड स्वतंत्र फाइल किंवा एकत्रित PDF मध्ये अपलोड करा.'), multiple: true },
+      { ...rationProof('All Members PAN Cards', 'रेशन कार्डमधील सर्व सदस्यांची पॅन कार्डे', 'Upload PAN cards for EVERY member of the ration card. / रेशन कार्डमधील प्रत्येक सदस्याचे पॅन कार्ड अपलोड करा.'), multiple: true },
+      { ...rationProof('All Members Photos', 'रेशन कार्डमधील सर्व सदस्यांचे फोटो', 'Upload a clear photo of EVERY member of the ration card. / रेशन कार्डमधील प्रत्येक सदस्याचा स्पष्ट फोटो अपलोड करा.'), multiple: true },
+      rationProof('Electricity Bill', 'लाईट बिल', 'Upload the electricity bill for the residence. / राहत्या घराचे लाईट बिल अपलोड करा.', { field: 'Change ration card address?', equals: 'No', defaultValue: 'No' }),
+      rationProof('Consent Letter / Rent Agreement', 'संमती पत्र / भाडेकरार', 'For a rented home, upload any ONE: the owner’s consent letter or the rent agreement. / भाड्याच्या घरासाठी घरमालकाचे संमती पत्र किंवा भाडेकरार यापैकी कोणताही एक पुरावा अपलोड करा.', { field: 'Ration card residence', equals: 'Rented', defaultValue: 'Owned' }),
+      rationProof('Gas Passbook', 'गॅस पासबुक'),
+      rationProof('Ration Shop A.B.C. Certificate', 'रेशन दुकान अ.ब.क. दाखला'),
+      rationProof('Female Head Bank Passbook', 'रेशन कार्ड प्रमुख महिलेचे बँक पासबुक'),
+      rationProof('ITR / Form 16 / Pension Statement', 'आयकर विवरणपत्र / फॉर्म १६ / पेन्शन स्टेटमेंट', 'For a white ration card, upload any ONE: ITR, Form 16 or pension statement. / पांढऱ्या रेशन कार्डसाठी आयकर विवरणपत्र (ITR), फॉर्म १६ किंवा पेन्शन स्टेटमेंट यापैकी कोणताही एक पुरावा अपलोड करा.', rationYes('Is the ration card white?')),
+      { ...rationProof('Member Addition Aadhaar Card', 'नाव वाढवायच्या सदस्याचे आधार कार्ड', 'Upload the Aadhaar card of each member being added. / नाव वाढवायच्या प्रत्येक सदस्याचे आधार कार्ड अपलोड करा.', rationYes('Add a member?'), 'Member Addition / नाव वाढ'), multiple: true },
+      { ...rationProof('Member Addition Birth Certificate', 'नाव वाढवायच्या सदस्याचा जन्म दाखला', 'Both Aadhaar and birth certificate are compulsory for a member addition. / नाव वाढवण्यासाठी आधार कार्ड व जन्म दाखला ही दोन्ही कागदपत्रे अनिवार्य आहेत.', rationYes('Add a member?'), 'Member Addition / नाव वाढ'), multiple: true },
+      rationProof('Marriage Addition Aadhaar Card', 'विवाहामुळे नाव वाढवायच्या सदस्याचे आधार कार्ड', '', rationYes('Add a member due to marriage?'), 'Addition Due to Marriage / विवाहामुळे नाव वाढ'),
+      rationProof('Marriage Addition Name Removal Certificate', 'नाव कमी केल्याचा दाखला', 'Upload the certificate confirming removal from the previous ration card. / पूर्वीच्या रेशन कार्डमधून नाव कमी केल्याचा दाखला अपलोड करा.', rationYes('Add a member due to marriage?'), 'Addition Due to Marriage / विवाहामुळे नाव वाढ'),
+      rationProof('Marriage Addition Wedding Invitation', 'लग्न पत्रिका', '', rationYes('Add a member due to marriage?'), 'Addition Due to Marriage / विवाहामुळे नाव वाढ'),
+      rationProof('Death Certificate / Separation Application', 'मृत्यू दाखला / विभक्त करण्याचा अर्ज', 'For a death, upload the death certificate. For a separate ration card, upload the separation application. / मृत्यू झाल्यास मृत्यू दाखला अपलोड करा. विभक्त रेशन कार्ड करायचे असल्यास विभक्त करण्याचा अर्ज अपलोड करा.', rationYes('Remove a member?'), 'Member Removal / नाव कमी'),
+      rationProof('Marriage Removal Aadhaar Card', 'विवाहामुळे नाव कमी करायच्या सदस्याचे आधार कार्ड', '', rationYes('Remove a member due to marriage?'), 'Removal Due to Marriage / विवाहामुळे नाव कमी'),
+      rationProof('Marriage Removal Wedding Invitation', 'लग्न पत्रिका', '', rationYes('Remove a member due to marriage?'), 'Removal Due to Marriage / विवाहामुळे नाव कमी'),
+      rationProof('Address Change Proof', 'पत्ता बदलाचा पुरावा', 'Upload any ONE for the new address: electricity bill or property tax receipt. This also fulfils the common electricity/address proof requirement. / नवीन पत्त्याचे लाईट बिल किंवा घरफळा पावती यापैकी कोणताही एक पुरावा अपलोड करा. हाच पुरावा अनिवार्य लाईट बिल / पत्त्याच्या पुराव्यासाठीही ग्राह्य धरला जाईल.', rationYes('Change ration card address?'), 'Address Change / पत्ता बदल')
+    ]
   }
 ];
 
@@ -200,6 +262,32 @@ udyam.fields = shopAct.fields
     : { ...item });
 udyam.documents = shopAct.documents.filter(item => item.label !== 'Shop Board Photo').map(item => ({ ...item }));
 
+// Food licence shares business details and owner/partner proofs with Shop Act.
+const food = serviceCatalog.find(service => service.slug === 'food-license');
+const foodFieldLabels = ['Shop name', 'Business email', 'Shop address', 'Owned or rented', 'Business type', 'Business mobile number', 'Ownership type', 'Owner / partner names', 'Business investment', 'GST registered?', 'GST number'];
+food.fields.push(...shopAct.fields.filter(item => foodFieldLabels.includes(item.label)).map(item => ({ ...item,
+  ...(item.label === 'Business type' ? { placeholder: 'उदा. उपाहारगृह, बेकरी, खाद्यपदार्थ विक्री / e.g. Restaurant, bakery, food retail' } : {})
+})));
+food.fields = food.fields.map(item => ({ ...item, required: true,
+  ...(item.label === 'Licence duration' ? { displayLabel: 'परवान्याचा कालावधी / Licence duration' } : {}),
+  ...(item.label === 'Business category' ? { displayLabel: 'व्यवसायाचा प्रकार / Business category' } : {})
+}));
+food.documents = [
+  ...shopAct.documents.filter(item => ['Owner Aadhaar Card', 'Owner Photo', 'Owner Signature Image', 'Owner PAN Card', 'Shop Board Photo', 'Firm PAN Card'].includes(item.label)).map(item => ({ ...item,
+    // Preserve the identifiers already used by Food Licence uploads.
+    ...(item.label === 'Owner Aadhaar Card' ? { label: 'Aadhaar Card', displayLabel: 'Owner / All Partners - Aadhaar Card / मालकाचे / सर्व भागीदारांचे आधार कार्ड' } : {}),
+    ...(item.label === 'Owner PAN Card' ? { label: 'PAN Card', displayLabel: 'Owner / All Partners - PAN Card / मालकाचे / सर्व भागीदारांचे पॅन कार्ड' } : {}),
+    ...(item.label === 'Owner Signature Image' ? { displayLabel: 'Owner / All Partners - Signature / मालकाची / सर्व भागीदारांची सही' } : {}),
+    ...(item.label === 'Shop Board Photo' ? { displayLabel: 'Shop Board Photo / दुकानाच्या फलकाचा फोटो' } : {}),
+    ...(item.label === 'Firm PAN Card' ? { displayLabel: 'Firm PAN Card / भागीदारी फर्मचे पॅन कार्ड' } : {})
+  })),
+  { ...doc('Partnership Deed', 'Required for a partnership. / भागीदारी व्यवसाय असल्यास आवश्यक.', { field: 'Ownership type', equals: 'Partnership' }), displayLabel: 'Partnership Deed / भागीदारी करारपत्र' },
+  { ...doc('Electricity Bill'), displayLabel: 'Electricity Bill / वीज बिल' },
+  { ...doc('Rent Agreement', 'Required for rented premises. / दुकान भाड्याने असल्यास आवश्यक.', { field: 'Owned or rented', equals: 'Rented' }), displayLabel: 'Rent Agreement / भाडे करारपत्र' },
+  { ...doc('Property Tax Record'), displayLabel: 'Property Tax Receipt / प्रॉपर्टी टॅक्स पावती' },
+  { ...doc('Business Photos (inside and outside)', 'Upload clear photos of both the inside and outside of the shop. / दुकानाच्या आतील व बाहेरील भागांचे स्पष्ट फोटो अपलोड करा.'), displayLabel: 'Business Photos (inside and outside) / दुकानाचे आतील व बाहेरील फोटो', multiple: true }
+];
+
 // Model conditional proofs as separate checklist items so each can be validated.
 serviceCatalog.find(service => service.slug === 'caste-certificate').documents.push(doc('Income Certificate'));
 for (const slug of ['caste-certificate','non-creamy-layer']) {
@@ -208,6 +296,9 @@ for (const slug of ['caste-certificate','non-creamy-layer']) {
 
 // Keep stored document labels stable for existing uploads; translate the checklist presentation.
 const marathiDocuments = {
+  'Partnership Deed': 'भागीदारी करारपत्र',
+  'Old Passport': 'जुना पासपोर्ट',
+  'Name Change / Correction Proof': 'नाव बदलाचा किंवा दुरुस्तीचा पुरावा',
   'Aadhaar Card': 'आधार कार्ड',
   'Photo': 'अर्जदाराचा फोटो',
   'Ration Card': 'रेशन कार्ड',
@@ -293,14 +384,16 @@ const serviceNotes = {
     'दिलेल्या संदर्भ फॉर्मनुसार प्रमाणपत्राचा कालावधी १ एप्रिल २०२६ ते ३१ मार्च २०२७ आहे. / The supplied reference form lists the certificate period as 1 April 2026 to 31 March 2027.',
     'जुन्या पुराव्यांसाठी नातेवाईकाचा शाळा सोडल्याचा दाखला तसेच जुना आकारणी उतारा, ७/१२ उतारा किंवा मालमत्ता पत्रक वापरता येईल. / Historical proofs can include a relative school leaving certificate and an old assessment extract, 7/12 extract or property card.'
   ],
-  'food-license': ['परवान्याचा कालावधी व व्यवसायाचा प्रकार निवडा. व्यवसायाच्या आतील व बाहेरील भागाचे स्पष्ट फोटो अपलोड करा. / Choose the licence duration and business category, and upload clear photos of the business inside and outside.'],
-  'passport': ['नाव, जन्मस्थळ व कुटुंबातील सदस्यांची माहिती कागदपत्रांप्रमाणे अचूक भरा. / Enter the name, birthplace and family details exactly as shown in the supporting documents.'],
-  'voting-card': ['अर्जदाराचे आधार कार्ड व स्पष्ट फोटो अपलोड करा. / Upload the applicant Aadhaar card and a clear photograph.'],
+  'food-license': ['शॉपचे नाव, ईमेल, संपूर्ण पत्ता, दुकान स्वतःचे की भाड्याने, व्यवसायाचे स्वरूप, मोबाईल नंबर व गुंतवणूक भरा. GST नंबर असल्यास होय निवडून नंबर भरा. / Enter the shop name, email, full address, owned or rented status, business activity, mobile number and investment. If GST registered, select Yes and enter the GST number.', 'मालकाचे व भागीदारी असल्यास प्रत्येक भागीदाराचे आधार कार्ड, फोटो, सही व पॅन कार्ड अपलोड करा. भागीदारी करारपत्र व फर्मचे पॅन कार्ड भागीदारी असल्यास आवश्यक आहे. / Upload Aadhaar, photo, signature and PAN for the owner and every partner. Partnerships also require the partnership deed and firm PAN.', 'दुकानाच्या फलकाचा फोटो, प्रॉपर्टी टॅक्स पावती, वीज बिल व दुकानाच्या आतील व बाहेरील भागांचे फोटो अपलोड करा. दुकान भाड्याने असल्यास भाडे करारपत्र आवश्यक आहे. / Upload the shop board photo, property tax receipt, electricity bill and inside/outside shop photos. A rent agreement is required for rented premises.'],
+  'passport': ['मोबाईल नंबर व ईमेल पत्ता भरा. नवीन पासपोर्ट की नूतनीकरण, अर्जदार १८ वर्षांखालील आहे का आणि नावात बदल किंवा दुरुस्ती हवी आहे का ते निवडा. / Enter the mobile number and email address, then select the application type, whether the applicant is under 18, and whether a name change or correction is needed.', 'नूतनीकरणासाठी जुना पासपोर्ट अपलोड करा. नावात बदल किंवा दुरुस्ती असल्यास नवीन किंवा दुरुस्त नावाचा पुरावा, उदा. राजपत्र (गॅझेट) किंवा अद्ययावत आधार कार्ड, अपलोड करा. / For renewal, upload the old passport. For a name change or correction, upload proof of the new or corrected name, such as a Gazette notification or updated Aadhaar card.'],
+  'voting-card': ['नवीन मतदार ओळखपत्र, दुरुस्ती किंवा नूतनीकरण / बदली यापैकी पर्याय निवडा. दुरुस्ती असल्यास चुकीची माहिती निवडा व तिच्याऐवजी योग्य माहिती भरा. / Choose New, Correction or Renew / Replace. For a correction, select the incorrect detail and enter the correct information.', 'अर्जदाराचे आधार कार्ड व स्पष्ट फोटो अपलोड करा. नूतनीकरण / बदलीसाठी जुने मतदार ओळखपत्रही अपलोड करा. छायाचित्र दुरुस्तीसाठी नवीन छायाचित्र अपलोड करा. / Upload the applicant Aadhaar card and a clear photograph. Renewals / replacements also require the old voting card. For a photograph correction, upload the new photograph.'],
   'pan': ['जन्म दाखला, वाहनचालक परवाना किंवा मतदार ओळखपत्र यापैकी जन्मतारीख नमूद असलेला कोणताही एक पुरावा अपलोड करा. / Upload any one date-of-birth proof: birth certificate, driving licence or voter ID showing the date of birth.'],
-  'pf-assistance': ['पासवर्ड येथे भरू नका किंवा अपलोड करू नका. मदत घेताना ग्राहकाने अधिकृत पोर्टलवर स्वतः पासवर्ड भरावा. / Do not enter, upload or save a password here; the customer should enter it directly in the official portal during the assisted session.'],
+  'pf-assistance': ['यूएएन क्रमांक, पासवर्ड आणि आवश्यक पीएफ कामाची माहिती भरा. प्रोफाइल अद्ययावत असल्यास ईमेल पत्ता आवश्यक आहे. / Enter the UAN number, password and the PF work required. Email is required when the profile is updated.', 'आधार कार्ड, पॅन कार्ड, आत्ताचा फोटो व बँक पासबुक अनिवार्य आहेत. इतर कागदपत्रे ऐच्छिक आहेत. / Aadhaar card, PAN card, live photo and bank passbook are compulsory. Other documents are optional.'],
   'ration-card': [
-    'सर्व सदस्यांची आधार कार्डे, पॅन कार्डे व फोटो अपलोड करा. / Upload Aadhaar cards, PAN cards and photos for all members.',
-    'युनिट कमी करताना मृत्यू प्रमाणपत्र / विवाह प्रमाणपत्र आवश्यक आहे. युनिट वाढवताना नाव बदलाचा पुरावा / जन्म दाखला आवश्यक आहे. / A unit decrease needs a death or marriage certificate; a unit increase needs a name-change record or birth certificate.'
+    'पुढे जाण्यासाठी किमान एका प्रश्नाचे उत्तर द्या. लागू नसलेले प्रश्न रिकामे ठेवू शकता. एकाच अर्जात एकापेक्षा जास्त बदल निवडता येतात. / Answer at least one question to continue. Questions that do not apply may be left unanswered. You can select multiple changes in one application.',
+    'सर्व सदस्यांची आधार कार्डे, पॅन कार्डे, फोटो, लाईट बिल, गॅस पासबुक, रेशन दुकान अ.ब.क. दाखला व रेशन कार्ड प्रमुख महिलेचे बँक पासबुक अनिवार्य आहेत. / Aadhaar cards, PAN cards and photos for every member, electricity bill, gas passbook, ration shop A.B.C. certificate and the female head’s bank passbook are compulsory.',
+    'भाड्याने राहत असल्यास संमती पत्र किंवा भाडेकरार आवश्यक आहे. पांढऱ्या रेशन कार्डसाठी ITR, फॉर्म १६ किंवा पेन्शन स्टेटमेंट यापैकी एक पुरावा आवश्यक आहे. / A rented home requires a consent letter or rent agreement. A white ration card requires any one of ITR, Form 16 or pension statement.',
+    'पत्ता बदलासाठी नवीन पत्त्याचे लाईट बिल किंवा घरफळा पावती यापैकी एक पुरावा अपलोड करा. हा पुरावा एकदाच अपलोड करणे पुरेसे आहे. / For an address change, upload either the new address electricity bill or property tax receipt. Uploading this proof once is sufficient.'
   ]
 };
 for (const service of serviceCatalog) {
@@ -314,7 +407,7 @@ for (const service of serviceCatalog) {
       document.marathiLabel = `${document.label.startsWith('Father') ? 'वडिलांचा' : document.label.startsWith('Owner') ? 'मालकाचा' : 'अर्जदाराचा'} आत्ताच काढलेला फोटो (Live Photo)`;
     }
   }
-  if (['shop-act', 'udyam-aadhaar'].includes(service.slug)) {
+  if (['shop-act', 'udyam-aadhaar', 'food-license'].includes(service.slug)) {
     for (const document of service.documents.filter(document => document.multiple)) {
       document.displayLabel = (document.displayLabel || document.label).replace(/^Owner /, 'Owner / All Partners - ');
       if (document.label === 'Owner Photo') document.note += ' Upload a live photo of EVERY partner. / प्रत्येक भागीदाराचा आत्ताचा फोटो अपलोड करा.';

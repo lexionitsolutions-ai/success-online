@@ -1,3 +1,4 @@
+import {pfDetails} from './pf-fixture.js';
 import {confirmTestReceiver,verifyTestOrder,confirmations} from './payment-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -210,11 +211,13 @@ test('cloud payments commit before delayed Sheets work and preserve retryable jo
     await api('/api/payment-settings',{action:'enable-receiver',ownerConfirmed:true});
     const services=(await api('/api/services')).services;
     const variant=services.find(s=>s.slug==='pf-assistance').variants[0];
-    const c=(await api('/api/cases',{variantId:variant.id,customer:{name:'Synthetic Cloud Payment',mobile:'9876543210'},consent:true})).case;
+    const c=(await api('/api/cases',{variantId:variant.id,details:pfDetails,customer:{name:'Synthetic Cloud Payment',mobile:'9876543210'},consent:true})).case;
     const pdf=Buffer.from('%PDF-1.4\nmirror fixture\n%%EOF');
-    const auth=await api('/api/cases/'+c.id+'/upload-url',{docType:'Bank Passbook',fileName:'mirror.pdf',mimeType:'application/pdf',size:pdf.length});
-    assert.equal((await fetch(auth.uploadUrl,{method:'PUT',body:pdf})).status,200);
-    await api('/api/cases/'+c.id+'/documents',{uploadId:auth.uploadId,deferMirrors:true});
+    for (const requirement of variant.documents.filter(doc=>doc.required)) {
+      const auth=await api('/api/cases/'+c.id+'/upload-url',{docType:requirement.label,fileName:'mirror.pdf',mimeType:'application/pdf',size:pdf.length});
+      assert.equal((await fetch(auth.uploadUrl,{method:'PUT',body:pdf})).status,200);
+      await api('/api/cases/'+c.id+'/documents',{uploadId:auth.uploadId,deferMirrors:true});
+    }
     await api('/api/cases/'+c.id+'/finish-uploads',{});
     const mirrorDeadline=Date.now()+5000;
     let mirrored=false;

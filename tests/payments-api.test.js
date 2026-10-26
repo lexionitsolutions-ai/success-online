@@ -1,3 +1,4 @@
+import {pfDetails} from './pf-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -17,7 +18,7 @@ test('direct UPI security, attempts, expiry, manual verification, prices, refund
     const login=async username=>(await request('/api/login',{body:{username,password:'Demo@12345'}})).response.headers.get('set-cookie').split(';')[0];
     const admin=await login('admin01'),sales=await login('sales01'),other=await login('sales02'),office=await login('backoffice01');
     const services=(await request('/api/services',{cookie:sales})).data.services,variant=services.find(s=>s.slug==='pf-assistance').variants[0];
-    const create=async()=>{const r=await request('/api/cases',{cookie:sales,body:{variantId:variant.id,customer:{name:'Test Customer',mobile:'9876543210'},consent:true,amount:1,upiId:'attacker@upi',payment_status:'PAID'}});assert.equal(r.status,201);return r.data.case;};
+    const create=async()=>{const r=await request('/api/cases',{cookie:sales,body:{variantId:variant.id,details:pfDetails,customer:{name:'Test Customer',mobile:'9876543210'},consent:true,amount:1,upiId:'attacker@upi',payment_status:'PAID'}});assert.equal(r.status,201);return r.data.case;};
     const c=await create(),base='/api/payments/'+c.payment.id;
     assert.equal(c.payment.amount,100);assert.equal(c.payment.status,'PENDING');
     assert.equal((await request(base,{cookie:sales})).data.upiIntent,null);
@@ -77,7 +78,7 @@ test('direct UPI security, attempts, expiry, manual verification, prices, refund
     assert.equal((await request(`/api/cases/${c.id}/payment-exception`,{cookie:sales,body:{reason:'Unauthorized'}})).status,403);
     assert.equal((await request(`/api/cases/${c.id}/payment-exception`,{cookie:admin,body:{reason:''}})).status,409);
     const pdf=Buffer.from('%PDF-1.4\nfixture\n%%EOF');
-    assert.equal((await request(`/api/cases/${c.id}/documents`,{cookie:sales,body:{docType:'Bank Passbook',fileName:'fixture.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')}})).status,201);
+    for (const requirement of variant.documents.filter(doc=>doc.required)) assert.equal((await request(`/api/cases/${c.id}/documents`,{cookie:sales,body:{docType:requirement.label,fileName:'fixture.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')}})).status,201);
     assert.equal((await request(`/api/cases/${c.id}/claim`,{cookie:office,method:'POST'})).status,409);
     assert.equal((await request(`/api/cases/${c.id}/payment-exception`,{cookie:admin,body:{reason:'Synthetic exception fixture for approved work before payment'}})).status,409);
     const legacyExceptionDb=new DatabaseSync(path);

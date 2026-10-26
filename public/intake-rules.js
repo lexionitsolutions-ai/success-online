@@ -11,7 +11,8 @@ globalThis.IntakeRules = (() => {
       return Object.entries(details).some(([label, value]) =>
         (details['Years of Certificate Required'] === '3 years' ? /^\d{4}-\d{4} income required/.test(label) : label.startsWith('Income amount required on certificate')) && Number(value) > when.incomeAbove);
     }
-    const value = details[when.field];
+    let value = details[when.field];
+    if ((value === undefined || String(value).trim() === '') && when.defaultValue !== undefined) value = when.defaultValue;
     return value === undefined || String(value).trim() === '' ? includeUnknown : String(value) === String(when.equals);
   }
   function surcharge(details = {}) {
@@ -30,5 +31,9 @@ globalThis.IntakeRules = (() => {
       details[field.label] = values.every(value => value !== '' && Number.isFinite(Number(value))) ? String(values.reduce((sum, value) => sum + Number(value), 0)) : '';
     }
   }
-  return { matches, surcharge, withSurcharge, available, willing, addressProof, applyComputed };
+  function missingAnswerGroups(fields, details) {
+    const groups = [...new Set(fields.map(field => field.answerGroup).filter(Boolean))];
+    return groups.filter(group => !fields.some(field => field.answerGroup === group && String(details[field.label] ?? '').trim()));
+  }
+  return { matches, surcharge, withSurcharge, available, willing, addressProof, applyComputed, missingAnswerGroups };
 })();

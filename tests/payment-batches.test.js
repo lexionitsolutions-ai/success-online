@@ -1,3 +1,4 @@
+import {pfDetails} from './pf-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -17,7 +18,7 @@ test('combined checkout allocates one verified transfer across cases and protect
     const admin=await login('admin01'),sales=await login('sales01'),other=await login('sales02'),office=await login('backoffice01');
     await request('/api/payment-settings',admin,{action:'enable-receiver',ownerConfirmed:true});
     const services=(await request('/api/services',sales)).data.services,variant=services.find(s=>s.slug==='pf-assistance').variants[0];
-    const create=async(cookie=sales)=>(await request('/api/cases',cookie,{variantId:variant.id,customer:{name:'Batch Client',mobile:'9876543210'},consent:true})).data.case;
+    const create=async(cookie=sales)=>(await request('/api/cases',cookie,{variantId:variant.id,details:pfDetails,customer:{name:'Batch Client',mobile:'9876543210'},consent:true})).data.case;
     const [a,b,c,foreign]=await Promise.all([create(),create(),create(),create(other)]);
     assert.equal((await request('/api/payments/batch',sales,{caseIds:[a.id,foreign.id]})).status,403);
     assert.equal((await request('/api/payments/batch',admin,{caseIds:[a.id,foreign.id]})).status,400);

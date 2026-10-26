@@ -1,3 +1,5 @@
+import {pfDetails} from './pf-fixture.js';
+import '../public/intake-rules.js';
 import {confirmTestReceiver,verifyTestOrder,confirmations} from './payment-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -51,14 +53,19 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     for (const path of ['/api/me','/api/google/status','/api/google/sheets/status','/api/admin/dashboard?period=week','/api/customers?q=test','/api/cases']) assert.equal((await request(path, { cookie:admin })).status, 200, path);
     const services = (await request('/api/services', { cookie:sales })).data.services;
     assert.equal(services.length, 16);
-    assert.ok(services.filter(service=>!['shop-act','udyam-aadhaar'].includes(service.slug)).every(service => service.variants.every(variant => variant.fields.every(field => field.type !== 'email'))));
+    assert.ok(services.filter(service=>!['shop-act','udyam-aadhaar','food-license','passport','pf-assistance'].includes(service.slug)).every(service => service.variants.every(variant => variant.fields.every(field => field.type !== 'email'))));
+    assert.ok(services.find(service=>service.slug==='food-license').variants.every(variant => variant.fields.some(field => field.label === 'Business email' && field.type === 'email' && field.required)));
     assert.equal((await request('/api/admin/employees', { cookie:admin, body:{...employeeBody, name:'Employee123', username:'invalid.name'} })).status, 400);
     // Exercise checklist enforcement for every service using its conditional selectors.
     for (const service of services) {
       const v = service.variants[0];
       const details = Object.fromEntries(v.fields.filter(f => f.type === 'select').map(f => [f.label, f.options[0]]));
       if (service.slug === 'gazette') for (const field of v.fields.filter(f=>f.when?.equals==='English')) details[field.label]='Test';
+      if (service.slug === 'pf-assistance') Object.assign(details,pfDetails);
+      if (service.slug === 'voting-card') details.Mobile='9876543210';
+      if (service.slug === 'passport') Object.assign(details, {Mobile:'9876543210',Email:'passport@example.com','Name change or correction?':'No'});
       if (service.slug === 'ews-certificate') details['Applicant caste']='Test Caste';
+      if (service.slug === 'food-license') Object.assign(details, {'Shop name':'Food Shop 123','Business email':'food@example.com','Shop address':'Kolhapur','Business type':'Restaurant','Business mobile number':'9876543210','Owner / partner names':'Asha Patil','Business investment':'100000','GST registered?':'No'});
       if (service.slug === 'shop-act') Object.assign(details, {'Shop name':'Shop 123','Business email':'shop@example.com','Business start date':'2026-10-01','Shop address':'Kolhapur','Male workers':'0','Female workers':'0','Business type':'Retail','Business mobile number':'9876543210','Owner / partner names':'Asha Patil','Years at Aadhaar address':'5','Shop size (sq. ft.)':'250','Business investment':'100000','GST registered?':'No'});
       if (service.slug === 'udyam-aadhaar') Object.assign(details, {'Shop name':'Enterprise 123','Business email':'udyam@example.com','Business start date':'2026-10-01','Shop address':'Kolhapur','Number of workers':'0','Business type':'Retail','Business mobile number':'9876543210','Owner / partner names':'Asha Patil','Business investment':'100000','GST registered?':'No'});
       if (service.slug === 'police-clearance') for (const person of [1, 2]) {
@@ -72,6 +79,30 @@ test('real API: access, document gates, uploads, bundle and completion', async (
       assert.equal(order.status,201,service.name);assert.equal(order.data.amount,expected);assert.equal(new URL(order.data.upiIntent).searchParams.get('am'),(expected/100).toFixed(2));
     }
     assert.ok(!services.some(service=>service.slug==='shop-act-udyam'));
+    const pf = services.find(service=>service.slug==='pf-assistance');
+    assert.equal(pf.name,'PF Working (Provident Fund)');
+    const pfPayload = {variantId:pf.variants[0].id,customer:{name:'PF Credential Trial',mobile:'9876543210'},details:pfDetails,consent:true};
+    assert.equal((await request('/api/cases',{cookie:sales,body:{...pfPayload,details:{...pfDetails,'PF profile updated?':'Yes'}}})).status,400,'Updated PF profile requires email');
+    const pfCase = (await request('/api/cases',{cookie:sales,body:pfPayload})).data.case;
+    assert.equal(pfCase.details['PF email'],undefined);
+    assert.ok(!JSON.stringify(pfCase).includes(pfDetails.Password));
+    const inspectPF = new DatabaseSync(join(root,'test.sqlite'));
+    const storedPF = inspectPF.prepare('SELECT details_json FROM cases WHERE id=?').get(pfCase.id).details_json;
+    assert.ok(!storedPF.includes(pfDetails.Password));
+    assert.ok(JSON.parse(storedPF)._pfPassword);
+    for (const cookie of [sales,otherSales,office]) assert.equal((await request(`/api/cases/${pfCase.id}/pf-password`,{cookie,method:'POST'})).status,403);
+    assert.equal((await request(`/api/cases/${pfCase.id}/pf-password`,{cookie:admin,method:'POST'})).data.password,pfDetails.Password);
+    inspectPF.prepare("UPDATE cases SET backoffice_user_id=(SELECT id FROM users WHERE username='backoffice01') WHERE id=?").run(pfCase.id);
+    assert.equal((await request(`/api/cases/${pfCase.id}/pf-password`,{cookie:office,method:'POST'})).data.password,pfDetails.Password);
+    assert.equal(inspectPF.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='case.pf_password.view' AND entity_id=?").get(pfCase.id).n,2);
+    inspectPF.close();
+    const ration = services.find(service=>service.slug==='ration-card').variants[0];
+    const rationPayload = {...pfPayload,variantId:ration.id};
+    assert.equal((await request('/api/cases',{cookie:sales,body:{...rationPayload,details:{}}})).status,400);
+    const oneAnswerRation = await request('/api/cases',{cookie:sales,body:{...rationPayload,details:{'Add a member?':'Yes'}}});
+    assert.equal(oneAnswerRation.status,201);
+    const oneRationRequirements = oneAnswerRation.data.case.variant.documents.filter(doc=>doc.required && IntakeRules.matches(doc.when,oneAnswerRation.data.case.details,true));
+    assert.equal(oneRationRequirements.length,9);
     const validity = services.find(service=>service.slug==='caste-validity').variants[0];
     assert.deepEqual(validity.fields.map(field=>field.label),['Caste Validity Certificate required for','Applicant under 18?']);
     assert.equal(validity.documents.length,12);
@@ -208,7 +239,15 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal(annualCase.data.case.details['Income amount required on certificate (₹)'], undefined);
     assert.equal((await request('/api/cases', { cookie:sales, body:{...payload, customer:{...payload.customer, name:'Trial123'}} })).status, 400);
     const passport = services.find(service => service.slug === 'passport').variants[0];
-    assert.equal((await request('/api/cases', { cookie:sales, body:{...payload, variantId:passport.id, details:{'Father name':'Father123'}} })).status, 400);
+    assert.equal((await request('/api/cases', { cookie:sales, body:{...payload, variantId:passport.id, details:{Mobile:'invalid',Email:'passport@example.com','Passport application type':'New','Applicant under 18?':'No','Name change or correction?':'No'}} })).status, 400);
+    const voting = services.find(service => service.slug === 'voting-card').variants[0];
+    const correctionDetails = {Mobile:'9876543210','Voting card application type':'Correction','Voting card field to correct':'Name'};
+    const votingPayload = {...payload, variantId:voting.id};
+    assert.equal((await request('/api/cases', {cookie:sales, body:{...votingPayload,details:correctionDetails}})).status,400,'A correction must include the corrected information');
+    assert.equal((await request('/api/cases', {cookie:sales, body:{...votingPayload,details:{...correctionDetails,'Voting card field to correct':'Mobile number','Corrected mobile number':'98letters'}}})).status,400,'API must reject letters in the corrected mobile number');
+    const correctedVoting = await request('/api/cases', {cookie:sales, body:{...votingPayload,details:{...correctionDetails,'Corrected applicant name':'Correct Person'}}});
+    assert.equal(correctedVoting.status,201);
+    assert.equal(correctedVoting.data.case.details['Corrected applicant name'],'Correct Person');
     for (const reason of ['Education','Hospital']) {
       const result = await request('/api/cases', { cookie:sales, body:{...payload, details:{...payload.details, 'Reason for application':reason}} });
       assert.equal(result.status, 201);
@@ -407,7 +446,7 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     assert.ok(new URL(oauth.authorizationUrl).searchParams.get('scope').includes('auth/spreadsheets'));
     const services = (await api('/api/services')).services;
     const variant = services.find(s => s.slug === 'pf-assistance').variants[0];
-    const c = (await api('/api/cases',{variantId:variant.id,customer:{name:'Drive Trial',mobile:'9876543210'},consent:true})).case;
+    const c = (await api('/api/cases',{variantId:variant.id,details:pfDetails,customer:{name:'Drive Trial',mobile:'9876543210'},consent:true})).case;
     const pdf = Buffer.from('%PDF-1.4\nmock-drive-file\n%%EOF');
     await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
     const documents = (await api(`/api/cases/${c.id}`)).documents;
@@ -443,7 +482,7 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     assert.equal(Object.values(workbook.Cashflow)[0][7],1);
 
     writeFileSync(join(root,'revoked'), 'mock revoked token');
-    const failedCase = await fetch(origin + '/api/cases', {method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({variantId:variant.id,customer:{name:'Retry Trial',mobile:'9876543210'},consent:true})});
+    const failedCase = await fetch(origin + '/api/cases', {method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({variantId:variant.id,details:pfDetails,customer:{name:'Retry Trial',mobile:'9876543210'},consent:true})});
     assert.equal(failedCase.status,409);
     assert.equal((await failedCase.json()).code,'GOOGLE_RECONNECT_REQUIRED');
     assert.equal((await api('/api/cases')).cases.length,1, 'Expired authorization must not save another case');
@@ -457,7 +496,7 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     assert.equal((await api('/api/google/status')).reconnectRequired,false);
     assert.equal((await api('/api/cases')).cases.length,1);
     writeFileSync(join(root,'revoked'),'missing-root');
-    const missingRoot = await fetch(origin + '/api/cases',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({variantId:variant.id,customer:{name:'Root Trial',mobile:'9876543210'},consent:true})});
+    const missingRoot = await fetch(origin + '/api/cases',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({variantId:variant.id,details:pfDetails,customer:{name:'Root Trial',mobile:'9876543210'},consent:true})});
     assert.equal(missingRoot.status,409);
     assert.equal((await missingRoot.json()).code,'GOOGLE_ROOT_FOLDER_INVALID');
     assert.equal((await api('/api/cases')).cases.length,1,'Missing root must not save a new case');

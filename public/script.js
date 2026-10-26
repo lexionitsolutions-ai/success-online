@@ -1,3 +1,182 @@
+// Intake translations affect presentation only. Field keys, option values and files stay intact.
+const intakeWords = {
+  'Case intake': 'अर्ज नोंदणी', 'New customer case': 'नवीन ग्राहकाचा अर्ज', Close: 'बंद करा',
+  Customer: 'ग्राहक', Service: 'सेवा', Documents: 'कागदपत्रे', Review: 'आढावा',
+  Continue: 'पुढे', Back: 'मागे', 'Choose…': 'निवडा…', 'Full name': 'संपूर्ण नाव',
+  'Mobile number': 'मोबाईल नंबर', Mobile: 'मोबाईल नंबर', Email: 'ईमेल', Address: 'पत्ता',
+  '10-digit mobile number': '१० अंकी मोबाईल नंबर',
+  'Important Notices': 'महत्त्वाच्या सूचना', 'View details': 'तपशील पाहा', 'Hide details': 'तपशील लपवा',
+  'Required documents': 'आवश्यक कागदपत्रे', 'Important notes': 'महत्त्वाच्या सूचना',
+  'Documents and important information': 'कागदपत्रे व महत्त्वाच्या सूचना',
+  'Required documents based on your selections': 'निवडलेल्या माहितीनुसार कागदपत्रांची यादी',
+  'Enter the details of a person known to the applicant.': 'अर्जदाराच्या ओळखीच्या व्यक्तीची माहिती भरा.',
+  'Required document': 'आवश्यक कागदपत्र', 'Optional supporting document': 'ऐच्छिक अतिरिक्त कागदपत्र',
+  'Not selected': 'निवडलेले नाही', 'Upload document': 'कागदपत्र अपलोड करा', 'Add files': 'फाइल जोडा',
+  Preview: 'पाहा', Remove: 'काढा', 'Ready to submit': 'सादर करण्यास तयार',
+  'Review your application': 'आपल्या अर्जाचा आढावा घ्या',
+  'Check the details below before saving your case.': 'अर्ज जतन करण्यापूर्वी खालील माहिती तपासा.',
+  'Selected service': 'निवडलेली सेवा', 'Service charge': 'सेवा शुल्क', 'Total payable': 'एकूण देय रक्कम',
+  'To be confirmed': 'निश्चित करणे बाकी',
+  'Customer consent accepted for this private assistance service': 'या खाजगी सहाय्य सेवेसाठी ग्राहकाची संमती घेतली आहे',
+  'Save & create another': 'जतन करा व नवीन अर्ज करा', 'Save & pay later': 'जतन करा व नंतर पैसे भरा',
+  'Create & pay': 'अर्ज तयार करा व पैसे भरा',
+  Yes: 'होय', No: 'नाही', New: 'नवीन', Renew: 'नूतनीकरण', Job: 'नोकरी', Education: 'शिक्षण',
+  Election: 'निवडणूक', Father: 'वडील', Mother: 'आई', Guardian: 'पालक', Self: 'स्वतः',
+  Applicant: 'अर्जदार', English: 'इंग्रजी', Marathi: 'मराठी',
+  'Income Certificate': 'उत्पन्नाचा दाखला', 'Age Nationality & Domicile Certificate': 'वय, राष्ट्रीयत्व व अधिवास प्रमाणपत्र',
+  'Caste Certificate': 'जातीचा दाखला', 'Non-Creamy Layer Certificate': 'नॉन क्रीमी लेयर प्रमाणपत्र',
+  Gazette: 'राजपत्र', 'Police Clearance Certificate': 'पोलीस ना हरकत प्रमाणपत्र', 'Shop Act': 'शॉप ॲक्ट',
+  'Udyam Aadhaar Certificate': 'उद्यम आधार प्रमाणपत्र', 'Caste Validity Certificate': 'जात वैधता प्रमाणपत्र',
+  'EWS Certificate': 'आर्थिकदृष्ट्या दुर्बल घटक प्रमाणपत्र', 'Food License': 'अन्न परवाना',
+  Passport: 'पासपोर्ट', 'Voting Card': 'मतदार ओळखपत्र', 'PAN Card': 'पॅन कार्ड',
+  'PF Working (Provident Fund)': 'पीएफ कामकाज (भविष्य निर्वाह निधी)', 'Ration Card': 'रेशन कार्ड',
+  'Answer at least one ration card question to continue.': 'पुढे जाण्यासाठी रेशन कार्डच्या किमान एका प्रश्नाचे उत्तर द्या.',
+  'Password': 'पासवर्ड', 'PF work required': 'आवश्यक पीएफ काम', 'UAN No': 'यूएएन क्रमांक',
+  'Years of Certificate Required': 'किती वर्षांचा उत्पन्नाचा दाखला हवा आहे?',
+  'Reason for application': 'अर्ज करण्याचे कारण', 'Other reason (please specify)': 'इतर कारण नमूद करा',
+  'Ration card colour': 'रेशन कार्डचा रंग', 'Ration card area': 'रेशन कार्डचे क्षेत्र',
+  'Applicant under 18?': 'अर्जदाराचे वय १८ वर्षांपेक्षा कमी आहे का?',
+  'Caste category': 'जातीचा प्रवर्ग', 'Police Station': 'पोलीस ठाणे',
+  'Reason for clearance': 'ना हरकत प्रमाणपत्राचे कारण', 'Company or organisation name': 'कंपनी किंवा संस्थेचे नाव',
+  'Full name (required)': 'संपूर्ण नाव (आवश्यक)', 'Contact number (required)': 'संपर्क क्रमांक (आवश्यक)',
+  'First Name': 'पहिले नाव', 'Father’s Name': 'वडिलांचे नाव', Surname: 'आडनाव', 'Last Name': 'आडनाव',
+  'From Name': 'जुने नाव', 'To Name': 'नवीन नाव',
+  Banking: 'बँकेचे काम', 'Government Schemes': 'शासकीय योजना', Hospital: 'रुग्णालय', Other: 'इतर',
+  Yellow: 'पिवळे', Orange: 'केशरी', White: 'पांढरे', City: 'शहर', Village: 'गाव',
+  Owned: 'स्वतःचे', Rented: 'भाड्याने', Individual: 'वैयक्तिक', Partnership: 'भागीदारी',
+  '1 year': '१ वर्ष', '2 years': '२ वर्षे', '3 years': '३ वर्षे', '4 years': '४ वर्षे', '5 years': '५ वर्षे',
+  Retail: 'किरकोळ विक्री', Manufacturing: 'उत्पादन', Tour: 'प्रवास', Business: 'व्यवसाय',
+  'Visa / Immigration': 'व्हिसा / स्थलांतर', 'Unit change': 'सदस्य संख्येतील बदल',
+  'No change': 'बदल नाही', 'Unit decreased': 'सदस्य कमी करणे', 'Unit increased': 'सदस्य वाढवणे',
+  'Enter a valid 10-digit Indian mobile number.': 'वैध १० अंकी भारतीय मोबाईल नंबर भरा.',
+  'Name cannot contain numbers.': 'नावामध्ये अंक वापरू नका.',
+  'Please enter this name in Marathi.': 'कृपया हे नाव मराठीत भरा.',
+  'UAN Number': 'यूएएन क्रमांक', 'Applicant / अर्जदार': 'अर्जदार'
+};
+
+let intakeLanguage = 'en';
+try { intakeLanguage = localStorage.getItem('success-online.intake-language') === 'mr' ? 'mr' : 'en'; } catch {}
+let intakeLanguageObserver;
+const intakeTextSources = new WeakMap();
+const intakeAttributeSources = new WeakMap();
+
+function intakeLanguageParts(value) {
+  const parts = value.split(/\s\/\s/);
+  if (parts.length < 2 || !/[\u0900-\u097f]/u.test(value)) return null;
+  const first = parts.findIndex(part => /[\u0900-\u097f]/u.test(part));
+  const last = parts.findLastIndex(part => /[\u0900-\u097f]/u.test(part));
+  // Keep category abbreviations (SC / ST, OBC / SBC) with their Marathi sentence.
+  const categoryPrefix = parts.slice(0, first).every(part => /^[A-Z0-9 &().—-]+$/.test(part));
+  const marathiFirst = first === 0 || categoryPrefix;
+  const mr = (marathiFirst ? parts.slice(0, last + 1) : parts.slice(first)).join(' / ');
+  const en = (marathiFirst ? parts.slice(last + 1) : parts.slice(0, first)).join(' / ');
+  return en && mr ? { en, mr } : null;
+}
+
+function intakeTranslationMap() {
+  const en = new Map(), mr = new Map();
+  const pair = (english, marathi) => {
+    if (!english || !marathi) return;
+    english = intakeLanguageParts(english)?.en || english;
+    marathi = intakeLanguageParts(marathi)?.mr || marathi;
+    mr.set(english.trim(), marathi.trim());
+    en.set(marathi.trim(), english.trim());
+  };
+  for (const [english, marathi] of Object.entries(intakeWords)) pair(english, marathi);
+  for (const service of services) for (const variant of service.variants || []) {
+    for (const item of [...(variant.fields || []), ...(variant.documents || [])]) {
+      if (item.marathiLabel) pair(item.displayLabel || item.label, item.marathiLabel);
+      for (const note of item.highlightedNotes || []) pair(note.english, note.marathi);
+      for (const value of [item.displayLabel, item.note, item.placeholder, item.section, item.sectionNote, ...Object.values(item.optionLabels || {})]) {
+        if (!value) continue;
+        const parts = intakeLanguageParts(value);
+        if (parts) pair(parts.en, parts.mr);
+      }
+      const labelParts = intakeLanguageParts(item.displayLabel || '');
+      if (labelParts) pair(item.label, labelParts.mr);
+    }
+    for (const note of (variant.instructions || '').split('\n')) {
+      const parts = intakeLanguageParts(note);
+      if (parts) pair(parts.en, parts.mr);
+    }
+  }
+  return { en, mr, pair };
+}
+
+function intakeTranslate(value, maps) {
+  const source = value.trim();
+  if (!source) return value;
+  const parts = intakeLanguageParts(source);
+  const selected = parts ? parts[intakeLanguage] : source;
+  let translated = maps[intakeLanguage].get(selected) || selected;
+  if (intakeLanguage === 'mr') {
+    translated = translated.replace(/^(\d+) of (\d+) required documents selected\. Upload every required document to continue\.$/, '$2 आवश्यक कागदपत्रांपैकी $1 निवडली आहेत. पुढे जाण्यासाठी सर्व आवश्यक कागदपत्रे अपलोड करा.')
+      .replace(/^(\d+) pages selected$/, '$1 पाने निवडली आहेत')
+      .replace(/^(\d+) (?:file|files) ready$/, '$1 फाइल तयार आहेत')
+      .replace(/^(\d{4}-\d{4}) income required \(₹\)$/, '$1 साठी आवश्यक उत्पन्न (₹)')
+      .replace(/^Page (\d+):/, 'पान $1:')
+      .replace(/^Please (choose|enter) (.+)\.$/, (_, action, label) => `${maps.mr.get(label) || label} ${action === 'choose' ? 'निवडा' : 'भरा'}.`);
+  }
+  return value.replace(source, translated);
+}
+
+function applyIntakeLanguage() {
+  const root = document.querySelector('#drawer[data-intake]');
+  if (!root) return;
+  intakeLanguageObserver?.disconnect();
+  root.lang = intakeLanguage;
+  const maps = intakeTranslationMap();
+  // Some older guidance renders Marathi text with its English translation in <small>.
+  // Keep one translated paragraph and suppress the duplicate presentation.
+  for (const parent of root.querySelectorAll('.income-notes li, .income-download li')) {
+    const small = parent.querySelector(':scope > small');
+    const text = [...parent.childNodes].find(node => node.nodeType === 3 && node.textContent.trim());
+    if (small && text) {
+      const mainSource = intakeTextSources.get(text)?.source || text.textContent;
+      const smallSource = intakeTextSources.get(small.firstChild)?.source || small.textContent;
+      if (/[\u0900-\u097f]/u.test(mainSource) && !/[\u0900-\u097f]/u.test(smallSource)) {
+        maps.pair(smallSource, mainSource);
+        small.hidden = true;
+      }
+    }
+  }
+  for (const el of root.querySelectorAll('[lang="mr"], [lang="en"]')) {
+    if (!el.closest('.intake-language-toggle')) el.hidden = el.lang !== intakeLanguage;
+  }
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.parentElement.closest('.intake-language-toggle, input, textarea, script, style, dd, .doc em, .selected-pages li>span, [data-marathi-input]')) continue;
+    let record = intakeTextSources.get(node);
+    if (!record || record.rendered !== node.data) record = { source: node.data };
+    record.rendered = intakeTranslate(record.source, maps);
+    node.data = record.rendered;
+    intakeTextSources.set(node, record);
+  }
+  for (const el of root.querySelectorAll('[placeholder], [aria-label], [title]')) {
+    if (el.closest('.intake-language-toggle')) continue;
+    const records = intakeAttributeSources.get(el) || {};
+    for (const attr of ['placeholder', 'aria-label', 'title']) {
+      if (!el.hasAttribute(attr)) continue;
+      const current = el.getAttribute(attr);
+      if (!records[attr] || records[attr].rendered !== current) records[attr] = { source: current };
+      records[attr].rendered = intakeTranslate(records[attr].source, maps);
+      el.setAttribute(attr, records[attr].rendered);
+    }
+    intakeAttributeSources.set(el, records);
+  }
+  for (const button of root.querySelectorAll('[data-intake-language]')) button.setAttribute('aria-pressed', String(button.dataset.intakeLanguage === intakeLanguage));
+  intakeLanguageObserver ||= new MutationObserver(applyIntakeLanguage);
+  intakeLanguageObserver.observe(root, { childList: true, characterData: true, subtree: true });
+}
+
+function setIntakeLanguage(language) {
+  if (!['en', 'mr'].includes(language)) return;
+  intakeLanguage = language;
+  try { localStorage.setItem('success-online.intake-language', language); } catch {}
+  applyIntakeLanguage();
+}
+
 function removeNameNumbers(input) { input.value = input.value.replace(/\p{N}/gu, ''); }
 
 const app = document.querySelector('#app');
@@ -562,8 +741,9 @@ function startCase() { if (drawerBusy) return; closeDrawer(); draft = { step: 1,
 function drawWizard() {
   const service = services.find(item => item.id === draft.serviceId);
   const variant = service?.variants.find(item => item.id === draft.variantId);
-  document.body.insertAdjacentHTML('beforeend', `<div class="drawer" id="drawer"><div class="panel"><div class="drawer-head"><div><p class="eyebrow">Case intake</p><h2>New customer case</h2></div><button class="quiet" onclick="closeDrawer()">Close</button></div><div class="steps">${['Customer','Service','Documents','Review'].map((label,index) => `<div class="step ${draft.step === index + 1 ? 'on' : ''}"><span>${index + 1}</span>${label}</div>`).join('')}</div><div id="wizard">${wizardBody(service, variant)}</div></div></div>`);
+  document.body.insertAdjacentHTML('beforeend', `<div class="drawer" id="drawer" data-intake><div class="panel"><div class="drawer-head"><div><p class="eyebrow">Case intake</p><h2>New customer case</h2></div><div class="intake-header-actions"><div class="intake-language-toggle" role="group" aria-label="Form language"><button type="button" lang="en" data-intake-language="en" aria-pressed="${intakeLanguage === 'en'}" onclick="setIntakeLanguage('en')">English</button><button type="button" lang="mr" data-intake-language="mr" aria-pressed="${intakeLanguage === 'mr'}" onclick="setIntakeLanguage('mr')">मराठी</button></div><button class="quiet" onclick="closeDrawer()">Close</button></div></div><div class="steps">${['Customer','Service','Documents','Review'].map((label,index) => `<div class="step ${draft.step === index + 1 ? 'on' : ''}"><span>${index + 1}</span>${label}</div>`).join('')}</div><div id="wizard">${wizardBody(service, variant)}</div></div></div>`);
   bindWizard();
+  applyIntakeLanguage();
 }
 
 function wizardBody(service, variant) {
@@ -577,11 +757,16 @@ function wizardBody(service, variant) {
   const baseAmount = variant?.amounts || { serviceCharge:0, officialFee:0, tax:0, total:0 };
   const amount = ['income-certificate','domicile-certificate'].includes(service?.slug) ? IntakeRules.withSurcharge(baseAmount, draft.details) : baseAmount;
   const pages = Object.values(draft.docs).reduce((count,doc) => count + (doc.pages?.length || 1), 0);
-  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your case.</p></div></header><div class="intake-review-card"><div class="intake-review-service"><span>Selected service</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge${amount.surcharge ? ` (includes \u20B9200 ${service.slug === 'domicile-certificate' ? 'affidavit fee' : 'Talathi surcharge'})` : ''}</span><strong>${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div><div class="intake-review-total"><span>Total payable</span><strong>${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div><label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button><button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button></div>`;
+  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your case.</p></div></header><div class="intake-review-card"><div class="intake-review-service"><span>Selected service</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(variant?.fields?.find(field => field.label === label)?.sensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge${amount.surcharge ? ` (includes \u20B9200 ${service.slug === 'domicile-certificate' ? 'affidavit fee' : 'Talathi surcharge'})` : ''}</span><strong>${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div><div class="intake-review-total"><span>Total payable</span><strong>${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div><label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button><button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button></div>`;
+}
+
+function highlightedDocumentNotes(item) {
+  if (!item.highlightedNotes?.length) return '';
+  return `<aside class="document-highlighted-notes" aria-label="Important notes"><strong>Important notes / \u092e\u0939\u0924\u094d\u0924\u094d\u0935\u093e\u091a\u094d\u092f\u093e \u0938\u0942\u091a\u0928\u093e</strong><ol start="${item.highlightedNotes[0].number}">${item.highlightedNotes.map(note => `<li value="${note.number}"><span lang="mr">${h(note.marathi)}</span><span lang="en">${h(note.english)}</span></li>`).join('')}</ol></aside>`;
 }
 
 function wizardDocumentUploads(service, docs) {
-  const cards = items => items.map(item => `<div class="doc"><span><strong>${h(item.displayLabel || item.label)}</strong><small>${h(item.note || (item.required ? 'Required document' : 'Optional supporting document'))}</small><em>${h(draft.docs[item.label]?.pages ? `${draft.docs[item.label].pages.length} pages selected` : draft.docs[item.label]?.fileName || 'Not selected')}</em></span>${uploadControls(encodeURIComponent(item.label), '', item.multiple)}${draft.docs[item.label] && !draft.docs[item.label].pages ? `<ul class="selected-pages"><li><span>${h(draft.docs[item.label].fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}')">Preview</button><button type="button" class="quiet" onclick="removeDraftDocument('${encodeURIComponent(item.label)}')" aria-label="Remove ${h(item.label)}">Remove</button></li></ul>` : ''}${draft.docs[item.label]?.pages ? `<ul class="selected-pages">${draft.docs[item.label].pages.map((page,index) => `<li><span>Page ${index+1}: ${h(page.fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}',${index})">Preview</button><button type="button" class="quiet" onclick="removeDraftPage('${encodeURIComponent(item.label)}',${index})" aria-label="Remove page ${index+1}">Remove</button></li>`).join('')}</ul>` : ''}</div>`).join('');
+  const cards = items => items.map(item => `<div class="doc"><span><strong>${h(item.displayLabel || item.label)}</strong><small>${h(item.note || (item.required ? 'Required document' : 'Optional supporting document'))}</small>${highlightedDocumentNotes(item)}<em>${h(draft.docs[item.label]?.pages ? `${draft.docs[item.label].pages.length} pages selected` : draft.docs[item.label]?.fileName || 'Not selected')}</em></span>${uploadControls(encodeURIComponent(item.label), '', item.multiple)}${draft.docs[item.label] && !draft.docs[item.label].pages ? `<ul class="selected-pages"><li><span>${h(draft.docs[item.label].fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}')">Preview</button><button type="button" class="quiet" onclick="removeDraftDocument('${encodeURIComponent(item.label)}')" aria-label="Remove ${h(item.label)}">Remove</button></li></ul>` : ''}${draft.docs[item.label]?.pages ? `<ul class="selected-pages">${draft.docs[item.label].pages.map((page,index) => `<li><span>Page ${index+1}: ${h(page.fileName)}</span><button type="button" class="quiet" onclick="previewDraftDocument('${encodeURIComponent(item.label)}',${index})">Preview</button><button type="button" class="quiet" onclick="removeDraftPage('${encodeURIComponent(item.label)}',${index})" aria-label="Remove page ${index+1}">Remove</button></li>`).join('')}</ul>` : ''}</div>`).join('');
   if (docs.some(item => item.section)) return groupedDocumentCards(docs, item => cards([item]));
   if (service?.slug !== 'caste-certificate') return cards(docs);
   const groups = [
@@ -618,12 +803,13 @@ function bindWizard() {
       const value = h(rawValue);
       const automatic = field.computedSum || (field.defaultWhen && draft.details[field.defaultWhen.field] === field.defaultWhen.equals);
       const control = automatic ? `<input data-field="${key}" value="${value}" readonly aria-readonly="true">` : field.type === 'select'
-        ? `<select data-field="${key}"><option value="" disabled hidden ${!rawValue ? 'selected' : ''}>Choose…</option>${(field.options || []).map(option => `<option value="${h(option)}" ${option === rawValue ? 'selected' : ''}>${field.label === 'Ration card colour' ? ({ Yellow: '\u{1F7E1} ', Orange: '\u{1F7E0} ', White: '\u26AA ' }[option] || '') : ''}${h(field.label === 'Ration card colour' ? ({ Yellow: 'Yellow (PHH)', Orange: 'Orange (PHH/NPH)', White: 'White (APL)' }[option] || option) : (field.optionLabels?.[option] || option))}</option>`).join('')}</select>`
-        : `<input data-field="${key}" type="${['email','date','number','tel'].includes(field.type) ? field.type : 'text'}" value="${value}" ${field.required ? 'required' : ''} ${field.allowNumbers ? 'data-allow-numbers="true"' : ''} ${field.min !== undefined ? `min="${h(field.min)}"` : ''} ${field.step ? `step="${h(field.step)}"` : ''} ${field.inputMode ? `inputmode="${h(field.inputMode)}"` : ''} ${field.placeholder ? `placeholder="${h(field.placeholder)}"` : ''} ${field.pattern ? `pattern="${h(field.pattern)}"` : ''} maxlength="500" ${!field.allowNumbers && /\bname\b|\bsurname\b/i.test(field.label) ? 'oninput="removeNameNumbers(this)"' : ''}>`;
+        ? `<select data-field="${key}" ${field.optional ? 'data-optional="true"' : ''}><option value="" disabled hidden ${!rawValue ? 'selected' : ''}>Choose…</option>${(field.options || []).map(option => `<option value="${h(option)}" ${option === rawValue ? 'selected' : ''}>${field.label === 'Ration card colour' ? ({ Yellow: '\u{1F7E1} ', Orange: '\u{1F7E0} ', White: '\u26AA ' }[option] || '') : ''}${h(field.label === 'Ration card colour' ? ({ Yellow: 'Yellow (PHH)', Orange: 'Orange (PHH/NPH)', White: 'White (APL)' }[option] || option) : (field.optionLabels?.[option] || option))}</option>`).join('')}</select>`
+        : field.type === 'textarea' ? `<textarea data-field="${key}" ${field.required ? 'required' : ''} placeholder="${h(field.placeholder || '')}" maxlength="500" rows="3">${value}</textarea>`
+        : `<input data-field="${key}" type="${['email','date','number','tel','password'].includes(field.type) ? field.type : 'text'}" value="${value}" ${field.required ? 'required' : ''} ${field.allowNumbers ? 'data-allow-numbers="true"' : ''} ${field.min !== undefined ? `min="${h(field.min)}"` : ''} ${field.step ? `step="${h(field.step)}"` : ''} ${field.inputMode ? `inputmode="${h(field.inputMode)}"` : ''} ${field.placeholder ? `placeholder="${h(field.placeholder)}"` : ''} ${field.pattern ? `pattern="${h(field.pattern)}"` : ''} maxlength="${field.maxLength || 500}" ${field.sensitive ? 'autocomplete="off" data-sensitive="true"' : ''} ${field.digitsOnly ? 'oninput="this.value=this.value.replace(/[^0-9]/g,\'\').slice(0,' + (field.maxLength || 10) + ')"' : !field.allowNumbers && /\bname\b|\bsurname\b/i.test(field.label) ? 'oninput="removeNameNumbers(this)"' : ''}>`;
       const incomeYear = service.slug === 'income-certificate' && (field.label === 'Years of Certificate Required' || field.when?.field === 'Years of Certificate Required');
       const sectionStart = field.section && visibleFields[index - 1]?.section !== field.section;
       const sectionEnd = field.section && visibleFields[index + 1]?.section !== field.section;
-      return `${sectionStart ? `<fieldset class="intake-field-section"><legend>${h(field.section)}</legend><p>${h(field.sectionNote || '')}</p><div class="formgrid">` : ''}<label${incomeYear ? ' class="income-year-field"' : field.fullWidth ? ' class="full-width-field"' : ''}>${h(field.displayLabel || field.label)}${field.marathiInput ? control.replace('<input ', '<input data-marathi-input lang="mr" spellcheck="false" autocomplete="off" ') + '<small class="marathi-preview" aria-live="polite"></small>' : control}</label>${sectionEnd ? '</div></fieldset>' : ''}`;
+      return `${sectionStart ? `<fieldset class="intake-field-section"><legend>${h(field.section)}</legend><p>${h(field.sectionNote || '')}</p><div class="formgrid">` : ''}<label${incomeYear ? ' class="income-year-field"' : field.fullWidth ? ' class="full-width-field"' : ''}>${h(field.displayLabel || field.label)}${field.marathiInput ? control.replace('<input ', '<input data-marathi-input lang="mr" spellcheck="false" autocomplete="off" ') + '<small class="marathi-preview" aria-live="polite"></small>' : control}${field.note ? `<small class="intake-field-note">${h(field.note)}</small>` : ''}</label>${sectionEnd ? '</div></fieldset>' : ''}`;
     }).join('');
     document.querySelector('#serviceFields').querySelectorAll('[data-field]').forEach(input => input.onchange = () => {
       const label = decodeURIComponent(input.dataset.field);
@@ -682,7 +868,7 @@ function serviceGuidanceBody(service, variant, details) {
   if (service.slug === 'income-certificate') return incomeGuidance(variant, details);
   const docs = applicableDocuments(variant.documents || [], details);
   const notes = (variant.instructions || 'सर्व आवश्यक कागदपत्रांच्या स्पष्ट व संपूर्ण प्रती अपलोड करा. / Upload clear and complete copies of all required documents.').split('\n').filter(Boolean);
-  return `<section class="income-guidance"><header><h3>आवश्यक कागदपत्रे</h3><p>निवडलेल्या माहितीनुसार कागदपत्रांची यादी · Required documents</p></header><ul class="income-checklist">${docs.map(doc => `<li><span aria-hidden="true">✓</span><div>${h(doc.marathiLabel || doc.displayLabel || doc.label)}</div></li>`).join('')}</ul><aside class="income-notes" aria-label="Important notes"><h4>महत्त्वाच्या सूचना / Important notes</h4><ul>${notes.map(note => {
+  return `<section class="income-guidance"><header><h3>आवश्यक कागदपत्रे</h3><p>Required documents based on your selections / निवडलेल्या माहितीनुसार कागदपत्रांची यादी</p></header><ul class="income-checklist">${docs.map(doc => `<li><span aria-hidden="true">✓</span><div>${h(doc.marathiLabel || doc.displayLabel || doc.label)}</div></li>`).join('')}</ul><aside class="income-notes" aria-label="Important notes"><h4>महत्त्वाच्या सूचना / Important notes</h4><ul>${notes.map(note => {
     const separator = note.search(/\s\/\s(?=[A-Z][a-z])/);
     const highlight = service.slug === 'caste-validity' && /^(SEBC|VJNT|SC\s*\/)/.test(note) ? ' class="historical-proof-note"' : '';
     return separator < 0 ? `<li${highlight}>${h(note)}</li>` : `<li${highlight}>${h(note.slice(0, separator))}<small>${h(note.slice(separator + 3))}</small></li>`;
@@ -693,7 +879,7 @@ function incomeGuidance(variant, details) {
   const docs = applicableDocuments(variant.documents, details);
   const bringReport = details['Ration card area'] === 'City' && details[IntakeRules.available] === 'No' && details[IntakeRules.willing] === 'Yes';
   const extra = IntakeRules.surcharge(details);
-  return `<section class="income-guidance"><header><h3>आवश्यक कागदपत्रे</h3><p>निवडलेल्या माहितीनुसार कागदपत्रांची यादी · Required documents</p></header><ul class="income-checklist">${docs.map(doc => `<li><span aria-hidden="true">✓</span><div>${h(doc.marathiLabel || doc.displayLabel || doc.label)}</div></li>`).join('')}</ul><aside class="income-notes" aria-label="Important notes"><h4>महत्त्वाच्या सूचना / Important notes</h4><ul><li>पांढऱ्या रेशन कार्डधारकांसाठी फॉर्म १६ किंवा आयकर विवरणपत्र (ITR) आवश्यक आहे.<small>For white ration card holders, Form 16 or ITR is required.</small></li><li>कोणत्याही निवडलेल्या वर्षाचे उत्पन्न ₹१ लाखापेक्षा जास्त असल्यास वेतन पावती, आयकर विवरणपत्र (ITR) किंवा फॉर्म १६ यापैकी कोणताही एक पुरावा अपलोड करणे आवश्यक आहे.<small>If income exceeds ₹1 lakh in any selected year, upload any ONE: Salary/Pay Slip, ITR (Income Tax Return), or Form 16.</small></li><li>ग्रामीण रेशन कार्डधारकांसाठी तलाठी अहवाल आवश्यक आहे.<small>A Talathi report is required for rural ration card holders.</small></li></ul></aside>${bringReport ? `<section class="income-download"><h4>तलाठी अहवाल मिळवा / Obtain your Talathi report</h4><a class="primary" href="/downloads/income-certificate-form.pdf" download>अर्ज डाउनलोड करा / Download application form (PDF)</a><a href="/downloads/talathi-report-form.pdf" download>तलाठी अहवाल नमुना / Download report template (PDF)</a><ol><li>अर्ज डाउनलोड करून प्रिंट काढा व संपूर्ण माहिती भरा.<small>Download, print and complete the application form.</small></li><li>भरलेला अर्ज तलाठ्यांकडे घेऊन जा आणि अहवालावर त्यांची सही व शिक्का घ्या.<small>Take the completed form to the Talathi and obtain their signature and stamp on the report.</small></li><li>सही व शिक्का असलेला संपूर्ण अहवाल कागदपत्रे विभागात अपलोड करा.<small>Upload every page of the signed and stamped report in the Documents section.</small></li></ol></section>` : ''}${extra ? `<div class="income-fee-notice" role="status"><strong>अतिरिक्त शुल्क: ₹२०० / Additional fee: ₹200</strong><p>तलाठी अहवाल उपलब्ध नसल्यामुळे आणि तो आणण्यास नकार दिल्यामुळे मूळ सेवा शुल्कात ₹२०० जोडले जातील.</p><small>₹200 is added to the base service fee because you selected No for both report availability and willingness to bring it.</small><p><strong>Total service fee: ${money((variant.amounts?.serviceCharge || 0) + extra)}</strong></p></div>` : ''}</section>`;
+  return `<section class="income-guidance"><header><h3>आवश्यक कागदपत्रे</h3><p>Required documents based on your selections / निवडलेल्या माहितीनुसार कागदपत्रांची यादी</p></header><ul class="income-checklist">${docs.map(doc => `<li><span aria-hidden="true">✓</span><div>${h(doc.marathiLabel || doc.displayLabel || doc.label)}</div></li>`).join('')}</ul><aside class="income-notes" aria-label="Important notes"><h4>महत्त्वाच्या सूचना / Important notes</h4><ul><li>पांढऱ्या रेशन कार्डधारकांसाठी फॉर्म १६ किंवा आयकर विवरणपत्र (ITR) आवश्यक आहे.<small>For white ration card holders, Form 16 or ITR is required.</small></li><li>कोणत्याही निवडलेल्या वर्षाचे उत्पन्न ₹१ लाखापेक्षा जास्त असल्यास वेतन पावती, आयकर विवरणपत्र (ITR) किंवा फॉर्म १६ यापैकी कोणताही एक पुरावा अपलोड करणे आवश्यक आहे.<small>If income exceeds ₹1 lakh in any selected year, upload any ONE: Salary/Pay Slip, ITR (Income Tax Return), or Form 16.</small></li><li>ग्रामीण रेशन कार्डधारकांसाठी तलाठी अहवाल आवश्यक आहे.<small>A Talathi report is required for rural ration card holders.</small></li></ul></aside>${bringReport ? `<section class="income-download"><h4>तलाठी अहवाल मिळवा / Obtain your Talathi report</h4><a class="primary" href="/downloads/income-certificate-form.pdf" download>अर्ज डाउनलोड करा / Download application form (PDF)</a><a href="/downloads/talathi-report-form.pdf" download>तलाठी अहवाल नमुना / Download report template (PDF)</a><ol><li>अर्ज डाउनलोड करून प्रिंट काढा व संपूर्ण माहिती भरा.<small>Download, print and complete the application form.</small></li><li>भरलेला अर्ज तलाठ्यांकडे घेऊन जा आणि अहवालावर त्यांची सही व शिक्का घ्या.<small>Take the completed form to the Talathi and obtain their signature and stamp on the report.</small></li><li>सही व शिक्का असलेला संपूर्ण अहवाल कागदपत्रे विभागात अपलोड करा.<small>Upload every page of the signed and stamped report in the Documents section.</small></li></ol></section>` : ''}${extra ? `<div class="income-fee-notice" role="status"><strong>अतिरिक्त शुल्क: ₹२०० / Additional fee: ₹200</strong><p>तलाठी अहवाल उपलब्ध नसल्यामुळे आणि तो आणण्यास नकार दिल्यामुळे मूळ सेवा शुल्कात ₹२०० जोडले जातील.</p><small>₹200 is added to the base service fee because you selected No for both report availability and willingness to bring it.</small><p><strong>Total service fee: ${money((variant.amounts?.serviceCharge || 0) + extra)}</strong></p></div>` : ''}</section>`;
 }
 
 function rerenderWizard({keepScroll=false}={}) {const scroll=keepScroll?(document.querySelector('#drawer .panel')?.scrollTop||0):0;closeDrawer();drawWizard();if(keepScroll) document.querySelector('#drawer .panel').scrollTop=scroll;}
@@ -701,7 +887,7 @@ function fieldWarning(input) {
   const label = input.dataset.field ? decodeURIComponent(input.dataset.field) : ({ name: 'Full name', mobile: 'Mobile number' }[input.id] || input.name || 'this field');
   const value = input.value.trim();
   if (input.dataset.marathiInput !== undefined && /[A-Za-z]/.test(value)) return 'Please enter this name in Marathi.';
-  const required = input.required || input.tagName === 'SELECT' || ['name', 'mobile'].includes(input.id);
+  const required = input.required || (input.tagName === 'SELECT' && input.dataset.optional !== 'true') || ['name', 'mobile'].includes(input.id);
   if (required && !value) return `${input.tagName === 'SELECT' ? 'Please choose' : 'Please enter'} ${label}.`;
   if (input.id === 'mobile' && !/^[6-9]\d{9}$/.test(value)) return 'Enter a valid 10-digit Indian mobile number.';
   if (!input.dataset.allowNumbers && (input.id === 'name' || /\bname\b|\bsurname\b/i.test(input.dataset.field ? decodeURIComponent(input.dataset.field) : '')) && /\p{N}/u.test(value)) return 'Name cannot contain numbers.';
@@ -752,6 +938,9 @@ function saveStep1() {
 }
 function saveStep2() {
   draft.validationStep = 2;
+  const variant = services.find(service => service.id === draft.serviceId)?.variants.find(variant => variant.id === draft.variantId);
+  const answers = Object.fromEntries([...document.querySelectorAll('#serviceFields [data-field]')].map(input => [decodeURIComponent(input.dataset.field), input.value]));
+  if (IntakeRules.missingAnswerGroups(variant?.fields || [], answers).length) return toast('Answer at least one ration card question to continue.');
   if (!validateWizardFields(document.querySelectorAll('#serviceFields [data-field]'))) return;
   document.querySelectorAll('#serviceFields [data-field]').forEach(input => { draft.details[decodeURIComponent(input.dataset.field)] = input.value; });
   draft.serviceId = document.querySelector('#service').value;
@@ -917,7 +1106,7 @@ function documentChecklist(item, documents) {
     const submitted = uploaded.some(doc => reupload.submittedDocumentIds?.includes(doc.id) || (!reupload.pending && doc.version > 1));
     const editable = !['Closed','Delivered','Cancelled'].includes(item.status);
     const highlight = pending ? 'doc-reuploaded-pending' : requested ? 'doc-reupload-requested' : submitted ? 'doc-reuploaded-submitted' : '';
-    return `<div class="doc ${highlight}"><span><strong>${h(requirement.displayLabel || requirement.label)}</strong>${requirement.note ? `<small>${h(requirement.note)}</small>` : ''}<small>${uploaded.length ? requirement.multiple ? `${uploaded.length} files uploaded` : `Uploaded version ${uploaded[0].version}` : requirement.required ? 'Required document missing' : 'Optional supporting document'}</small>${requested && !pending ? '<span class="reupload-tag is-requested">Reupload requested</span>' : ''}${statusBadge(uploaded.length ? 'Uploaded' : requirement.required ? 'Missing' : 'Optional')}${uploaded.map((doc,index) => {
+    return `<div class="doc ${highlight}"><span><strong>${h(requirement.displayLabel || requirement.label)}</strong>${requirement.note ? `<small>${h(requirement.note)}</small>` : ''}${highlightedDocumentNotes(requirement)}<small>${uploaded.length ? requirement.multiple ? `${uploaded.length} files uploaded` : `Uploaded version ${uploaded[0].version}` : requirement.required ? 'Required document missing' : 'Optional supporting document'}</small>${requested && !pending ? '<span class="reupload-tag is-requested">Reupload requested</span>' : ''}${statusBadge(uploaded.length ? 'Uploaded' : requirement.required ? 'Missing' : 'Optional')}${uploaded.map((doc,index) => {
       const isPending = reupload.pendingDocumentIds?.includes(doc.id);
       const isSubmitted = reupload.submittedDocumentIds?.includes(doc.id) && !(requested && !isPending);
       return `<span class="document-file" data-document-id="${h(doc.id)}">${requirement.multiple ? `<small>Page ${index+1}</small>` : ''}<span class="document-file-name">${h(doc.file_name || requirement.label)}</span>${isPending ? '<span class="reupload-tag is-pending">Reuploaded &middot; not submitted</span>' : isSubmitted ? '<span class="reupload-tag is-submitted">Reuploaded &middot; submitted for review</span>' : doc.version > 1 && !reupload.pending ? '<span class="reupload-tag is-submitted">Reuploaded document</span>' : ''}${documentActions(item,doc)}</span>`;
@@ -1120,7 +1309,7 @@ function casePaymentCard(item) {
 }
 
 function caseDetail(item, documents, notes) {
-  const intakeDetails = Object.entries(item.details || {}).filter(([, value]) => value).map(([label, value]) => `<div><span>${h(label)}</span><strong>${h(value)}</strong></div>`).join('');
+  const intakeDetails = Object.entries(item.details || {}).filter(([, value]) => value).map(([label, value]) => `<div><span>${h(label)}</span><strong${label === 'Password' ? ' class="pf-password-value"' : ''}>${h(value)}</strong>${label === 'Password' && (me.role === 'admin' || (me.role === 'backoffice' && item.backoffice?.id === me.id)) ? `<button type="button" class="quiet" onclick="togglePFPassword('${item.id}',this)">Show password</button>` : ''}</div>`).join('');
   const priced = item.amounts.total > 0;
   return `<div class="drawer-head"><div><p class="eyebrow">${h(item.ref)}</p><h2>${h(item.customer.name)}</h2><p>${h(item.service.name)} · ${h(item.variant.name)}</p></div><button class="quiet" onclick="closeDrawer()">Close</button></div>
     <div class="case-summary"><div><span>Status</span>${statusBadge(item.status)}</div><div><span>Payment</span>${statusBadge(item.payment_state)}</div><div><span>${priced ? 'Total' : 'Price'}</span><strong>${priced ? money(item.amounts.total) : 'To be confirmed'}</strong></div><div><span>Owner</span><strong>${h(item.backoffice?.name || 'Unassigned')}</strong></div></div>
@@ -1133,6 +1322,25 @@ function caseDetail(item, documents, notes) {
     ${me.role === 'backoffice' && isPaymentConfirmed(item) && item.status === 'Ready for Assignment' ? `<div class="sticky-actions"><button class="primary" onclick="claim('${item.id}')">Claim case</button></div>` : ''}
     ${['backoffice','admin'].includes(me.role) ? progressControls(item) : ''}`;
 }
+
+async function togglePFPassword(caseId, button) {
+  const output = button.parentElement.querySelector('.pf-password-value');
+  if (button.dataset.revealed === 'true') {
+    output.textContent = '••••••••';
+    button.dataset.revealed = 'false';
+    button.textContent = 'Show password';
+    return;
+  }
+  button.disabled = true;
+  try {
+    const result = await api(`/api/cases/${caseId}/pf-password`, {method:'POST',body:{}});
+    output.textContent = result.password;
+    button.dataset.revealed = 'true';
+    button.textContent = 'Hide password';
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; }
+}
+Object.assign(window, { togglePFPassword });
 
 function progressControls(item) {
   if (!isPaymentConfirmed(item)) return '';
@@ -1246,6 +1454,7 @@ async function progress(caseId) {
 
 function closeDrawer() {
   if(drawerBusy) return;
+  intakeLanguageObserver?.disconnect();
   closeDocumentPreview();
   document.querySelector('#drawer')?.remove();
   document.body?.classList?.remove('payment-open');
@@ -1271,7 +1480,7 @@ async function setView(next) {
 }
 
 Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, previewDraftDocument, previewDocument, closeDocumentPreview, changePreviewPage, zoomDocumentPreview, uploadCaseDocument, showReuploadRequest, submitReupload, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
-Object.assign(window, { downloadCaseFiles, wizardBack, removeNameNumbers, rememberNoticeState, rememberRecentUpdates });
+Object.assign(window, { downloadCaseFiles, wizardBack, removeNameNumbers, rememberNoticeState, rememberRecentUpdates, setIntakeLanguage });
 Object.assign(window,{previewAnnouncementPicture,clearAnnouncementPicture,publishAnnouncement,removeAnnouncement});
 Object.assign(window, { saveDriveRootFolder });
 Object.assign(window, { toggleEmployeeDates, applyEmployeePeriod, createEmployee });
