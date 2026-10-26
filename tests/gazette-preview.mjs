@@ -39,8 +39,12 @@ try {
     for(const input of await page.locator('#serviceFields input').all()) await input.fill('Old Name');
     await screenshot(`deliverables/gazette/english-${width}.png`);
     await field('Gazette language').selectOption('Marathi');
+    assert.deepEqual(await page.locator('legend').allTextContents(),['From Name','To Name']);
+    await page.evaluate(()=>window.setIntakeLanguage('mr'));
     assert.deepEqual(await page.locator('legend').allTextContents(),['जुने नाव','नवीन नाव']);
+    await page.evaluate(()=>window.setIntakeLanguage('en'));
     assert.equal(await page.locator('[data-marathi-input]').count(),6);
+    for (const input of await page.locator('[data-marathi-input]').all()) assert.equal(await input.isVisible(),true,'Marathi name fields must stay visible when the interface language is English');
     assert.equal(await field('Old first name (English)').count(),0);
     await page.getByRole('button',{name:'Continue',exact:true}).click();
     assert.equal(await page.locator('.field-invalid').count(),6);

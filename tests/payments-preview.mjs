@@ -1,3 +1,4 @@
+import {pfDetails} from './pf-fixture.js';
 // End-to-end browser QA against an isolated local database; no actual transfers.
 import {chromium} from 'playwright';
 import {spawn} from 'node:child_process';
@@ -19,7 +20,7 @@ try {
   await context.request.post(origin+'/api/login',{data:{username:'admin01',password:'Demo@12345'}});
   const serviceResponse=await context.request.get(origin+'/api/services'),services=(await serviceResponse.json()).services;
   const v=services.find(s=>s.slug==='pf-assistance').variants[0];
-  const c=await (await context.request.post(origin+'/api/cases',{data:{variantId:v.id,customer:{name:'Browser Test',mobile:'9876543210'},consent:true}})).json();
+  const c=await (await context.request.post(origin+'/api/cases',{data:{variantId:v.id,details:pfDetails,customer:{name:'Browser Test',mobile:'9876543210'},consent:true}})).json();
   await page.goto(origin);
   for(const width of [320,390,1280]) {
     await page.setViewportSize({width,height:900});
@@ -83,10 +84,8 @@ try {
   await page.screenshot({path:join(screenshots,'manual-upi.png'),fullPage:true});
   await page.getByRole('button',{name:'I have paid',exact:true}).click();
   await page.locator('#utrForm input').fill('123456789012');await page.getByRole('button',{name:'Submit payment details',exact:true}).click();
-  await page.locator('#verifyForm').waitFor();
+  await page.getByRole('button',{name:'Verify received payment',exact:true}).waitFor();
   assert.ok(await page.getByText('Your payment is awaiting verification.',{exact:false}).first().isVisible());
-  await page.locator('#verifyForm input').evaluateAll(inputs=>inputs.forEach(el=>el.checked=true));
-  await page.locator('#verifyForm textarea').fill('Synthetic verified bank record for browser QA');
   await page.getByRole('button',{name:'Verify received payment',exact:true}).click();await page.getByRole('heading',{name:'Verified payment receipt'}).waitFor();
   await page.screenshot({path:join(screenshots,'verified-receipt.png'),fullPage:true});
   assert.deepEqual(browserErrors,[]);console.log('Browser checkout and admin verification passed at 320, 390, 768 and 1280px; no runtime errors.');

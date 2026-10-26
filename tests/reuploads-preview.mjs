@@ -1,3 +1,4 @@
+import {pfDetails} from './pf-fixture.js';
 // Full browser workflow against an isolated database; never uses live cases.
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -27,9 +28,9 @@ try {
     const sales=await browser.newContext({viewport:{width,height:900}}),office=await browser.newContext({viewport:{width,height:900}});
     await sales.request.post(origin+'/api/login',{data:{username:'sales01',password:'Demo@12345'}});
     await office.request.post(origin+'/api/login',{data:{username:'backoffice01',password:'Demo@12345'}});
-    const created=await (await sales.request.post(origin+'/api/cases',{data:{variantId:variant.id,customer:{name:'Reupload Test',mobile:'9876543210'},consent:true}})).json();
+    const created=await (await sales.request.post(origin+'/api/cases',{data:{variantId:variant.id,details:pfDetails,customer:{name:'Reupload Test',mobile:'9876543210'},consent:true}})).json();
     const id=created.case.id, path=origin+'/api/cases/'+id;
-    assert.equal((await sales.request.post(path+'/documents',{data:{docType:'Bank Passbook',fileName:'original.png',mimeType:'image/png',size:png.length,content:png.toString('base64')}})).status(),201);
+    for(const doc of variant.documents.filter(doc=>doc.required)) assert.equal((await sales.request.post(path+'/documents',{data:{docType:doc.label,fileName:'original.png',mimeType:'image/png',size:png.length,content:png.toString('base64')}})).status(),201);
     assert.equal((await sales.request.post(origin+`/api/payments/${created.case.payment.id}/submit`,{data:{utr:String(900000000000+width)}})).status(),200);
     assert.equal((await admin.request.post(origin+`/api/payments/${created.case.payment.id}/verify`,{data:confirmations})).status(),200);
     assert.equal((await office.request.post(path+'/claim',{data:{}})).status(),200);
@@ -37,7 +38,7 @@ try {
     officePage.on('pageerror',error=>errors.push(error.message));salesPage.on('pageerror',error=>errors.push(error.message));
     await officePage.goto(origin);await officePage.locator('.profile-button').waitFor();
     await officePage.evaluate(id=>window.openCase(id),id);
-    await officePage.getByRole('button',{name:'Request reupload',exact:true}).click();
+    await officePage.locator('.doc').filter({hasText:'Bank Passbook'}).getByRole('button',{name:'Request reupload',exact:true}).click();
     await officePage.locator('.reupload-request-form textarea').fill('Please upload a clear passbook scan with the account details visible.');
     await officePage.getByRole('button',{name:'Send reupload request',exact:true}).click();
     await officePage.locator('.doc-reupload-requested').waitFor();
@@ -46,7 +47,7 @@ try {
     await salesPage.evaluate(id=>window.openCase(id),id);
     await salesPage.locator('.doc-reupload-requested').waitFor();
     assert.equal(await salesPage.getByRole('button',{name:'Submit reupload',exact:true}).isDisabled(),true);
-    await salesPage.locator('#drawer input[type=file]').setInputFiles({name:'corrected-passbook.png',mimeType:'image/png',buffer:png});
+    await salesPage.locator('.doc-reupload-requested input[type=file]').setInputFiles({name:'corrected-passbook.png',mimeType:'image/png',buffer:png});
     await salesPage.locator('.doc-reuploaded-pending').waitFor();
     assert.match(await salesPage.locator('.doc-reuploaded-pending .reupload-tag').innerText(),/not submitted/);
     assert.equal((await (await sales.request.get(path)).json()).case.status,'Correction Required');

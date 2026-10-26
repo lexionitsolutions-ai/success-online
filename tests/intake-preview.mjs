@@ -14,6 +14,7 @@ try {
   await page.addStyleTag({ content: readFileSync('public/dashboard.css', 'utf8') });
   await page.addScriptTag({ content: readFileSync('public/intake-rules.js', 'utf8') });
   await page.addScriptTag({ type: 'module', content: readFileSync('public/app.js', 'utf8').replace(/boot\(\);\s*$/, '') + `
+    window.expectedDocCount=()=>{const v=services.find(s=>s.id===draft.serviceId).variants[0];return v.documents.filter(d=>IntakeRules.matches(d.when,draft.details,true)).length;};
     window.setupIntake = catalog => {
       services = catalog.map(service => ({ ...service, id: service.slug, variants: [{ ...service, id: service.slug, amounts: {serviceCharge:service.serviceCharge || 0,officialFee:0,tax:0,total:service.serviceCharge || 0} }] }));
       startCase();
@@ -36,7 +37,7 @@ try {
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   for (const service of serviceCatalog) {
     await page.locator('#service').selectOption(service.slug);
-    assert.equal(await page.locator('input[type="email"]').count(), 0, service.name);
+    assert.equal(await page.locator('input[type="email"]').count(), ['shop-act','udyam-aadhaar','food-license','passport'].includes(service.slug)?1:0, service.name);
     for (const select of await page.locator('#serviceFields select').all()) {
       const placeholder = select.locator('option[value=""]');
       assert.equal(await placeholder.evaluate(option => option.disabled), true, service.name);
@@ -86,7 +87,10 @@ try {
     assert.ok((await colours.textContent()).includes(label));
   }
   await colours.selectOption('White');
+  assert.ok((await page.locator('#svcInfo').textContent()).includes('Form 16 / ITR'));
+  await page.evaluate(()=>window.setIntakeLanguage('mr'));
   assert.ok((await page.locator('#svcInfo').textContent()).includes('फॉर्म १६ / आयकर विवरणपत्र'));
+  await page.evaluate(()=>window.setIntakeLanguage('en'));
   await page.locator('#service').selectOption('domicile-certificate');
   assert.equal(await page.locator('#service option:checked').textContent(), 'Age Nationality & Domicile Certificate');
   assert.equal(await field('Applicant birth place').count(), 0);
@@ -140,7 +144,7 @@ try {
       assert.equal(await disclosure.evaluate(el=>el.open),true,'Notices remain open after conditional fields change');
       assert.equal(await page.locator('.income-guidance').count(),1,service.name);
       assert.equal(await page.locator('.income-notes').count(),1,service.name);
-      assert.equal(await page.locator('.income-checklist li').count(),service.documents.length-(service.slug==='income-certificate'?1:0),service.name);
+      assert.equal(await page.locator('.income-checklist li').count(),await page.evaluate(()=>window.expectedDocCount()),service.name);
       assert.ok(await page.locator('.panel').evaluate(el=>el.scrollWidth<=el.clientWidth+1),`${service.name} fits ${width}px`);
       await page.evaluate(()=>{document.querySelector('.drawer').style.position='absolute';const panel=document.querySelector('.panel');panel.style.height='auto';panel.style.overflow='visible';panel.scrollTop=0;});
       await page.screenshot({path:`deliverables/service-intake/${service.slug}-${width}.png`,fullPage:true});
@@ -148,9 +152,10 @@ try {
     }
   }
   await page.locator('#service').selectOption('passport');
-  await field('Father name').fill('Father123');
-  assert.equal(await field('Father name').inputValue(), 'Father');
-  console.log('All 15 services passed at 390px and 1280px: Marathi checklists, notes and layout; fixed income years and conditional birthplace address validation also passed.');
+  await field('Mobile').fill('98abc76');
+  assert.equal(await field('Mobile').inputValue(), '9876');
+  assert.equal(await field('Father name').count(),0);
+  console.log('All 16 services passed at 390px and 1280px: Marathi checklists, notes and layout; fixed income years and conditional birthplace address validation also passed.');
 } finally {
   await browser.close();
 }

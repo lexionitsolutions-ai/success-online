@@ -20,6 +20,8 @@ try {
         return allowLogin ? json({user:{id:'test',name:'Staff Demo',username:'staff.demo',role:'sales'}}) : json({error:'Incorrect username or password'},401);
       }
       if(path==='/api/services') return json({services:[]});
+      if(path==='/api/notifications') return json({notifications:[]});
+      if(path==='/api/announcements') return json({announcements:[]});
       if(path==='/api/cases') return json({cases:[]});
       const file={'/':'index.html','/script.js':'script.js','/styles.css':'styles.css','/mobile.css':'mobile.css','/payments.css':'payments.css','/dashboard.css':'dashboard.css','/login.css':'login.css'}[path];
       if(file) return route.fulfill({contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:readFileSync(file==='script.js' && process.env.LOGIN_PREVIEW_SCRIPT ? process.env.LOGIN_PREVIEW_SCRIPT : join('public',file),'utf8')});

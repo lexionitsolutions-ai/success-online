@@ -98,7 +98,7 @@ try {
       await page.locator('#drawer').getByRole('button',{name:'Close',exact:true}).click();
       contextCases[0].status='Awaiting Documents';contextCases[0].payment_state='paid';
     }
-    contextCases[0].payment_state='paid';
+    contextCases[0].payment_state='paid';contextCases[0].document_state='complete';
     await page.evaluate(()=>window.setView('cases'));
     await page.locator('.case-table').waitFor();
     const fits=await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1);

@@ -2,13 +2,14 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 const originalFetch = globalThis.fetch;
 const sheetRows={};
+const sheetTitles=new Set();
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(String(input));
   const response = value => new Response(JSON.stringify(value), {headers:{'content-type':'application/json'}});
   // Google rejects dot notation in partial-response field masks.
   if (/\b(?:capabilities|properties|sheets)\./.test(url.searchParams.get('fields') || '')) return new Response(JSON.stringify({error:{message:'Invalid field selection'}}),{status:400,headers:{'content-type':'application/json'}});
   if (url.hostname === 'oauth2.googleapis.com') {
-    if (process.env.GOOGLE_MOCK_FAILURE_FILE && existsSync(process.env.GOOGLE_MOCK_FAILURE_FILE) && !['missing-root','sheets-fail','sheets-slow-fail'].includes(readFileSync(process.env.GOOGLE_MOCK_FAILURE_FILE,'utf8'))) return new Response(JSON.stringify({error:'invalid_grant',error_description:'Token has been expired or revoked.'}), {status:400,headers:{'content-type':'application/json'}});
+    if (process.env.GOOGLE_MOCK_FAILURE_FILE && existsSync(process.env.GOOGLE_MOCK_FAILURE_FILE) && !['missing-root','sheets-fail','sheets-slow-fail','sheets-missing-tab'].includes(readFileSync(process.env.GOOGLE_MOCK_FAILURE_FILE,'utf8'))) return new Response(JSON.stringify({error:'invalid_grant',error_description:'Token has been expired or revoked.'}), {status:400,headers:{'content-type':'application/json'}});
     return response({access_token:'mock-token'});
   }
   if (url.hostname === 'www.googleapis.com') {
@@ -25,10 +26,17 @@ globalThis.fetch = async (input, options = {}) => {
       return new Response(JSON.stringify({error:{message:'Synthetic slow Sheets outage'}}),{status:503});
     }
     if(process.env.GOOGLE_MOCK_FAILURE_FILE && existsSync(process.env.GOOGLE_MOCK_FAILURE_FILE) && readFileSync(process.env.GOOGLE_MOCK_FAILURE_FILE,'utf8')==='sheets-fail') return new Response(JSON.stringify({error:{message:'Synthetic Sheets outage'}}),{status:503});
-    if (url.searchParams.has('fields')) return response({spreadsheetId:'workbook',properties:{title:'Trial workbook'},sheets:[]});
+    if (url.searchParams.has('fields')) return response({spreadsheetId:'workbook',properties:{title:'Trial workbook'},sheets:[...sheetTitles].map(title=>({properties:{title}}))});
+    if (url.pathname.endsWith('/values:batchUpdate')) {
+      for(const entry of JSON.parse(options.body).data){const match=entry.range.match(/^'([^']+)'!A(\d+)/);if(match&&Number(match[2])>1){sheetRows[match[1]] ||= {};sheetRows[match[1]][match[2]]=entry.values[0];}}
+      if(process.env.GOOGLE_MOCK_SHEETS_FILE)writeFileSync(process.env.GOOGLE_MOCK_SHEETS_FILE,JSON.stringify(sheetRows));
+      return response({updatedRows:1});
+    }
+    if(url.pathname.endsWith(':batchUpdate')){for(const request of JSON.parse(options.body).requests||[])if(request.addSheet)sheetTitles.add(request.addSheet.properties.title);return response({});}
     const range=decodeURIComponent(url.pathname.split('/values/')[1] || ''), match=range.match(/^'([^']+)'!([A-Z]+)(\d+)?/);
     if(match) {
       const [,tab,column,row]=match;sheetRows[tab] ||= {};
+      if(process.env.GOOGLE_MOCK_FAILURE_FILE && existsSync(process.env.GOOGLE_MOCK_FAILURE_FILE) && readFileSync(process.env.GOOGLE_MOCK_FAILURE_FILE,'utf8')==='sheets-missing-tab' && !sheetTitles.has(tab))return new Response(JSON.stringify({error:{message:`Unable to parse range: '${tab}'!${column}:${column}`}}),{status:400,headers:{'content-type':'application/json'}});
       if(!options.method) {const index=column.charCodeAt(0)-65;return response({values:[[tab,...Object.keys(sheetRows[tab]).sort((a,b)=>a-b).map(r=>sheetRows[tab][r][index])]]});}
       if(row) {sheetRows[tab][row]=JSON.parse(options.body).values[0];if(process.env.GOOGLE_MOCK_SHEETS_FILE) writeFileSync(process.env.GOOGLE_MOCK_SHEETS_FILE,JSON.stringify(sheetRows));}
     }

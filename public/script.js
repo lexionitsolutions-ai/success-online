@@ -140,7 +140,7 @@ function applyIntakeLanguage() {
       }
     }
   }
-  for (const el of root.querySelectorAll('[lang="mr"], [lang="en"]')) {
+  for (const el of root.querySelectorAll('.document-highlighted-notes [lang="mr"], .document-highlighted-notes [lang="en"]')) {
     if (!el.closest('.intake-language-toggle')) el.hidden = el.lang !== intakeLanguage;
   }
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);

@@ -19,11 +19,11 @@ try {
   for(const [context,username] of [[sales,'sales01'],[admin,'admin01'],[office,'backoffice01']]) assert.equal((await context.request.post(origin+'/api/login',{data:{username,password:'Demo@12345'}})).status(),200);
   const services=(await (await sales.request.get(origin+'/api/services')).json()).services;
   const variant=services.find(s=>s.slug==='voting-card').variants[0];
-  const created=await (await sales.request.post(origin+'/api/cases',{data:{variantId:variant.id,customer:{name:'Workflow Test',mobile:'9876543210'},consent:true}})).json();
+  const created=await (await sales.request.post(origin+'/api/cases',{data:{variantId:variant.id,details:{Mobile:'9876543210','Voting card application type':'New'},customer:{name:'Workflow Test',mobile:'9876543210'},consent:true}})).json();
   const c=created.case,path=origin+'/api/cases/'+c.id;
   const pdf=Buffer.from('%PDF-1.4\nsynthetic-completed-document\n%%EOF');
   const upload=docType=>({docType,fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
-  for(const doc of variant.documents) assert.equal((await sales.request.post(path+'/documents',{data:upload(doc.label)})).status(),201);
+  for(const doc of variant.documents.filter(doc=>!doc.when)) assert.equal((await sales.request.post(path+'/documents',{data:upload(doc.label)})).status(),201);
   const page=await sales.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin);await page.locator('.profile-button').waitFor();
   await page.evaluate(()=>window.setView('pending'));

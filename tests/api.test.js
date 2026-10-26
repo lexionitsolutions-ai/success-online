@@ -446,6 +446,7 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     assert.ok(new URL(oauth.authorizationUrl).searchParams.get('scope').includes('auth/spreadsheets'));
     const services = (await api('/api/services')).services;
     const variant = services.find(s => s.slug === 'pf-assistance').variants[0];
+    writeFileSync(join(root,'revoked'),'sheets-missing-tab');
     const c = (await api('/api/cases',{variantId:variant.id,details:pfDetails,customer:{name:'Drive Trial',mobile:'9876543210'},consent:true})).case;
     const countStoredCases=()=>{const db=new DatabaseSync(join(root,'test.sqlite'));try{return db.prepare('SELECT COUNT(*) n FROM cases').get().n;}finally{db.close();}};
     const pdf = Buffer.from('%PDF-1.4\nmock-drive-file\n%%EOF');
@@ -456,6 +457,9 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     assert.equal(download.status,200); assert.deepEqual(Buffer.from(await download.arrayBuffer()),pdf);
     const zip = await fetch(origin + `/api/cases/${c.id}/download-all`,{headers:{cookie}});
     assert.equal(zip.status,200); assert.equal(Buffer.from(await zip.arrayBuffer()).readUInt32LE(),0x04034b50);
+    const repairedWorkbook=JSON.parse(readFileSync(join(root,'sheets.json'),'utf8'));
+    assert.ok(Object.values(repairedWorkbook['PF Working (Provident Fund)']||{}).some(row=>row[0]===c.ref),'Missing/renamed service tabs heal automatically before manual activation');
+    unlinkSync(join(root,'revoked'));
     const sync = await api('/api/google/sheets/activate', undefined, 'POST');
     assert.equal(sync.syncedCases,1); assert.equal(sync.workbook.tabs.length,24);
     assert.ok(sync.workbook.tabs.includes('Documents'));

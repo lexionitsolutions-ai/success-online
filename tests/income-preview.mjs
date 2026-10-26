@@ -55,7 +55,10 @@ try {
     await field('Ration card area').selectOption('Village');
     assert.equal(await field('Is Talathi Report available?').count(),0);
     await page.locator('#drawer').getByRole('button',{name:'Continue',exact:true}).click();
-    assert.match(await page.locator('.upload-list').innerText(),/Hospital Letter.*वैद्यकीय दाखला.*चिकित्सा प्रमाण पत्र/);
+    assert.match(await page.locator('.upload-list').innerText(),/Hospital Letter/);
+    await page.evaluate(()=>window.setIntakeLanguage('mr'));
+    assert.match(await page.locator('.upload-list').innerText(),/\u0935\u0948\u0926\u094d\u092f\u0915\u0940\u092f \u0926\u093e\u0916\u0932\u093e/u);
+    await page.evaluate(()=>window.setIntakeLanguage('en'));
     assert.equal(await page.locator('.doc').count(),6);
     assert.equal(await page.getByRole('button',{name:'Continue',exact:true}).isDisabled(),true);
     await page.screenshot({path:`deliverables/income-preview/uploads-${width}.png`,fullPage:true});

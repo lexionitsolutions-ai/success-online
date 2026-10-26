@@ -271,7 +271,7 @@ async function sheetsRequest(path, options = {}) {
 function spreadsheetId() { return process.env.GOOGLE_OPERATIONS_SPREADSHEET_ID || ''; }
 function sheetSafe(value) { return String(value ?? '').replace(/^[=+\-@]/, "'$&"); }
 function sheetRange(tab, range) { return encodeURIComponent(`'${tab}'!${range}`); }
-async function ensureSheetsWorkbook() {
+async function ensureSheetsWorkbook({missingOnly=false} = {}) {
   const id = spreadsheetId();
   if (!id) throw new Error('GOOGLE_OPERATIONS_SPREADSHEET_ID is missing');
   const metadata = await sheetsRequest(`/v4/spreadsheets/${encodeURIComponent(id)}?fields=spreadsheetId,properties(title),sheets(properties(title))`);
@@ -283,15 +283,16 @@ async function ensureSheetsWorkbook() {
       body: JSON.stringify({ requests: missing.map(title => ({ addSheet: { properties: { title } } })) })
     });
   }
-  await sheetsRequest(`/v4/spreadsheets/${encodeURIComponent(id)}/values:batchUpdate`, {
+  const headersToWrite = Object.entries(sheetHeaders).filter(([tab])=>!missingOnly || missing.includes(tab));
+  if (headersToWrite.length) await sheetsRequest(`/v4/spreadsheets/${encodeURIComponent(id)}/values:batchUpdate`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ valueInputOption: 'RAW', data: Object.entries(sheetHeaders).map(([tab, headers]) => ({ range: `'${tab}'!A1`, values: [headers] })) })
+    body: JSON.stringify({ valueInputOption: 'RAW', data: headersToWrite.map(([tab, headers]) => ({ range: `'${tab}'!A1`, values: [headers] })) })
   });
   return { id: metadata.spreadsheetId, title: metadata.properties.title, tabs: Object.keys(sheetHeaders) };
 }
 async function upsertSheetRow(tab, key, values, keyColumn = 'A:A') {
   const id = spreadsheetId();
-  const column = await sheetsRequest(`/v4/spreadsheets/${encodeURIComponent(id)}/values/${sheetRange(tab, keyColumn)}?majorDimension=COLUMNS`);
+  const column = await sheetKeyColumn(tab,keyColumn);
   const keys = column.values?.[0] || [];
   const index = keys.findIndex(value => value === key);
   const row = index >= 1 ? index + 1 : keys.length + 1;
@@ -300,6 +301,25 @@ async function upsertSheetRow(tab, key, values, keyColumn = 'A:A') {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ values: [values] })
   });
+}
+async function sheetKeyColumn(tab, keyColumn='A:A') {
+  const path=`/v4/spreadsheets/${encodeURIComponent(spreadsheetId())}/values/${sheetRange(tab,keyColumn)}?majorDimension=COLUMNS`;
+  try {return await sheetsRequest(path);}
+  catch(error) {
+    if (!/Unable to parse range/i.test(error.message)) throw error;
+    await ensureSheetsWorkbook({missingOnly:true});
+    return sheetsRequest(path);
+  }
+}
+async function upsertSheetRows(tab, entries, keyColumn='A:A') {
+  if (!entries.length) return;
+  const column=await sheetKeyColumn(tab,keyColumn),keys=column.values?.[0] || [];
+  const data=entries.map(([key,values])=>{
+    let index=keys.findIndex(value=>value===key);
+    if(index<1){index=Math.max(1,keys.length);keys[index]=key;}
+    return {range:`'${tab}'!A${index+1}`,values:[values]};
+  });
+  await sheetsRequest(`/v4/spreadsheets/${encodeURIComponent(spreadsheetId())}/values:batchUpdate`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({valueInputOption:'RAW',data})});
 }
 function serviceSheet(name) { return serviceTabs[name]; }
 async function syncCaseToGoogle(caseId) {
@@ -310,9 +330,8 @@ async function syncCaseToGoogle(caseId) {
   await upsertSheetRow('All Cases', c.ref, master);
   const tab = serviceSheet(c.service.name);
   if (tab) await upsertSheetRow(tab, c.ref, [c.ref, sheetSafe(c.customer.name), c.customer.mobile, c.service.name, c.status, c.payment_state, c.document_state, c.updated_at]);
-  for (const d of (await all('SELECT * FROM documents WHERE case_id=$id ORDER BY created_at', { $id: caseId }))) {
-    await upsertSheetRow('Documents', d.id, [d.id, c.ref, sheetSafe(d.doc_type), sheetSafe(d.file_name), d.mime_type, d.size, d.version, d.state, d.created_at, d.drive_file_id && !d.drive_file_id.startsWith('demo-') ? `https://drive.google.com/file/d/${d.drive_file_id}/view` : d.storage_path.startsWith('supabase://') ? 'Private cloud storage' : 'Local demo storage']);
-  }
+  const documents=await all('SELECT * FROM documents WHERE case_id=$id ORDER BY created_at',{$id:caseId});
+  await upsertSheetRows('Documents',documents.map(d=>[d.id,[d.id,c.ref,sheetSafe(d.doc_type),sheetSafe(d.file_name),d.mime_type,d.size,d.version,d.state,d.created_at,d.drive_file_id && !d.drive_file_id.startsWith('demo-') ? `https://drive.google.com/file/d/${d.drive_file_id}/view` : d.storage_path.startsWith('supabase://') ? 'Private cloud storage' : 'Local demo storage']]));
   for (const p of await paymentSystem.list(caseId,{role:'admin'})) {
     await upsertSheetRow('Payments',p.id,[p.id,p.created_at,p.gateway_order_id,sheetSafe(p.customer_name),p.customer_mobile,sheetSafe(p.service_name),p.amount/100,p.payment_method || '',p.transaction_id || '',p.status,sheetSafe(p.employee_name),p.verified_by || '',p.verified_at || '']);
   }
@@ -341,7 +360,7 @@ async function performSheetsSync(caseId) {
     const job = await one("SELECT updated_at,status FROM sync_jobs WHERE type='sheets' AND entity_id=$entity",{$entity:caseId});
     if (!job || job.status === 'ok') return;
     try {
-      await sheetsContext.run({signal:AbortSignal.timeout(40000)},()=>syncCaseToGoogle(caseId));
+      await sheetsContext.run({signal:AbortSignal.timeout(25000)},()=>syncCaseToGoogle(caseId));
       (await run("UPDATE sync_jobs SET status='ok',attempts=attempts+1,last_error=NULL,updated_at=$n WHERE type='sheets' AND entity_id=$entity AND updated_at=$version", { $entity: caseId, $n: now(), $version:job.updated_at }));
     } catch (error) {
       (await run("UPDATE sync_jobs SET status='failed',attempts=attempts+1,last_error=$error,updated_at=$n WHERE type='sheets' AND entity_id=$entity AND updated_at=$version", { $entity: caseId, $error: error.message, $n: now(), $version:job.updated_at }));
@@ -361,27 +380,31 @@ async function performDriveSync(caseId) {
     try {
       const pending = await all("SELECT d.* FROM documents d JOIN sync_jobs j ON j.entity_id=d.id AND j.type='drive' WHERE d.case_id=$case AND d.state='uploaded' AND j.status IN ('pending','failed') AND d.storage_path LIKE 'supabase://%' AND (d.drive_file_id IS NULL OR d.drive_file_id='')",{$case:caseId});
       if (!pending.length) return;
-      let folders;
-      for (const document of pending) {
+      let foldersPromise,cursor=0;
+      const mirror=async()=>{while(cursor<pending.length){
+        const document=pending[cursor++];
         try {
           sheetsContext.getStore()?.signal.throwIfAborted();
           if (process.env.GOOGLE_RECONNECT_REQUIRED==='1') throw Object.assign(new Error('Google reconnection is required'),{code:'GOOGLE_RECONNECT_REQUIRED'});
           const c=await one('SELECT * FROM cases WHERE id=$id',{$id:caseId});
           if (!c) return;
-          folders ||= await driveFoldersForCase(c,await one('SELECT * FROM customers WHERE id=$id',{$id:c.customer_id}),await one('SELECT * FROM services WHERE id=$id',{$id:c.service_id}));
+          foldersPromise ||= (async()=>driveFoldersForCase(c,await one('SELECT * FROM customers WHERE id=$id',{$id:c.customer_id}),await one('SELECT * FROM services WHERE id=$id',{$id:c.service_id})))();
+          const folders=await foldersPromise;
           const uploaded=await uploadDriveFile(document.file_name,document.mime_type,folders.caseFolderId,await readStorage(document.storage_path.slice(11)));
           await run('UPDATE documents SET drive_file_id=$drive WHERE id=$id',{$drive:uploaded.id,$id:document.id});
           await run("UPDATE sync_jobs SET status='ok',attempts=attempts+1,last_error=NULL,updated_at=$at WHERE type='drive' AND entity_id=$id",{$id:document.id,$at:now()});
         } catch(error) {
-          await run("UPDATE sync_jobs SET status='failed',attempts=attempts+1,last_error=$error,updated_at=$at WHERE type='drive' AND entity_id=$id",{$id:document.id,$error:error.code || error.message,$at:now()});
+          await run("UPDATE sync_jobs SET status='failed',attempts=attempts+1,last_error=$error,updated_at=$at WHERE type='drive' AND entity_id=$id",{$id:document.id,$error:typeof error.code==='string'?error.code:error.message,$at:now()});
         }
-      }
+      }};
+      await Promise.all(Array.from({length:Math.min(3,pending.length)},mirror));
       if (process.env.SHEETS_MODE==='live') await run("UPDATE sync_jobs SET status='pending',updated_at=$at WHERE type='sheets' AND entity_id=$case",{$case:caseId,$at:now()});
     } finally {
-      await run("UPDATE sync_jobs SET status='ok',updated_at=$at WHERE type='drive-case' AND entity_id=$case",{$case:caseId,$at:now()});
+      const remaining=await one("SELECT COUNT(*) n FROM sync_jobs j JOIN documents d ON d.id=j.entity_id WHERE j.type='drive' AND d.case_id=$case AND d.state='uploaded' AND j.status IN ('pending','failed')",{$case:caseId});
+      await run("UPDATE sync_jobs SET status=$status,updated_at=$at WHERE type='drive-case' AND entity_id=$case",{$case:caseId,$status:remaining.n?'failed':'ok',$at:now()});
     }
   };
-  await sheetsContext.run({signal:AbortSignal.timeout(15000)},sync);
+  await sheetsContext.run({signal:AbortSignal.timeout(30000)},sync);
 }
 async function verifyDriveRoot(folderId = oauthConfig().rootFolderId) {
   try {
