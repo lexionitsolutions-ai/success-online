@@ -95,6 +95,21 @@ test('ration ABC and police forms have download instructions and matching upload
   }
 });
 
+test('New case refreshes stale session forms and does not open old forms if refresh fails',async()=>{
+  const {context,run}=client();
+  context.latestServices=serviceCatalog.map(service=>({...service,id:service.slug,variants:[{...service,id:service.slug}]}));
+  run("me={id:'sales-1'};services=[{id:'old-forms'}];let drawCount=0;drawWizard=()=>drawCount++;closeDrawer=()=>{};api=async path=>{if(path!=='/api/services') throw Error(path);return {services:latestServices,cloudUploads:true,testPricingMode:false};}");
+  await run('startCase()');
+  assert.equal(run('drawCount'),1);
+  assert.equal(run("services.find(s=>s.slug==='police-clearance').variants[0].documents.find(d=>d.label==='Office Letter / NOC').templateUrl"),'/downloads/police-clearance-form.pdf');
+  assert.equal(run('cloudUploads'),true);
+  run("api=async()=>{throw Error('Offline')};draft.step=2");
+  await run('startCase()');
+  assert.equal(run('drawCount'),1,'Failed refresh never opens a stale intake form');
+  assert.equal(run('draft.step'),2,'An existing draft is retained if refresh fails');
+  assert.match(run('messages.at(-1)'),/latest service forms/);
+});
+
 test('overview has collapsed Recent Updates and a completed-case navigation card',()=>{
   const {context,run}=client();
   context.overviewRows=[

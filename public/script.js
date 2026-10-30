@@ -184,6 +184,7 @@ const app = document.querySelector('#app');
 let me = null;
 let cases = [];
 let services = [];
+let startingCase = false;
 let caseNotifications = [];
 let updatesTimer = null;
 let updatesInFlight = false;
@@ -739,7 +740,29 @@ function filterCases(completed = null) {
   if (count) count.textContent = `${number(filtered.length)} ${view === 'pending' ? 'pending' : completed ? 'completed' : 'active'} cases`;
 }
 
-function startCase() { if (drawerBusy) return; closeDrawer(); draft = { step: 1, customer: {}, details: {}, docs: {} }; selectedCase = null; drawWizard(); }
+async function startCase() {
+  if (drawerBusy || startingCase) return;
+  startingCase = true;
+  const userId = me?.id;
+  const button = document.querySelector('.new-case-button');
+  if (button) { button.disabled = true; button.setAttribute('aria-busy','true'); }
+  try {
+    const current = await api('/api/services');
+    if (me?.id !== userId) return;
+    services = current.services;
+    cloudUploads = current.cloudUploads === true;
+    testPricingMode = current.testPricingMode;
+    closeDrawer();
+    draft = { step: 1, customer: {}, details: {}, docs: {} };
+    selectedCase = null;
+    drawWizard();
+  } catch {
+    toast('Could not load the latest service forms. Please try New case again.');
+  } finally {
+    startingCase = false;
+    if (button) { button.disabled = false; button.removeAttribute('aria-busy'); }
+  }
+}
 function drawWizard() {
   const service = services.find(item => item.id === draft.serviceId);
   const variant = service?.variants.find(item => item.id === draft.variantId);
