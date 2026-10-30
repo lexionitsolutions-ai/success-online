@@ -100,7 +100,6 @@ try {
   assert.equal(await field('Birth certificate city').count(),0);
   assert.equal(await field('Birth certificate state').count(),0);
   await field('Applicant under 18?').selectOption('No');
-  await field('Do you have proof confirming the entered address?').selectOption('Yes');
   await page.getByRole('button',{name:'Continue',exact:true}).click();
   const addressFields=['Birth certificate address'];
   for(const label of addressFields) assert.equal(await field(label).getAttribute('aria-invalid'),'true');
@@ -132,14 +131,8 @@ try {
       await summary.click();
       if(service.slug==='domicile-certificate') {
         await birthplace.selectOption('No');
-        const proof=field('Do you have proof confirming the entered address?');
-        await proof.selectOption('No');
-        assert.equal(await page.locator('.affidavit-notice').isVisible(),true);
-        assert.match(await page.locator('.affidavit-notice').innerText(),/additional ₹200/);
-        assert.match(await page.locator('.affidavit-notice').innerText(),/400/);
-        await proof.selectOption('Yes');
+        assert.equal(await field('Do you have proof confirming the entered address?').count(),0);
         assert.equal(await page.locator('.affidavit-notice').count(),0);
-        await proof.selectOption('No');
       }
       assert.equal(await disclosure.evaluate(el=>el.open),true,'Notices remain open after conditional fields change');
       assert.equal(await page.locator('.income-guidance').count(),1,service.name);
@@ -154,7 +147,7 @@ try {
   await page.locator('#service').selectOption('passport');
   await field('Mobile').fill('98abc76');
   assert.equal(await field('Mobile').inputValue(), '9876');
-  assert.equal(await field('Father name').count(),0);
+  assert.equal(await field('Father name').count(),1);
   console.log('All 16 services passed at 390px and 1280px: Marathi checklists, notes and layout; fixed income years and conditional birthplace address validation also passed.');
 } finally {
   await browser.close();

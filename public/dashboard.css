@@ -261,7 +261,7 @@
 .completed-download:focus-visible { outline:3px solid #3977ce; outline-offset:2px; }
 .completed-download svg { width:17px; height:17px; }
 @media(max-width:900px) { .case-table td.completed-download-cell { grid-column:1/-1; grid-row:6; padding-top:10px; border-top:1px solid #edf1f5; } .completed-download { min-height:44px; width:100%; } }
-#serviceFields>.full-width-field { grid-column:1/-1; }
+#serviceFields .full-width-field { grid-column:1/-1; }
 #svcInfo.summary-box { padding:0; border:0; background:transparent; }
 .intake-notices { overflow:hidden; border:1px solid #dce5ef; border-radius:14px; background:#fff; box-shadow:0 3px 12px #18364b05; }
 .intake-notices>summary { display:flex; align-items:center; gap:12px; min-height:78px; padding:18px 20px; list-style:none; cursor:pointer; background:linear-gradient(110deg,#f2f7fc,#fff); }

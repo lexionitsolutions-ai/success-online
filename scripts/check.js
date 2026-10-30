@@ -4,7 +4,7 @@ import './generate-apps-script.js';
 import './generate-supabase-schema.js';
 import './vendor-pdfjs.js';
 import './vendor-marathi.js';
-const required = ['intake-uploads.js','pf-credentials.js','server.js','announcements.js','service-catalog.js','reuploads.js','public/index.html','public/app.js','public/intake-rules.js','public/downloads/income-certificate-form.pdf','public/downloads/talathi-report-form.pdf','public/styles.css','public/mobile.css','public/dashboard.css','.env.example','google-apps-script/Code.gs','README.md'];
+const required = ['intake-uploads.js','pf-credentials.js','server.js','announcements.js','service-catalog.js','reuploads.js','public/index.html','public/app.js','public/intake-rules.js','public/downloads/income-certificate-form.pdf','public/downloads/caste-validity-information-form.pdf','public/downloads/ration-card-abc-dakhla.pdf','public/downloads/police-clearance-form.pdf','public/downloads/talathi-report-form.pdf','public/styles.css','public/mobile.css','public/dashboard.css','.env.example','google-apps-script/Code.gs','README.md'];
 const missing = required.filter(f => !existsSync(f));
 if (missing.length) {
   console.error('Missing files:', missing.join(', '));
@@ -15,5 +15,5 @@ for (const file of ['server.js','announcements.js','database.js','storage.js','i
   const check = spawnSync(process.execPath, ['--check', file], { stdio: 'inherit' });
   if (check.status) process.exit(check.status);
 }
-const test = spawnSync(process.execPath, ['--test', 'tests/background-uploads.test.js', 'tests/shop-services.test.js', 'tests/marathi-input.test.js', 'tests/announcements.test.js', 'tests/income-rules.test.js', 'tests/business.test.js', 'tests/api.test.js', 'tests/ui.test.js', 'tests/postgres.test.js', 'tests/initial-accounts.test.js','tests/payments.test.js','tests/payments-api.test.js','tests/payment-batches.test.js','tests/reuploads.test.js'], { stdio: 'inherit' });
+const test = spawnSync(process.execPath, ['--test', 'tests/service-catalog-sync.test.js', 'tests/background-uploads.test.js', 'tests/shop-services.test.js', 'tests/marathi-input.test.js', 'tests/announcements.test.js', 'tests/income-rules.test.js', 'tests/business.test.js', 'tests/api.test.js', 'tests/ui.test.js', 'tests/postgres.test.js', 'tests/initial-accounts.test.js','tests/payments.test.js','tests/payments-api.test.js','tests/payment-batches.test.js','tests/reuploads.test.js'], { stdio: 'inherit' });
 process.exit(test.status);

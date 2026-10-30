@@ -37,9 +37,9 @@ test('hospital document has Marathi and Hindi labels and is conditional',()=>{
   assert.ok(income.documents.every(d=>d.marathiLabel && !d.marathiLabel.includes('?')));
 });
 
-test('address proof No adds the affidavit fee and Yes removes it',()=>{
+test('obsolete address proof answers no longer add an affidavit fee',()=>{
   const amount={serviceCharge:20000,officialFee:0,tax:0,total:20000};
-  for(const [answer,extra] of [['Yes',0],['No',20000],[undefined,0]]) {
+  for(const [answer,extra] of [['Yes',0],['No',0],[undefined,0]]) {
     const result=withSurcharge(amount,{[IntakeRules.addressProof]:answer});
     assert.equal(result.surcharge,extra);
     assert.equal(result.serviceCharge,20000+extra);

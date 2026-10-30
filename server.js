@@ -13,7 +13,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { waitUntil } from '@vercel/functions';
 import { storage, storageEnabled, signedDownload, signedPreview, readStorage, writeStorage, downloadFileLimit } from './storage.js';
 import { serviceCatalog } from './service-catalog.js';
-import { syncServiceForms } from './service-catalog-sync.js';
+import { currentServiceForms, applyCurrentServiceForm } from './service-catalog-sync.js';
 import { PF_PASSWORD_KEY, encryptPFPassword, decryptPFPassword, publicCaseDetails } from './pf-credentials.js';
 import { INTAKE_UPLOADS, createUploadBatch, uploadBatchState, uploadManifestEntry } from './intake-uploads.js';
 import { sheetHeaders, serviceTabs } from './operations-schema.js';
@@ -31,7 +31,10 @@ const DEMO_ROOT = process.env.STORAGE_PATH || (process.env.VERCEL ? join(tmpdir(
 const RECEIVED_DOCUMENT_TYPE = 'Received Document';
 if (!process.env.VERCEL) mkdirSync(DEMO_ROOT, { recursive: true });
 export const db = createDatabase();
-const { one, all, run } = db;
+const { run } = db;
+let activeServiceForms = new Map();
+const one = async (...args) => applyCurrentServiceForm(await db.one(...args), activeServiceForms);
+const all = async (...args) => (await db.all(...args)).map(row => applyCurrentServiceForm(row, activeServiceForms));
 const deferredSheets = new AsyncLocalStorage();
 const deferredDrive = new AsyncLocalStorage();
 const sheetsContext = new AsyncLocalStorage();
@@ -541,7 +544,7 @@ function analyticsPeriod(key) {
 }
 async function recomputeCase(id, {sync=true} = {}) {
   const c = (await one('SELECT * FROM cases WHERE id=$id' + (db.cloud ? ' FOR UPDATE' : ''), { $id: id }));
-  const docsReq = json((await one('SELECT documents_json FROM variants WHERE id=$id', { $id: c.variant_id })), 'documents_json', []);
+  const docsReq = json((await one('SELECT id,documents_json FROM variants WHERE id=$id', { $id: c.variant_id })), 'documents_json', []);
   const docs = (await all('SELECT * FROM documents WHERE case_id=$id AND state!=$state', { $id: id, $state: 'replaced' }));
   const have = new Set(docs.map(d => d.doc_type));
   const details = json(c, 'details_json', {});
@@ -603,7 +606,7 @@ async function readDocument(document) {
   return readFileSync(path);
 }
 async function missingDocuments(c) {
-  const requirements = json((await one('SELECT documents_json FROM variants WHERE id=$id', { $id: c.variant_id })), 'documents_json', []);
+  const requirements = json((await one('SELECT id,documents_json FROM variants WHERE id=$id', { $id: c.variant_id })), 'documents_json', []);
   const details = json(c, 'details_json', {});
   const have = new Set((await all("SELECT doc_type FROM documents WHERE case_id=$id AND state='uploaded'", { $id: c.id })).map(d => d.doc_type));
   return requirements.filter(d => d.required && matchesIntake(d.when, details, true) && !have.has(d.label)).map(d => d.label);
@@ -821,7 +824,7 @@ async function routeApi(req, res, url) {
       if (!matchesIntake(field.when, b.details)) continue;
       const value = String(b.details?.[field.label] ?? '').trim();
       if (!field.allowNumbers && /\bname\b|\bsurname\b/i.test(field.label) && /\p{N}/u.test(value)) return send(res, 400, { error: `${field.label} cannot contain numbers` });
-      if (field.marathiInput && /[A-Za-z]/.test(value)) return send(res, 400, { error: `Enter ${field.label} in Marathi` });
+      if (field.marathiInput && value && !IntakeRules.isMarathiName(value)) return send(res, 400, { error: `Enter ${field.label} in Marathi` });
       if (field.required && !value) return send(res, 400, { error: `Enter ${field.label}` });
       if (field.type === 'select' && (value || !field.optional) && !field.options.includes(value)) return send(res, 400, { error: `Choose ${field.label}` });
       if (value && field.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return send(res, 400, { error: `Invalid ${field.label}` });
@@ -884,7 +887,7 @@ async function routeApi(req, res, url) {
     if (req.method === 'POST' && caseMatch[2] === 'request-reupload') return body(req).then(async b => {
       if (!['backoffice','admin'].includes(user.role)) return send(res,403,{error:'Only back office or admin can request a reupload'});
       if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res,409,{error:'This case is closed for corrections'});
-      const variant=await one('SELECT documents_json FROM variants WHERE id=$id',{$id:c.variant_id});
+      const variant=await one('SELECT id,documents_json FROM variants WHERE id=$id',{$id:c.variant_id});
       const allowed=json(variant,'documents_json',[]).map(doc=>doc.label);
       if (!Array.isArray(b.documentTypes) || !b.documentTypes.length || b.documentTypes.some(type=>!allowed.includes(type))) return send(res,400,{error:'Select valid checklist documents to reupload'});
       const reason=String(b.reason || '').trim();
@@ -956,7 +959,7 @@ async function routeApi(req, res, url) {
       const b = await body(req);
       if (!storageEnabled()) return send(res,503,{error:'Private cloud document storage is not configured.'});
       if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res,409,{error:'This case is closed for uploads'});
-      const variant = await one('SELECT documents_json FROM variants WHERE id=$id',{$id:c.variant_id});
+      const variant = await one('SELECT id,documents_json FROM variants WHERE id=$id',{$id:c.variant_id});
       if (b.docType === RECEIVED_DOCUMENT_TYPE ? !['backoffice','admin'].includes(user.role) || c.status !== 'Document Received' : !json(variant,'documents_json',[]).some(d => d.label === b.docType)) return send(res,403,{error:'Document type or role is not allowed for this case.'});
       if (typeof b.fileName !== 'string' || !b.fileName || b.fileName.length > 255 || !['image/jpeg','image/png','application/pdf'].includes(b.mimeType) || !Number.isInteger(b.size) || b.size <= 0 || b.size > 10000000) return send(res,400,{error:'Choose JPG, PNG or PDF up to 10 MB.'});
       const uploadId = id('upload'), path = `staging/${c.id}/${randomUUID()}`;
@@ -986,7 +989,7 @@ async function routeApi(req, res, url) {
         return send(res,200,{ok:true,documentId:manifestFile.documentId});
       }
       if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res, 409, { error: 'This case is closed for uploads' });
-      const variant = (await one('SELECT documents_json FROM variants WHERE id=$id', { $id: c.variant_id }));
+      const variant = (await one('SELECT id,documents_json FROM variants WHERE id=$id', { $id: c.variant_id }));
       const allowed = json(variant, 'documents_json', []).map(d => d.label);
       const multiple = json(variant, 'documents_json', []).some(d => d.label === b.docType && d.multiple);
       const isReceivedDocument = b.docType === RECEIVED_DOCUMENT_TYPE;
@@ -1230,7 +1233,6 @@ async function preserveServicePrices() {
 }
 let initialization;
 export async function initialize({setup = false} = {}) {
-  if (db.cloud && !setup) await syncServiceForms(db);
   if (setup || !db.cloud) {
     if (!db.cloud) await migrate();
     await db.transaction(async () => {
@@ -1244,6 +1246,7 @@ export async function initialize({setup = false} = {}) {
       await run("UPDATE cases SET payment_state='unpaid',status=CASE WHEN status='Ready for Assignment' THEN 'Awaiting Payment' ELSE status END WHERE payment_state='paid' AND EXISTS (SELECT 1 FROM payments WHERE payments.case_id=cases.id AND gateway='demo') AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.case_id=cases.id AND status IN ('PAID','verified','offline_approved') AND gateway!='demo')");
     });
   }
+  activeServiceForms = currentServiceForms(await db.all('SELECT v.id,v.name,s.slug FROM variants v JOIN services s ON s.id=v.service_id'));
   for (const setting of await all('SELECT name,value FROM integration_settings')) process.env[setting.name] = setting.value;
   servicePrices=new Map((await all('SELECT variant_id,price,original_config FROM service_prices')).map(p=>[p.variant_id,{price:p.price,original:JSON.parse(p.original_config)}]));
 }

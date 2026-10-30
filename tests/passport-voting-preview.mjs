@@ -39,8 +39,42 @@ try {
       input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
     });
     assert.equal(await field('Mobile').inputValue(), '9876');
+    await field('Mobile').fill('9876543210');
+    const passportDetails={Email:'passport@example.com','Birth place':'Kolhapur','Police station':'Shahupuri','Emergency number':'9876543211','Mother name':'Test Mother','Father name':'Test Father',Education:'Graduate'};
+    for(const [label,value] of Object.entries(passportDetails)) await field(label).fill(value);
+    await field('Occupation').selectOption('Student');
+    await field('Passport application type').selectOption('New');
+    await field('Applicant under 18?').selectOption('No');
+    await field('Name change or correction?').selectOption('No');
+    assert.equal(await field('Old name').count(),0);
+    await field('Name change or correction?').selectOption('Yes');
+    await page.getByRole('button',{name:'Continue',exact:true}).click();
+    assert.equal(await field('Old name').getAttribute('aria-invalid'),'true');
+    assert.equal(await field('Wife name').inputValue(),'');
+    assert.notEqual(await field('Wife name').getAttribute('aria-invalid'),'true');
+    await field('Old name').fill('Previous Name');
+    for(const language of ['mr','en']) {
+      await page.locator(`[data-intake-language="${language}"]`).click();
+      assert.equal(await field('Old name').inputValue(),'Previous Name');
+    }
+    await field('Name change or correction?').selectOption('No');
+    assert.equal((await page.evaluate(()=>window.currentDetails()))['Old name'],undefined);
+    await field('Name change or correction?').selectOption('Yes');
+    await field('Old name').fill('Previous Name');
+    await page.locator('.intake-notices').evaluate(details=>details.open=true);
+    const notices=await page.locator('.notice-content').innerText();
+    for(const term of ['PAN Card','Aadhaar Card','birth place','police station','emergency number','mother name','father name','wife name','education','Employee','Self-employed','Student','Retailer','old name']) assert.ok(notices.toLowerCase().includes(term.toLowerCase()),`${term}: ${notices}`);
+    await page.screenshot({path:`deliverables/voting-card/passport-${width}.png`,fullPage:true});
+    await page.getByRole('button',{name:'Continue',exact:true}).click();
+    assert.equal(await page.locator('.doc input[type=file]').count(),3);
+    await page.evaluate(catalog=>window.setupService(catalog,'food-license'),serviceCatalog);
+    const foodHeadings=await page.locator('#serviceFields label').evaluateAll(labels=>labels.map(label=>[...label.childNodes].filter(node=>node.nodeType===Node.TEXT_NODE).map(node=>node.textContent).join('').trim()));
+    for(const heading of ['Shop name','Email ID','Shop address','Shop owned or rented','Nature of business','Mobile number','Business type']) assert.ok(foodHeadings.includes(heading),heading);
+    assert.ok(foodHeadings.every(heading=>heading.length<30),foodHeadings.join(', '));
+    await page.screenshot({path:`deliverables/voting-card/food-license-${width}.png`,fullPage:true});
     for (const choice of choices) {
       await page.evaluate(catalog => window.setupService(catalog, 'voting-card'), serviceCatalog);
+      assert.deepEqual(await field('Voting card application type').locator('option').evaluateAll(options=>options.filter(option=>option.value).map(option=>option.value)),['New','Correction']);
       await field('Mobile').fill('9876543210');
       assert.equal(await field('Voting card field to correct').count(), 0);
       await field('Voting card application type').selectOption('Correction');
@@ -55,25 +89,25 @@ try {
       assert.equal(await corrected.inputValue(), text);
       await page.locator('[data-intake-language="en"]').click();
       await page.getByRole('button', { name: 'Continue', exact: true }).click();
-      assert.equal(await page.locator('.doc input[type=file]').count(), 2, choice);
-      assert.doesNotMatch(await page.locator('#wizard').innerText(), /Old \/ Previous Voting Card/);
+      assert.equal(await page.locator('.doc input[type=file]').count(), 3, choice);
+      assert.match(await page.locator('#wizard').innerText(), /Old \/ Previous Voting Card/);
     }
     await page.evaluate(catalog => window.setupService(catalog, 'voting-card'), serviceCatalog);
     await field('Mobile').fill('9876543210');
     await field('Voting card application type').selectOption('Correction');
     await field('Voting card field to correct').selectOption('Name');
     await field('Corrected applicant name').fill('Correct Person');
-    await field('Voting card application type').selectOption('Renew');
+    await field('Voting card application type').selectOption('New');
     assert.equal(await field('Corrected applicant name').count(), 0);
     assert.equal((await page.evaluate(() => window.currentDetails()))['Corrected applicant name'], undefined);
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    assert.equal(await page.locator('.doc input[type=file]').count(), 3);
-    assert.match(await page.locator('#wizard').innerText(), /Old \/ Previous Voting Card/);
-    await page.screenshot({ path: `deliverables/voting-card/renew-${width}.png` });
+    assert.equal(await page.locator('.doc input[type=file]').count(), 2);
+    assert.doesNotMatch(await page.locator('#wizard').innerText(), /Old \/ Previous Voting Card/);
+    await page.screenshot({ path: `deliverables/voting-card/new-${width}.png` });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   }
   assert.deepEqual(errors, []);
-  console.log('Desktop/mobile: Passport rejects typed/pasted letters and caps at 10 digits; eight Voting Card corrections require corrected details; Renew requires old-card upload; switching modes removes stale corrections.');
+  console.log('Desktop/mobile: Passport rejects typed/pasted letters and caps at 10 digits; eight Voting Card corrections require corrected details; Corrections require old-card upload; New has no old-card upload; passport wife name is optional; switching modes removes stale corrections.');
 } finally {
   await browser.close();
 }

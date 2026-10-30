@@ -63,7 +63,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
       if (service.slug === 'gazette') for (const field of v.fields.filter(f=>f.when?.equals==='English')) details[field.label]='Test';
       if (service.slug === 'pf-assistance') Object.assign(details,pfDetails);
       if (service.slug === 'voting-card') details.Mobile='9876543210';
-      if (service.slug === 'passport') Object.assign(details, {Mobile:'9876543210',Email:'passport@example.com','Name change or correction?':'No'});
+      if (service.slug === 'passport') Object.assign(details, {Mobile:'9876543210',Email:'passport@example.com','Birth place':'Kolhapur','Police station':'Shahupuri','Emergency number':'9876543211','Mother name':'Test Mother','Father name':'Test Father',Education:'Graduate','Name change or correction?':'No'});
       if (service.slug === 'ews-certificate') details['Applicant caste']='Test Caste';
       if (service.slug === 'food-license') Object.assign(details, {'Shop name':'Food Shop 123','Business email':'food@example.com','Shop address':'Kolhapur','Business type':'Restaurant','Business mobile number':'9876543210','Owner / partner names':'Asha Patil','Business investment':'100000','GST registered?':'No'});
       if (service.slug === 'shop-act') Object.assign(details, {'Shop name':'Shop 123','Business email':'shop@example.com','Business start date':'2026-10-01','Shop address':'Kolhapur','Male workers':'0','Female workers':'0','Business type':'Retail','Business mobile number':'9876543210','Owner / partner names':'Asha Patil','Years at Aadhaar address':'5','Shop size (sq. ft.)':'250','Business investment':'100000','GST registered?':'No'});
@@ -102,11 +102,11 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const oneAnswerRation = await request('/api/cases',{cookie:sales,body:{...rationPayload,details:{'Add a member?':'Yes'}}});
     assert.equal(oneAnswerRation.status,201);
     const oneRationRequirements = oneAnswerRation.data.case.variant.documents.filter(doc=>doc.required && IntakeRules.matches(doc.when,oneAnswerRation.data.case.details,true));
-    assert.equal(oneRationRequirements.length,9);
+    assert.equal(oneRationRequirements.length,10);
     const validity = services.find(service=>service.slug==='caste-validity').variants[0];
     assert.deepEqual(validity.fields.map(field=>field.label),['Caste Validity Certificate required for','Applicant under 18?']);
-    assert.equal(validity.documents.length,12);
-    assert.equal(validity.documents.filter(doc=>doc.required).length,11);
+    assert.equal(validity.documents.length,13);
+    assert.equal(validity.documents.filter(doc=>doc.required).length,12);
     assert.equal(new Set(validity.documents.map(doc=>doc.section)).size,5);
     assert.equal(validity.documents.find(doc=>doc.label==='Family Member Caste Validity Record').required,false);
     const validityPayload={variantId:validity.id,customer:{name:'Validity Trial',mobile:'9876543210'},consent:true};
@@ -148,18 +148,26 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const gazetteService=services.find(s=>s.slug==='gazette');
     assert.equal(gazetteService.name,'Gazette');
     const gazette=gazetteService.variants[0];
+    const staleForms = new DatabaseSync(join(root,'test.sqlite'));
+    staleForms.prepare('UPDATE variants SET fields_json=?,documents_json=?,instructions=? WHERE id=?').run('[{"label":"Old first name (Marathi)","required":true}]','[]','Older deployment definition',gazette.id);
+    staleForms.close();
+    const gazetteAfterOverwrite=(await request('/api/services',{cookie:sales})).data.services.find(s=>s.slug==='gazette').variants[0];
+    assert.deepEqual(gazetteAfterOverwrite.fields,gazette.fields,'A shared database overwrite cannot restore the six-field form');
+    assert.deepEqual(gazetteAfterOverwrite.documents,gazette.documents,'Upload requirements use the same running form version');
     const gazettePayload={variantId:gazette.id,customer:{name:'Gazette Trial',mobile:'9876543210'},consent:true};
     assert.equal((await request('/api/cases',{cookie:sales,body:{...gazettePayload,details:{'Gazette language':'English'}}})).status,400);
     const marathiDetails={'Gazette language':'Marathi','Reason for name change':'Marriage',...Object.fromEntries(gazette.fields.filter(f=>f.marathiInput).map(f=>[f.label,'राम']))};
-    const invalidMarathi={...marathiDetails,'Old first name (Marathi)':'Ram'};
-    assert.equal((await request('/api/cases',{cookie:sales,body:{...gazettePayload,details:invalidMarathi}})).status,400);
-    const marathiCase=await request('/api/cases',{cookie:sales,body:{...gazettePayload,details:{...marathiDetails,'Old first name (English)':'Discard'}}});
+    for(const value of ['Ram','123','राम 123','Ελληνικά','राम Ελληνικά']) {
+      const invalidMarathi={...marathiDetails,'Old full name (Marathi)':value};
+      assert.equal((await request('/api/cases',{cookie:sales,body:{...gazettePayload,details:invalidMarathi}})).status,400);
+    }
+    const marathiCase=await request('/api/cases',{cookie:sales,body:{...gazettePayload,details:{...marathiDetails,'Old full name (English)':'Discard'}}});
     assert.equal(marathiCase.status,201);
-    assert.equal(marathiCase.data.case.details['Old first name (Marathi)'],'राम');
-    assert.equal(marathiCase.data.case.details['Old first name (English)'],undefined);
+    assert.equal(marathiCase.data.case.details['Old full name (Marathi)'],'राम');
+    assert.equal(marathiCase.data.case.details['Old full name (English)'],undefined);
     const caste=services.find(s=>s.slug==='caste-certificate').variants[0];
     assert.equal(caste.amounts.total,40000);
-    assert.equal(caste.documents.find(d=>d.label==='Income Certificate').required,true);
+    assert.equal(caste.documents.some(d=>d.label==='Income Certificate'),false);
     const domicile = services.find(s => s.slug === 'domicile-certificate').variants[0];
     assert.equal(services.find(s => s.slug === 'domicile-certificate').name, 'Age Nationality & Domicile Certificate');
     assert.ok(domicile.fields.every(field => field.label !== 'Applicant birth place'));
@@ -180,7 +188,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal(adult.data.case.details['Applicant birth date'],undefined);
     assert.equal(adult.data.case.details['Applicant or beneficiary'],undefined);
     assert.equal(adult.data.case.details['Birth certificate address'],undefined);
-    const outsideDetails = {'Do you have proof confirming the entered address?':'Yes','Applicant under 18?':'No','Is beneficiary birth place in Maharashtra?':'No','Birth certificate address':'House 10, Market Road, Belagavi, Karnataka'};
+    const outsideDetails = {'Applicant under 18?':'No','Is beneficiary birth place in Maharashtra?':'No','Birth certificate address':'House 10, Market Road, Belagavi, Karnataka'};
     assert.ok(!domicile.fields.some(field=>['Birth certificate city','Birth certificate state'].includes(field.label)));
     for (const key of ['Birth certificate address']) {
       for (const value of ['', '   ']) assert.equal((await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{...outsideDetails,[key]:value}}})).status,400,`${key} is required outside Maharashtra`);
@@ -190,12 +198,12 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     for (const [key,value] of Object.entries(outsideDetails)) assert.equal(outside.data.case.details[key],value);
     assert.equal(outside.data.case.details['Birth certificate city'],undefined);
     assert.equal(outside.data.case.details['Birth certificate state'],undefined);
-    for(const [answer,expected] of [['Yes',20000],['No',40000]]) {
+    for(const [answer,expected] of [['Yes',20000],['No',20000]]) {
       const details={...outsideDetails,'Do you have proof confirming the entered address?':answer,'Ration card area':'City','Is Talathi Report available?':'No','Will you bring a signed Talathi Report?':'No'};
       const created=await request('/api/cases',{cookie:sales,body:{...domicilePayload,details,amount:1}});
       assert.equal(created.status,201);
       assert.equal(created.data.case.amounts.total,expected);
-      assert.equal(created.data.case.details['Do you have proof confirming the entered address?'],answer);
+      assert.equal(created.data.case.details['Do you have proof confirming the entered address?'],undefined);
       assert.equal(created.data.case.details['Ration card area'],undefined,'Unrelated service fee selectors are discarded');
       for(let retry=0;retry<2;retry++) {
         const order=await request(`/api/cases/${created.data.case.id}/payment-order`,{cookie:sales,method:'POST'});
@@ -205,7 +213,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
       }
       assert.equal((await request(`/api/cases/${created.data.case.id}`,{cookie:sales})).data.case.amounts.total,expected);
     }
-    for(const value of [undefined,'','Maybe']) assert.equal((await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{...outsideDetails,'Do you have proof confirming the entered address?':value}}})).status,400);
+    for(const value of [undefined,'','Maybe']) assert.equal((await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{...outsideDetails,'Do you have proof confirming the entered address?':value}}})).status,201);
     assert.equal((await request('/api/cases',{cookie:sales,body:{...domicilePayload,details:{...outsideDetails,'Is beneficiary birth place in Maharashtra?':'Maybe'}}})).status,400);
     const payload = { variantId:variant.id, customer:{ name:'Trial Customer', mobile:'9876543210' }, details:{ 'Years of Certificate Required':'1 year','Reason for application':'Banking', 'Income amount required on certificate (₹)':'150000', 'Ration card colour':'Yellow', 'Ration card area':'City', 'Is Talathi Report available?':'No', 'Will you bring a signed Talathi Report?':'Yes' }, consent:true };
     const annualFields = variant.fields.filter(field => field.when?.equals === '3 years');

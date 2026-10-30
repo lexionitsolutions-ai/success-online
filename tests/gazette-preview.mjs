@@ -32,42 +32,41 @@ try {
     assert.equal(await page.locator('.intake-field-section').count(),0);
     await field('Gazette language').selectOption('English');
     await field('Reason for name change').selectOption('Marriage');
-    assert.deepEqual(await page.locator('legend').allTextContents(),['From Name','To Name']);
-    assert.equal(await page.locator('#serviceFields input').count(),6);
+    assert.deepEqual(await page.locator('legend').allTextContents(),['Old name','New name']);
+    assert.equal(await page.locator('#serviceFields input').count(),2);
     await page.getByRole('button',{name:'Continue',exact:true}).click();
-    assert.equal(await page.locator('.field-invalid').count(),6);
+    assert.equal(await page.locator('.field-invalid').count(),2);
     for(const input of await page.locator('#serviceFields input').all()) await input.fill('Old Name');
     await screenshot(`deliverables/gazette/english-${width}.png`);
     await field('Gazette language').selectOption('Marathi');
-    assert.deepEqual(await page.locator('legend').allTextContents(),['From Name','To Name']);
+    assert.deepEqual(await page.locator('legend').allTextContents(),['Old name','New name']);
     await page.evaluate(()=>window.setIntakeLanguage('mr'));
     assert.deepEqual(await page.locator('legend').allTextContents(),['जुने नाव','नवीन नाव']);
     await page.evaluate(()=>window.setIntakeLanguage('en'));
-    assert.equal(await page.locator('[data-marathi-input]').count(),6);
+    assert.equal(await page.locator('[data-marathi-input]').count(),2);
     for (const input of await page.locator('[data-marathi-input]').all()) assert.equal(await input.isVisible(),true,'Marathi name fields must stay visible when the interface language is English');
-    assert.equal(await field('Old first name (English)').count(),0);
+    assert.equal(await field('Old full name (English)').count(),0);
     await page.getByRole('button',{name:'Continue',exact:true}).click();
-    assert.equal(await page.locator('.field-invalid').count(),6);
-    await field('Old first name (Marathi)').pressSequentially('raahul');
-    assert.match(await page.locator('.marathi-preview').first().textContent(),/राहुल/);
-    await field('Old first name (Marathi)').press('Space');
-    assert.equal((await field('Old first name (Marathi)').inputValue()).trim(),'राहुल');
-    for(const kind of ['Old','New']) {
-      await field(`${kind} first name (Marathi)`).fill('राम');
-      await field(`${kind} father name (Marathi)`).fill('suresh');
-      await field(`${kind} last name (Marathi)`).pressSequentially('paaTiila');
-      await field(`${kind} last name (Marathi)`).press('Tab');
-      assert.equal(await field(`${kind} last name (Marathi)`).inputValue(),'पाटील');
+    assert.equal(await page.locator('.field-invalid').count(),2);
+    const oldName=field('Old full name (Marathi)');
+    for(const key of 'raahul suresh paaTiila') {
+      await oldName.pressSequentially(key);
+      assert.doesNotMatch(await oldName.inputValue(),/[A-Za-z]/,'Latin letters never appear while typing');
     }
+    assert.equal(await oldName.inputValue(),'\u0930\u093e\u0939\u0941\u0932 \u0938\u0941\u0930\u0947\u0936 \u092a\u093e\u091f\u0940\u0932');
+    const newName=field('New full name (Marathi)');
+    await newName.fill('raama suresh paaTiila 123 \u0391\u03bb\u03c6\u03b1');
+    assert.doesNotMatch(await newName.inputValue(),/[A-Za-z0-9\u0370-\u03ff]/);
+    await newName.fill('\u0930\u093e\u092e \u0938\u0941\u0930\u0947\u0936 \u092a\u093e\u091f\u0940\u0932');
     assert.equal(await page.locator('.field-invalid').count(),0,'Converted Marathi names clear validation warnings');
     assert.equal(await page.locator('.panel').evaluate(el=>el.scrollWidth>el.clientWidth),false);
     await screenshot(`deliverables/gazette/marathi-${width}.png`);
     await page.getByRole('button',{name:'Continue',exact:true}).click();
     assert.equal(await page.locator('.steps .on').textContent(),'3Documents');
     await page.getByRole('button',{name:'Back',exact:true}).click();
-    assert.equal(await field('New father name (Marathi)').inputValue(),'सुरेश');
+    assert.equal(await field('New full name (Marathi)').inputValue(),'\u0930\u093e\u092e \u0938\u0941\u0930\u0947\u0936 \u092a\u093e\u091f\u0940\u0932');
     await field('Gazette language').selectOption('English');
-    assert.equal(await field('Old first name (English)').inputValue(),'');
+    assert.equal(await field('Old full name (English)').inputValue(),'');
     for(const input of await page.locator('#serviceFields input').all()) await input.fill('Test');
     for(const [reason,count] of [['Marriage',6],['Correction of incorrect name',5],['Other name change',4]]) {
       await field('Reason for name change').selectOption(reason);
@@ -85,8 +84,8 @@ try {
     }
     await page.evaluate(catalog=>window.setupGazette(catalog,'caste-certificate',3),serviceCatalog);
     const other=page.locator('.caste-document-section').last();
-    assert.match(await other.textContent(),/Income Certificate/);
-    assert.equal(await page.locator('.doc').count(),9);
+    assert.doesNotMatch(await other.textContent(),/Income Certificate/);
+    assert.equal(await page.locator('.doc').count(),8);
   }
   assert.deepEqual(errors,[]);
   console.log('Gazette language switching, required names, phonetic/native Marathi input, persistence, and Caste Certificate document groups passed at 390px and 1280px.');

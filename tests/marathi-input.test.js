@@ -18,8 +18,8 @@ test('Marathi phonetic input converts words, preserves native text and handles e
   listeners.input({target:input,data:' ',isComposing:true});
   assert.equal(input.value,'raama ','Native IME composition is left alone');
   listeners.input({target:input,data:'a',isComposing:false});
-  assert.equal(input.value,'raama ');
-  assert.match(preview,/राम/);
+  assert.equal(input.value,'राम ');
+  assert.equal(preview,'');
   listeners.input({target:input,data:' ',isComposing:false});
   assert.equal(input.value,'राम ');
   assert.equal(input.selectionStart,4);
@@ -27,4 +27,7 @@ test('Marathi phonetic input converts words, preserves native text and handles e
   commit(input);
   assert.equal(input.value,'राहुल पाटील');
   assert.equal(input.selectionStart,5);
+  input.value='राम 123 abc Ελληνικά';input.selectionStart=input.value.length;
+  commit(input);
+  assert.doesNotMatch(input.value,/[A-Za-z0-9]|Ελληνικά/);
 });

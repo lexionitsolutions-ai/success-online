@@ -55,9 +55,12 @@ try {
     await page.evaluate(catalog => window.setupIntake(catalog, 'passport'), serviceCatalog);
     await field('Mobile').fill('9876543210');
     await field('Email').fill('test@example.com');
+    for(const [label,value] of Object.entries({'Birth place':'Kolhapur','Police station':'Shahupuri','Emergency number':'9876543211','Mother name':'Test Mother','Father name':'Test Father','Wife name':'Not applicable',Education:'Graduate'})) await field(label).fill(value);
+    await field('Occupation').selectOption('Employee');
     await field('Passport application type').selectOption('Renew');
     await field('Applicant under 18?').selectOption('No');
     await field('Name change or correction?').selectOption('Yes');
+    await field('Old name').fill('Previous Name');
     const state = await page.evaluate(() => window.languageState());
     for (const language of ['mr', 'en']) {
       await page.locator(`[data-intake-language="${language}"]`).click();
@@ -85,7 +88,7 @@ try {
     await page.evaluate(catalog => window.setupIntake(catalog, 'passport'), serviceCatalog);
     assert.equal(await page.locator('#drawer').getAttribute('lang'), 'mr', 'Preference persists when reopening');
     assert.equal(await page.evaluate(() => localStorage.getItem('success-online.intake-language')), 'mr');
-    for (const scenario of [{change:'No',home:'Owned',white:'No',reason:null,count:7},{change:'Yes',home:'Rented',white:'Yes',reason:'Death',count:17},{change:'Yes',home:'Rented',white:'Yes',reason:'Separation',count:17}]) {
+    for (const scenario of [{change:'No',home:'Owned',white:'No',reason:null,count:8},{change:'Yes',home:'Rented',white:'Yes',reason:'Death',count:18},{change:'Yes',home:'Rented',white:'Yes',reason:'Separation',count:18}]) {
       await page.evaluate(catalog => window.setupIntake(catalog, 'ration-card'), serviceCatalog);
       await page.locator('[data-intake-language="en"]').click();
       const questions = ['Add a member?', 'Add a member due to marriage?', 'Remove a member?', 'Remove a member due to marriage?', 'Change ration card address?'];
@@ -109,7 +112,7 @@ try {
     await page.locator('[data-intake-language="en"]').click();
     await field('Add a member?').selectOption('Yes');
     await page.getByRole('button',{name:'Continue',exact:true}).click();
-    assert.equal(await page.locator('.doc input[type=file]').count(),9,'One Ration Card answer proceeds without requiring unanswered questions');
+    assert.equal(await page.locator('.doc input[type=file]').count(),10,'One Ration Card answer proceeds without requiring unanswered questions');
     for (const updated of ['No','Yes']) {
       await page.evaluate(catalog => window.setupIntake(catalog, 'pf-assistance'), serviceCatalog);
       await page.locator('[data-intake-language="en"]').click();

@@ -39,6 +39,62 @@ test('all services render Marathi document checklists and separate bilingual not
   }
 });
 
+test('caste validity form is downloadable in guidance and upload views and is required to continue',()=>{
+  const {context,run}=client();
+  context.service=serviceCatalog.find(service=>service.slug==='caste-validity');
+  context.form=context.service.documents.find(doc=>doc.templateUrl);
+  assert.equal(readFileSync(`public${context.form.templateUrl}`).subarray(0,5).toString(),'%PDF-');
+  run("draft={step:3,details:{},docs:{}};me={role:'sales'}");
+  assert.match(run('serviceGuidance(service,service,{})').split('<details')[0],/href="\/downloads\/caste-validity-information-form.pdf" download/);
+  for(const markup of [
+    run('serviceGuidance(service,service,{})'),
+    run('wizardDocumentUploads(service,service.documents)'),
+    run("documentChecklist({id:'case-1',status:'Draft',variant:service,details:{}},[])")
+  ]) {
+    assert.match(markup,/href="\/downloads\/caste-validity-information-form.pdf" download/);
+  }
+  run("for(const doc of service.documents.filter(doc=>doc.required && doc!==form)) draft.docs[doc.label]={fileName:'proof.pdf'}");
+  assert.match(run('wizardBody(service,service)'),/onclick="saveStep3\(\)" disabled/);
+  run("draft.docs[form.label]={fileName:'completed-form.pdf'}");
+  assert.doesNotMatch(run('wizardBody(service,service)'),/onclick="saveStep3\(\)" disabled/);
+});
+
+test('EWS preserves saved ancestor uploads, explains the area limit and allows omitting other documents',()=>{
+  const {context,run}=client();
+  context.location={origin:'https://example.test'};
+  context.service=serviceCatalog.find(service=>service.slug==='ews-certificate');
+  run("draft={step:3,details:{},docs:{}};me={role:'sales'}");
+  const saved=run("documentChecklist({id:'case-1',ref:'SO-TEST',customer:{name:'Test Applicant',mobile:'9876543210'},status:'Draft',variant:service,details:{}},[{id:'doc-1',doc_type:'Relative School Leaving Certificate (pre-1967)',file_name:'ancestor-proof.pdf',version:1,download_url:'/proof.pdf'}])");
+  assert.match(saved,/Grandfather \/ Great-grandfather School Leaving Certificate/);
+  assert.match(saved,/ancestor-proof.pdf/);
+  assert.doesNotMatch(saved,/aunt, or uncle/);
+  assert.match(saved,/less than 1,000 square feet/);
+  assert.match(saved,/ॲसेसमेंट उताऱ्यात दिलेले क्षेत्रफळ/);
+  assert.match(saved,/Optional supporting document/);
+  run("for(const doc of service.documents.filter(doc=>doc.required)) draft.docs[doc.label]={fileName:'proof.pdf'}");
+  assert.equal(run("draft.docs['Other Document']"),undefined);
+  assert.doesNotMatch(run('wizardBody(service,service)'),/onclick="saveStep3\(\)" disabled/);
+});
+
+test('ration ABC and police forms have download instructions and matching upload slots',()=>{
+  const {context,run}=client();
+  run("draft={step:3,details:{},docs:{}};me={role:'sales'}");
+  for(const [slug,label,path,note] of [
+    ['ration-card','Ration Shop A.B.C. Certificate','/downloads/ration-card-abc-dakhla.pdf',/signature and stamp from the ration retail store/],
+    ['police-clearance','Office Letter / NOC','/downloads/police-clearance-form.pdf',/fill in the supplied police clearance form/]
+  ]) {
+    context.service=serviceCatalog.find(s=>s.slug===slug);
+    const requirement=context.service.documents.find(doc=>doc.label===label);
+    assert.equal(requirement.templateUrl,path);
+    assert.match(requirement.note,note);
+    assert.equal(readFileSync(`public${path}`).subarray(0,5).toString(),'%PDF-');
+    assert.match(run('serviceGuidance(service,service,{})').split('<details')[0],new RegExp(path));
+    assert.match(run('wizardDocumentUploads(service,service.documents)'),new RegExp(path));
+    assert.match(run("documentChecklist({id:'test',status:'Draft',variant:service,details:{}},[])"),new RegExp(path));
+    assert.equal(requirement.required,true);
+  }
+});
+
 test('overview has collapsed Recent Updates and a completed-case navigation card',()=>{
   const {context,run}=client();
   context.overviewRows=[
@@ -96,22 +152,25 @@ test('background announcement updates preserve an open admin composer',async()=>
   assert.match(feed.innerHTML,/New update/);
 });
 
-test('domicile affidavit fee is visible with notices closed and matches the review total',()=>{
+test('domicile always requires address proof and never offers the removed affidavit path',()=>{
   const {context,run}=client();
-  context.domicileService=serviceCatalog.find(service=>service.slug==='domicile-certificate');
-  context.domicileVariant={documents:context.domicileService.documents,instructions:context.domicileService.instructions,amounts:{serviceCharge:20000,officialFee:0,tax:0,total:20000}};
-  run("draft.step=4;draft.details={'Do you have proof confirming the entered address?':'No'};draft.customer={name:'Test Applicant',mobile:'9876543210'}");
-  const markup=run('serviceGuidance(domicileService,domicileVariant,draft.details)');
-  assert.match(markup,/<\/details><aside class="income-fee-notice affidavit-notice"/);
-  assert.match(markup,/additional ₹200/);
-  assert.match(markup,/₹400\.00/);
-  const review=run('wizardBody(domicileService,domicileVariant)');
-  assert.match(review,/includes ₹200 affidavit fee/);
-  assert.match(review,/₹400\.00/);
-  run("draft.details['Do you have proof confirming the entered address?']='Yes'");
-  assert.doesNotMatch(run('serviceGuidance(domicileService,domicileVariant,draft.details)'),/affidavit-notice/);
-  assert.match(run('wizardBody(domicileService,domicileVariant)'),/₹200\.00/);
-  assert.doesNotMatch(run('wizardBody(domicileService,domicileVariant)'),/includes ₹200 affidavit fee/);
+  context.service=serviceCatalog.find(service=>service.slug==='domicile-certificate');
+  context.variant={...context.service,amounts:{serviceCharge:20000,total:20000}};
+  assert.ok(!context.service.fields.some(field=>field.label==='Do you have proof confirming the entered address?'));
+  assert.equal(context.service.documents.find(doc=>doc.label==='Family Member Address Proof (15+ years old)').required,true);
+  run("draft={step:4,details:{'Do you have proof confirming the entered address?':'No'},customer:{name:'Test Applicant'},docs:{}}");
+  assert.doesNotMatch(run('serviceGuidance(service,variant,draft.details)'),/affidavit-notice/);
+  assert.doesNotMatch(run('wizardBody(service,variant)'),/affidavit fee/);
+});
+
+test('Non-Creamy Layer cannot continue without the three-year income certificate',()=>{
+  const {context,run}=client();
+  context.service=serviceCatalog.find(service=>service.slug==='non-creamy-layer');
+  run("draft={step:3,details:{'Applicant under 18?':'No'},docs:{}}");
+  run("for(const doc of applicableDocuments(service.documents,draft.details).filter(doc=>doc.label!=='3 Years Income Certificate')) draft.docs[doc.label]={fileName:'proof.pdf'}");
+  assert.match(run('wizardBody(service,service)'),/onclick="saveStep3\(\)" disabled/);
+  run("draft.docs['3 Years Income Certificate']={fileName:'three-year-income.pdf'}");
+  assert.doesNotMatch(run('wizardBody(service,service)'),/onclick="saveStep3\(\)" disabled/);
 });
 
 test('customer intake omits email and removes numbers from typed or pasted names', () => {

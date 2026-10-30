@@ -17,8 +17,7 @@ globalThis.IntakeRules = (() => {
   }
   function surcharge(details = {}) {
     const talathi = details['Ration card area'] === 'City' && details[available] === 'No' && details[willing] === 'No' ? 20000 : 0;
-    const affidavit = details[addressProof] === 'No' ? 20000 : 0;
-    return talathi + affidavit;
+    return talathi;
   }
   function withSurcharge(amounts, details) {
     const extra = surcharge(details);
@@ -35,5 +34,8 @@ globalThis.IntakeRules = (() => {
     const groups = [...new Set(fields.map(field => field.answerGroup).filter(Boolean))];
     return groups.filter(group => !fields.some(field => field.answerGroup === group && String(details[field.label] ?? '').trim()));
   }
-  return { matches, surcharge, withSurcharge, available, willing, addressProof, applyComputed, missingAnswerGroups };
+  function isMarathiName(value) {
+    return /^[\u0900-\u0963\u0971-\u097F\s\u200C\u200D]+$/u.test(value) && /\p{L}/u.test(value);
+  }
+  return { matches, surcharge, withSurcharge, available, willing, addressProof, applyComputed, missingAnswerGroups, isMarathiName };
 })();

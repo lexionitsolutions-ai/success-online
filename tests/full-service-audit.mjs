@@ -32,7 +32,7 @@ function scenarios(service){
    for(const willing of yesNo)add(`report-unavailable-${willing}`,{'Ration card area':'City','Is Talathi Report available?':'No','Will you bring a signed Talathi Report?':willing});
    add('income-below-threshold',{'Income amount required on certificate (₹)':'99999'});break;
   case 'domicile-certificate':
-   for(const adult of yesNo)for(const born of yesNo)for(const proof of yesNo)add(`minor-${adult}-born-${born}-proof-${proof}`,{'Applicant under 18?':adult,'Is beneficiary birth place in Maharashtra?':born,'Do you have proof confirming the entered address?':proof});break;
+   for(const adult of yesNo)for(const born of yesNo)add(`minor-${adult}-born-${born}`,{'Applicant under 18?':adult,'Is beneficiary birth place in Maharashtra?':born});break;
   case 'caste-certificate':case 'non-creamy-layer':
    for(const category of service.variants[0].fields.find(f=>f.label==='Caste category').options)for(const minor of yesNo)add(`${category}-minor-${minor}`,{'Caste category':category,'Applicant under 18?':minor});break;
   case 'gazette':
@@ -50,7 +50,7 @@ function scenarios(service){
   case 'passport':
    for(const type of ['New','Renew'])for(const minor of yesNo)for(const change of yesNo)add(`${type}-minor-${minor}-name-${change}`,{'Passport application type':type,'Applicant under 18?':minor,'Name change or correction?':change});break;
   case 'voting-card':
-   add('new',{'Voting card application type':'New'});add('renew',{'Voting card application type':'Renew'});
+   add('new',{'Voting card application type':'New'});
    for(const correction of service.variants[0].fields.find(f=>f.label==='Voting card field to correct').options)add(`correct-${correction}`,{'Voting card application type':'Correction','Voting card field to correct':correction});break;
   case 'ration-card':
    for(const question of ['Add a member?','Add a member due to marriage?','Remove a member?','Remove a member due to marriage?','Change ration card address?'])for(const answer of yesNo)add(`${question}-${answer}`,{[question]:answer});
