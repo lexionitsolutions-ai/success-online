@@ -67,7 +67,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
       if (service.slug === 'ews-certificate') details['Applicant caste']='Test Caste';
       if (service.slug === 'food-license') Object.assign(details, {'Shop name':'Food Shop 123','Business email':'food@example.com','Shop address':'Kolhapur','Business type':'Restaurant','Business mobile number':'9876543210','Owner / partner names':'Asha Patil','Business investment':'100000','GST registered?':'No'});
       if (service.slug === 'shop-act') Object.assign(details, {'Shop name':'Shop 123','Business email':'shop@example.com','Business start date':'2026-10-01','Shop address':'Kolhapur','Male workers':'0','Female workers':'0','Business type':'Retail','Business mobile number':'9876543210','Owner / partner names':'Asha Patil','Years at Aadhaar address':'5','Shop size (sq. ft.)':'250','Business investment':'100000','GST registered?':'No'});
-      if (service.slug === 'udyam-aadhaar') Object.assign(details, {'Shop name':'Enterprise 123','Business email':'udyam@example.com','Business start date':'2026-10-01','Shop address':'Kolhapur','Number of workers':'0','Business type':'Retail','Business mobile number':'9876543210','Owner / partner names':'Asha Patil','Business investment':'100000','GST registered?':'No'});
+      if (service.slug === 'udyam-aadhaar') Object.assign(details, {'Shop name':'Enterprise 123','Business email':'udyam@example.com','Business start date':'2026-10-01','Shop address':'Kolhapur','Male workers':'0','Female workers':'0','Business type':'Retail','Business mobile number':'9876543210','Owner / partner names':'Asha Patil','Business investment':'100000','GST registered?':'No'});
       if (service.slug === 'police-clearance') for (const person of [1, 2]) {
         details[`Reference ${person} name`] = 'Known Person';
         details[`Reference ${person} contact number`] = '9876543210';
@@ -79,6 +79,28 @@ test('real API: access, document gates, uploads, bundle and completion', async (
       assert.equal(order.status,201,service.name);assert.equal(order.data.amount,expected);assert.equal(new URL(order.data.upiIntent).searchParams.get('am'),(expected/100).toFixed(2));
     }
     assert.ok(!services.some(service=>service.slug==='shop-act-udyam'));
+    assert.equal(services.find(service=>service.slug==='shop-act').name,'Shop Act Registration');
+    // Exercise every premises/ownership branch through the real case and upload API.
+    const businessProof=Buffer.from('%PDF-1.4\nbusiness proof\n%%EOF');
+    for (const slug of ['shop-act','udyam-aadhaar']) {
+      const variant=services.find(service=>service.slug===slug).variants[0];
+      for (const premises of ['Owned','Rented']) for (const ownership of ['Individual','Partnership']) {
+        const details={'Shop name':'Test Shop','Business email':'shop@example.com','Business start date':'2026-10-01','Shop address':'Kolhapur','Owned or rented':premises,'Ownership type':ownership,'Male workers':'2','Female workers':'3','Number of workers':'999','Business type':'Retail','Business mobile number':'9876543210','Owner / partner names':'Test Owner','Years at Aadhaar address':'5','Shop size (sq. ft.)':'250','Business investment':'100000','GST registered?':'No'};
+        const created=await request('/api/cases',{cookie:sales,body:{variantId:variant.id,customer:{name:'Business Branch Trial',mobile:'9876543210'},details,consent:true}});
+        assert.equal(created.status,201,`${slug} ${premises} ${ownership}`);
+        assert.equal(created.data.case.details['Number of workers'],'5');
+        const path=`/api/cases/${created.data.case.id}`;
+        const base=['Owner Aadhaar Card','Owner Photo','Owner Signature Image','Owner PAN Card','Owner Bank Passbook / Cheque',...(slug==='shop-act'?['Shop Board Photo']:[])];
+        const conditional=[premises==='Owned'?'Electricity Bill':'Rent Agreement',...(ownership==='Partnership'?['Partnership Deed','Firm PAN Card']:[])];
+        const upload=async docType=>assert.equal((await request(path+'/documents',{cookie:sales,body:{docType,fileName:'proof.pdf',mimeType:'application/pdf',size:businessProof.length,content:businessProof.toString('base64')}})).status,201,docType);
+        for (const docType of base) await upload(docType);
+        assert.equal((await request(path,{cookie:sales})).data.case.document_state,'missing');
+        for (const [index,docType] of conditional.entries()) {
+          await upload(docType);
+          assert.equal((await request(path,{cookie:sales})).data.case.document_state,index===conditional.length-1?'complete':'missing');
+        }
+      }
+    }
     const pf = services.find(service=>service.slug==='pf-assistance');
     assert.equal(pf.name,'PF Working (Provident Fund)');
     const pfPayload = {variantId:pf.variants[0].id,customer:{name:'PF Credential Trial',mobile:'9876543210'},details:pfDetails,consent:true};
@@ -150,8 +172,11 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const gazette=gazetteService.variants[0];
     const staleForms = new DatabaseSync(join(root,'test.sqlite'));
     staleForms.prepare('UPDATE variants SET fields_json=?,documents_json=?,instructions=? WHERE id=?').run('[{"label":"Old first name (Marathi)","required":true}]','[]','Older deployment definition',gazette.id);
+    staleForms.prepare("UPDATE services SET name='Shop Act' WHERE slug='shop-act'").run();
     staleForms.close();
-    const gazetteAfterOverwrite=(await request('/api/services',{cookie:sales})).data.services.find(s=>s.slug==='gazette').variants[0];
+    const currentServices=(await request('/api/services',{cookie:sales})).data.services;
+    assert.equal(currentServices.find(s=>s.slug==='shop-act').name,'Shop Act Registration','An older database name cannot restore the old service heading');
+    const gazetteAfterOverwrite=currentServices.find(s=>s.slug==='gazette').variants[0];
     assert.deepEqual(gazetteAfterOverwrite.fields,gazette.fields,'A shared database overwrite cannot restore the six-field form');
     assert.deepEqual(gazetteAfterOverwrite.documents,gazette.documents,'Upload requirements use the same running form version');
     const gazettePayload={variantId:gazette.id,customer:{name:'Gazette Trial',mobile:'9876543210'},consent:true};

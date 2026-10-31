@@ -42,7 +42,8 @@ try {
     await field('Mobile').fill('9876543210');
     const passportDetails={Email:'passport@example.com','Birth place':'Kolhapur','Police station':'Shahupuri','Emergency number':'9876543211','Mother name':'Test Mother','Father name':'Test Father',Education:'Graduate'};
     for(const [label,value] of Object.entries(passportDetails)) await field(label).fill(value);
-    await field('Occupation').selectOption('Student');
+    await field('Occupation').selectOption('Government Employee');
+    assert.equal(await field('Occupation').inputValue(),'Government Employee');
     await field('Passport application type').selectOption('New');
     await field('Applicant under 18?').selectOption('No');
     await field('Name change or correction?').selectOption('No');
@@ -56,6 +57,7 @@ try {
     for(const language of ['mr','en']) {
       await page.locator(`[data-intake-language="${language}"]`).click();
       assert.equal(await field('Old name').inputValue(),'Previous Name');
+      assert.equal(await field('Occupation').inputValue(),'Government Employee');
     }
     await field('Name change or correction?').selectOption('No');
     assert.equal((await page.evaluate(()=>window.currentDetails()))['Old name'],undefined);

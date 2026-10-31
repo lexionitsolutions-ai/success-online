@@ -39,10 +39,8 @@ function scenarios(service){
    for(const language of ['English','Marathi'])for(const reason of ['Marriage','Correction of incorrect name','Other name change'])add(`${language}-${reason}`,{'Gazette language':language,'Reason for name change':reason});break;
   case 'police-clearance':
    for(const reason of ['Job','Tour','Education','Visa / Immigration','Business'])add(reason,{'Reason for clearance':reason});break;
-  case 'shop-act':case 'food-license':
+  case 'shop-act':case 'food-license':case 'udyam-aadhaar':
    for(const ownership of ['Individual','Partnership'])for(const premises of ['Owned','Rented'])for(const gst of yesNo)add(`${ownership}-${premises}-gst-${gst}`,{'Ownership type':ownership,'Owned or rented':premises,'GST registered?':gst});break;
-  case 'udyam-aadhaar':
-   for(const ownership of ['Individual','Partnership'])for(const gst of yesNo)add(`${ownership}-gst-${gst}`,{'Ownership type':ownership,'GST registered?':gst});break;
   case 'caste-validity':
    for(const purpose of ['Job','Education','Election'])for(const minor of yesNo)add(`${purpose}-minor-${minor}`,{'Caste Validity Certificate required for':purpose,'Applicant under 18?':minor});break;
   case 'ews-certificate':

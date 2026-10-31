@@ -90,7 +90,7 @@ export const serviceCatalog = [
       { ...field('Company or organisation name'), fullWidth: true },
       ...[1, 2].flatMap(person => [
         { ...field(`Reference ${person} name`), displayLabel: 'Full name (required)', required: true, section: `Reference person ${person}`, sectionNote: 'Enter the details of a person known to the applicant.' },
-        { ...field(`Reference ${person} contact number`, 'tel'), displayLabel: 'Contact number (required)', required: true, section: `Reference person ${person}`, inputMode: 'numeric', pattern: '[0-9]{10}', placeholder: '10-digit contact number' }
+        { ...field(`Reference ${person} contact number`, 'tel'), displayLabel: 'Contact number (required)', required: true, section: `Reference person ${person}`, inputMode: 'numeric', digitsOnly: true, maxLength: 10, pattern: '[0-9]{10}', placeholder: '10-digit contact number' }
       ])
     ],
     documents: [
@@ -103,7 +103,7 @@ export const serviceCatalog = [
     ]
   },
   {
-    name: 'Shop Act', slug: 'shop-act', description: 'Shop Act registration application assistance.',
+    name: 'Shop Act Registration', slug: 'shop-act', description: 'Shop Act registration application assistance.',
     fields: [
       { ...field('Shop name'), required: true, allowNumbers: true, displayLabel: 'शॉपचे नाव काय आहे? / What is the shop name?' },
       { ...field('Business email', 'email'), required: true, displayLabel: 'ईमेल आयडी काय आहे? / What is the email address?' },
@@ -127,6 +127,9 @@ export const serviceCatalog = [
       ...['Owner Aadhaar Card', 'Owner Photo', 'Owner Signature Image', 'Owner PAN Card'].map(label => ({ ...doc(label, 'Upload this document for the owner and EVERY partner, if in partnership. Add separate files or a combined PDF. / मालकाची व भागीदारी असल्यास प्रत्येक भागीदाराची कागदपत्रे अपलोड करा.'), multiple: true })),
       { ...doc('Owner Bank Passbook / Cheque', 'Upload a bank passbook or cheque for the owner and every partner. / मालकाचे व प्रत्येक भागीदाराचे बँक पासबुक किंवा चेक अपलोड करा.'), multiple: true, marathiLabel: 'मालकाचे / सर्व भागीदारांचे बँक पासबुक किंवा चेक' },
       doc('Shop Board Photo'),
+      { ...doc('Electricity Bill', 'Required for owned premises. / दुकान स्वतःचे असल्यास आवश्यक.', { field: 'Owned or rented', equals: 'Owned' }), displayLabel: 'Light Bill / वीज बिल' },
+      doc('Rent Agreement', 'Required for rented premises. / दुकान भाड्याने असल्यास आवश्यक.', { field: 'Owned or rented', equals: 'Rented' }),
+      doc('Partnership Deed', 'Required for a partnership. / भागीदारी व्यवसाय असल्यास आवश्यक.', { field: 'Ownership type', equals: 'Partnership' }),
       { ...doc('Firm PAN Card', 'Required for a partnership firm. / भागीदारी फर्मसाठी आवश्यक.', { field: 'Ownership type', equals: 'Partnership' }), marathiLabel: 'भागीदारी फर्मचे पॅन कार्ड' }
     ]
   },
@@ -185,7 +188,7 @@ export const serviceCatalog = [
       { ...field('Father name'), required: true, displayLabel: 'Father name / वडिलांचे नाव' },
       { ...field('Wife name'), required: false, displayLabel: 'Wife name (optional) / पत्नीचे नाव (ऐच्छिक)', placeholder: 'Leave blank if not applicable / लागू नसल्यास रिकामे ठेवा' },
       { ...field('Education'), required: true, displayLabel: 'Education / शिक्षण' },
-      { ...field('Occupation', 'select', ['Employee', 'Self-employed', 'Student', 'Retailer']), required: true, displayLabel: 'Occupation / व्यवसाय', optionLabels: { Employee: 'Employee / नोकरदार', 'Self-employed': 'Self-employed / स्वयंरोजगार', Student: 'Student / विद्यार्थी', Retailer: 'Retailer / किरकोळ विक्रेता' } },
+      { ...field('Occupation', 'select', ['Employee', 'Government Employee', 'Self-employed', 'Student', 'Retailer']), required: true, displayLabel: 'Occupation / व्यवसाय', optionLabels: { Employee: 'Employee / नोकरदार', 'Government Employee': 'Government Employee / शासकीय कर्मचारी', 'Self-employed': 'Self-employed / स्वयंरोजगार', Student: 'Student / विद्यार्थी', Retailer: 'Retailer / किरकोळ विक्रेता' } },
       { ...field('Passport application type', 'select', ['New', 'Renew']), required: true, fullWidth: true, displayLabel: 'Are you applying for a new passport or renewing an existing passport? / तुम्हाला नवीन पासपोर्ट काढायचा आहे की सध्याच्या पासपोर्टचे नूतनीकरण करायचे आहे?', optionLabels: { New: 'New / नवीन', Renew: 'Renew / नूतनीकरण' } },
       { ...field('Applicant under 18?', 'select', ['Yes', 'No']), required: true, fullWidth: true, displayLabel: 'Is the applicant under 18 years of age? / अर्जदाराचे वय १८ वर्षांपेक्षा कमी आहे का?', optionLabels: { Yes: 'Yes / होय', No: 'No / नाही' } },
       { ...field('Name change or correction?', 'select', ['Yes', 'No']), required: true, fullWidth: true, displayLabel: 'Name spelling correction or change after marriage? / नावातील स्पेलिंग दुरुस्ती किंवा लग्नानंतर नाव बदलायचे आहे का?', optionLabels: { Yes: 'Yes / होय', No: 'No / नाही' }, note: 'If Yes, enter the old name below and upload proof of the new or corrected name, such as a Gazette notification or an updated Aadhaar card, in Documents. / होय निवडल्यास, खाली जुने नाव भरा आणि नवीन किंवा दुरुस्त नावाचा पुरावा, उदा. राजपत्र (गॅझेट) किंवा अद्ययावत आधार कार्ड, कागदपत्रे विभागात अपलोड करा.' },
@@ -270,12 +273,31 @@ export const serviceCatalog = [
 // Udyam has its own checklist; share wording and validation for common business questions.
 const shopAct = serviceCatalog.find(service => service.slug === 'shop-act');
 const udyam = serviceCatalog.find(service => service.slug === 'udyam-aadhaar');
+const businessFieldHeadings = {
+  'Shop name': 'Shop name / दुकानाचे नाव',
+  'Business email': 'Email address / ईमेल पत्ता',
+  'Business start date': 'Business start date / व्यवसाय सुरू झाल्याची तारीख',
+  'Shop address': 'Shop address / दुकानाचा पत्ता',
+  'Owned or rented': 'Shop owned or rented / दुकान स्वतःचे की भाड्याने',
+  'Male workers': 'Male workers / पुरुष कामगार',
+  'Female workers': 'Female workers / महिला कामगार',
+  'Number of workers': 'Total number of workers / एकूण कामगार संख्या',
+  'Business type': 'Nature of business / व्यवसायाचे स्वरूप',
+  'Business mobile number': 'Mobile number / मोबाईल नंबर',
+  'Ownership type': 'Ownership type / मालकीचा प्रकार',
+  'Owner / partner names': 'Owner / partner names / मालक / भागीदारांची नावे',
+  'Years at Aadhaar address': 'Years at Aadhaar address / आधारवरील पत्त्यावर वास्तव्याची वर्षे',
+  'Shop size (sq. ft.)': 'Shop area (sq. ft.) / दुकानाचे क्षेत्रफळ (चौ. फूट)',
+  'Business investment': 'Business investment (Rs) / व्यवसायातील गुंतवणूक (रु.)',
+  'GST registered?': 'GST registered? / जीएसटी नोंदणी आहे का?',
+  'GST number': 'GST number / जीएसटी क्रमांक'
+};
+shopAct.fields = shopAct.fields.map(item => ({ ...item, displayLabel: businessFieldHeadings[item.label] }));
 udyam.fields = shopAct.fields
-  .filter(item => !['Owned or rented', 'Male workers', 'Female workers', 'Years at Aadhaar address', 'Shop size (sq. ft.)'].includes(item.label))
-  .map(item => item.label === 'Number of workers'
-    ? { ...field('Number of workers', 'number'), required: true, min: 0, step: '1', displayLabel: 'एकूण कामगार किती आहेत? / How many workers are there?' }
-    : { ...item });
+  .filter(item => !['Years at Aadhaar address', 'Shop size (sq. ft.)'].includes(item.label))
+  .map(item => ({ ...item, ...(item.label === 'Male workers' ? { displayLabel: 'No of male workers / पुरुष कामगार संख्या' } : item.label === 'Female workers' ? { displayLabel: 'No of female workers / महिला कामगार संख्या' } : {}) }));
 udyam.documents = shopAct.documents.filter(item => item.label !== 'Shop Board Photo').map(item => ({ ...item }));
+udyam.documents.push({ ...doc('Business Address Proof', 'Upload a document showing the business address, if available. / उपलब्ध असल्यास व्यवसायाचा पत्ता दर्शविणारे कागदपत्र अपलोड करा.'), required: false, marathiLabel: 'व्यवसायाच्या पत्त्याचा पुरावा', multiple: true });
 
 // Food licence shares business details and owner/partner proofs with Shop Act.
 const food = serviceCatalog.find(service => service.slug === 'food-license');
@@ -419,7 +441,7 @@ const serviceNotes = {
     'पॅन कार्ड आणि आधार कार्डाच्या स्पष्ट व संपूर्ण प्रती अपलोड करा. / Upload clear and complete copies of the PAN Card and Aadhaar Card.',
     'मोबाईल नंबर, ईमेल आयडी, जन्मस्थान, पोलीस ठाणे आणि आपत्कालीन संपर्क क्रमांक भरा. / Enter the mobile number, email ID, birth place, police station and emergency number.',
     'आईचे नाव, वडिलांचे नाव आणि शिक्षण भरा. पत्नीचे नाव ऐच्छिक आहे; लागू नसल्यास रिकामे ठेवा. / Enter the mother name, father name and education. Wife name is optional; leave it blank if not applicable.',
-    'व्यवसाय निवडा: नोकरदार, स्वयंरोजगार, विद्यार्थी किंवा किरकोळ विक्रेता. / Select the occupation: Employee, Self-employed, Student or Retailer.',
+    'व्यवसाय निवडा: नोकरदार, शासकीय कर्मचारी, स्वयंरोजगार, विद्यार्थी किंवा किरकोळ विक्रेता. / Select the occupation: Employee, Government Employee, Self-employed, Student or Retailer.',
     'नवीन पासपोर्ट की नूतनीकरण आणि अर्जदार १८ वर्षांखालील आहे का ते निवडा. नूतनीकरणासाठी जुना पासपोर्ट अपलोड करा. / Select New or Renew and whether the applicant is under 18. For renewal, upload the old passport.',
     'नावातील स्पेलिंग दुरुस्ती किंवा लग्नानंतर नाव बदलायचे असल्यास होय निवडून जुने नाव भरा. नवीन किंवा दुरुस्त नावाचा पुरावा, उदा. राजपत्र (गॅझेट) किंवा अद्ययावत आधार कार्ड, अपलोड करा. / For a name spelling correction or name change after marriage, select Yes and enter the old name. Upload proof of the new or corrected name, such as a Gazette notification or updated Aadhaar card.'
   ],
@@ -433,6 +455,9 @@ const serviceNotes = {
     'पत्ता बदलासाठी नवीन पत्त्याचे लाईट बिल किंवा घरफळा पावती यापैकी एक पुरावा अपलोड करा. हा पुरावा एकदाच अपलोड करणे पुरेसे आहे. / For an address change, upload either the new address electricity bill or property tax receipt. Uploading this proof once is sufficient.'
   ]
 };
+for (const slug of ['shop-act', 'udyam-aadhaar']) {
+  serviceNotes[slug].push('दुकान स्वतःचे असल्यास वीज बिल, भाड्याने असल्यास भाडे करारपत्र अपलोड करा. भागीदारी असल्यास भागीदारी करारपत्र आवश्यक आहे. / Upload the Light Bill for owned premises or the Rent Agreement for rented premises. Partnerships also require the Partnership Deed.');
+}
 for (const service of serviceCatalog) {
   for (const document of service.documents) document.marathiLabel ||= marathiDocuments[document.label];
   for (const document of service.documents) {

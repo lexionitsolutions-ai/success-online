@@ -778,7 +778,7 @@ async function routeApi(req, res, url) {
   }
   if (req.method === 'GET' && url.pathname === '/api/services') {
     const [serviceRows,variants]=await Promise.all([all('SELECT * FROM services WHERE active=1'),all('SELECT * FROM variants WHERE active=1')]);
-    return send(res,200,{demoPayments:false,directUPI:true,testPricingMode:paymentConfig().testPricingMode,cloudUploads:storageEnabled(),services:serviceRows.map(service=>({...service,variants:variants.filter(v=>v.service_id===service.id).map(v=>({...v,fields:json(v,'fields_json',[]),documents:json(v,'documents_json',[]),amounts:amounts(v)}))}))});
+    return send(res,200,{demoPayments:false,directUPI:true,testPricingMode:paymentConfig().testPricingMode,cloudUploads:storageEnabled(),services:serviceRows.map(service=>({...service,name:serviceCatalog.find(current=>current.slug===service.slug)?.name || service.name,variants:variants.filter(v=>v.service_id===service.id).map(v=>({...v,fields:json(v,'fields_json',[]),documents:json(v,'documents_json',[]),amounts:amounts(v)}))}))});
   }
   if(req.method==='POST' && url.pathname==='/api/payments-sync') {
     if(user.role!=='admin') return send(res,403,{error:'Admin access required'});

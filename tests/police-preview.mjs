@@ -30,6 +30,18 @@ try {
   assert.equal(await page.locator('.field-invalid').count(),4);
   for(const person of [1,2]) {
    await field(`Reference ${person} name`).fill(person===1?'First Person':'Second Person');
+   const contact=field(`Reference ${person} contact number`);
+   await contact.fill('letters');
+   assert.equal(await contact.inputValue(),'');
+   await contact.fill('98ab76');
+   assert.equal(await contact.inputValue(),'9876');
+   await contact.fill('9876543210123');
+   assert.equal(await contact.inputValue(),'9876543210');
+   await contact.evaluate(input=>{
+    input.value='a9876543210123xyz';
+    input.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertFromPaste'}));
+   });
+   assert.equal(await contact.inputValue(),'9876543210');
    await field(`Reference ${person} contact number`).fill('123');
   }
   await page.getByRole('button',{name:'Continue',exact:true}).click();

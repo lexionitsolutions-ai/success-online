@@ -153,7 +153,7 @@ const SHEET_HEADERS = {
     "Documents",
     "Updated"
   ],
-  "Shop Act": [
+  "Shop Act Registration": [
     "Case ID",
     "Customer Name",
     "Phone",
