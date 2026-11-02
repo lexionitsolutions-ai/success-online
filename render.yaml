@@ -17,8 +17,6 @@ services:
         sync: false
       - key: INITIAL_ADMIN_PASSWORD
         sync: false
-      - key: DRIVE_MODE
-        value: demo
       - key: SHEETS_MODE
         value: demo
       - key: PAYMENT_MODE

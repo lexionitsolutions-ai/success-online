@@ -2,8 +2,7 @@
 
 The website and API run on Vercel. Supabase PostgreSQL stores employee accounts,
 customers, cases, payments, audit records, upload authorizations and settings.
-Supabase Storage holds private documents and temporary download ZIPs. Google Drive
-can remain enabled as a document mirror; Google Sheets remains a reporting mirror.
+Supabase Storage holds private documents and temporary download ZIPs. Google Sheets can remain enabled as a reporting mirror.
 Staff sign in through the application's existing accounts, not Supabase Auth.
 
 ## 1. Create the Supabase project
@@ -42,7 +41,6 @@ INITIAL_BACKOFFICE_USERNAME=
 INITIAL_BACKOFFICE_PASSWORD=
 SESSION_SECRET=YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
 TEST_PRICING_MODE=true
-DRIVE_MODE=demo
 SHEETS_MODE=demo
 ```
 
@@ -103,7 +101,7 @@ npm.cmd run setup:supabase
 ```
 
 The importer creates the SQL schema, copies records, uploads local document bytes
-to private Storage, preserves Drive document references, and initializes case
+to private Storage, preserves private document references, and initializes case
 number counters. It refuses to overwrite nonempty application tables. Record
 imports are transactional; if an import fails after files were uploaded, those
 unreferenced Storage objects may need cleanup before retrying.
@@ -136,7 +134,7 @@ The `.vercelignore` file excludes local credentials, certificates and client dat
    this setup.
 3. In Vercel **Settings → Environment Variables**, add DATABASE_URL, SUPABASE_URL,
    SUPABASE_SECRET_KEY, both bucket names, SESSION_SECRET, TEST_PRICING_MODE,
-   DRIVE_MODE and SHEETS_MODE. Put them in the Production environment. Do not
+   SHEETS_MODE. Put them in the Production environment. Do not
    expose database credentials to the frontend.
 4. Set `APP_ORIGIN` to the exact production website URL, including `https://` and
    no trailing slash. If needed, deploy once to get the URL, add APP_ORIGIN, then
@@ -157,23 +155,22 @@ in Google Cloud and add this exact Authorized redirect URI (no trailing slash):
 
 `https://success-online.vercel.app/api/google/oauth/callback`
 
-Save, then return to Business analytics and click Connect/Reconnect Google Drive.
-The admin page displays the callback URL and a link to the configured OAuth
-client. `node scripts/check-google-connection.js https://success-online.vercel.app`
+Save, then return to Business analytics and click Connect/Reconnect Google Sheets.
+`node scripts/check-google-connection.js https://success-online.vercel.app`
 can inspect the requested callback without printing secrets or authorization state.
 When Supabase Storage is enabled, expired Google authorization does not block
-case intake or document uploads. Google copy failures are recorded as sync failures;
+case intake or document uploads. Google reporting failures are recorded as sync failures;
 the primary document remains stored privately in Supabase.
 
 On Vercel configure GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET,
-GOOGLE_ROOT_FOLDER_ID and GOOGLE_OPERATIONS_SPREADSHEET_ID privately. Add
+GOOGLE_OPERATIONS_SPREADSHEET_ID privately. Add
 `https://YOUR_SITE/api/google/oauth/callback` as an authorized redirect URI in
-Google Cloud. Use Business analytics to connect Drive, then the existing Sheets
+Google Cloud. Use Business analytics to connect Google Sheets, then the existing Sheets
 activation endpoint/setup flow to activate Sheets. The backend saves refreshed
 OAuth settings in PostgreSQL and reloads them on subsequent requests.
 
 Copy `google-apps-script/Code.gs` into Apps Script and run
-`setupSuccessOnlineWorkbook` if setting up the report workbook manually.
+`setupSuccessOnlineWorkbook` to prepare only All Workings and Cash Flow. Older tabs can be deleted manually after preserving any records you need.
 Supabase works without Google integration: documents remain private in Storage.
 
 ## 7. Hosted acceptance checks

@@ -263,6 +263,16 @@
 @media(max-width:900px) { .case-table td.completed-download-cell { grid-column:1/-1; grid-row:6; padding-top:10px; border-top:1px solid #edf1f5; } .completed-download { min-height:44px; width:100%; } }
 #serviceFields .full-width-field { grid-column:1/-1; }
 #svcInfo.summary-box { padding:0; border:0; background:transparent; }
+#svcInfo > .income-download + .intake-notices { margin-top:20px; }
+.pricing-panel { margin-bottom:20px; }
+.pricing-salesperson { max-width:440px; }
+.pricing-panel p,.pricing-card p { color:var(--muted); line-height:1.6; }
+.pricing-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:20px; }
+.pricing-card { min-width:0; display:flex; flex-direction:column; align-items:stretch; gap:12px; }
+.pricing-card h2,.pricing-card p { margin:0; }
+.pricing-card h2 { font-size:17px; }
+.pricing-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:auto; }
+.pricing-result { min-height:18px; color:var(--green); }
 .intake-notices { overflow:hidden; border:1px solid #dce5ef; border-radius:14px; background:#fff; box-shadow:0 3px 12px #18364b05; }
 .intake-notices>summary { display:flex; align-items:center; gap:12px; min-height:78px; padding:18px 20px; list-style:none; cursor:pointer; background:linear-gradient(110deg,#f2f7fc,#fff); }
 .intake-notices>summary::-webkit-details-marker { display:none; }

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import {confirmations} from './payment-fixture.js';
 const root=mkdtempSync(join(tmpdir(),'case-sections-'));
 const port=47000+Math.floor(Math.random()*2000), origin=`http://localhost:${port}`;
-const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),APP_ORIGIN:origin,DATABASE_PATH:join(root,'test.sqlite'),STORAGE_PATH:join(root,'files'),DRIVE_MODE:'demo',SHEETS_MODE:'demo',SESSION_SECRET:'case-sections-isolated-test-secret'},stdio:['ignore','pipe','pipe']});
+const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),APP_ORIGIN:origin,DATABASE_PATH:join(root,'test.sqlite'),STORAGE_PATH:join(root,'files'),SHEETS_MODE:'demo',SESSION_SECRET:'case-sections-isolated-test-secret'},stdio:['ignore','pipe','pipe']});
 let browser,stderr='';child.stderr.on('data',d=>stderr+=d);
 const screenshotRoot='deliverables/case-sections';mkdirSync(screenshotRoot,{recursive:true});
 try {

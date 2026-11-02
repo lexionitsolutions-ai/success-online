@@ -28,7 +28,7 @@ Set these environment variables on the backend:
 - `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD` (at least 10 characters) for a fresh production database
 - `DATABASE_PATH=/app/storage/success-online.sqlite`
 - `STORAGE_PATH=/app/storage/documents`
-- `TEST_PRICING_MODE=true`, `DRIVE_MODE=demo`, `SHEETS_MODE=demo` for local testing; UPI transfers real money
+- `TEST_PRICING_MODE=true`, `SHEETS_MODE=demo` for local testing; UPI transfers real money
 
 Expose HTTPS and verify `https://your-api.example.com/api/health` returns `{"ok":true}`. Keep the persistent volume backed up. Use one server instance with this SQLite deployment.
 
@@ -46,11 +46,11 @@ The generated `vercel.json` serves only `public/` and proxies the authenticated 
 
 ## Google reconnection
 
-The saved Google refresh token was rejected as expired or revoked during verification. In Google Cloud OAuth settings, add `https://your-trial.vercel.app/api/google/oauth/callback` as an authorized redirect URI. Configure OAuth client ID, client secret, Drive root folder ID, and operations spreadsheet ID privately on the backend. Connect Google Drive from the admin portal, then activate Google Sheets. The new OAuth request includes Drive and Sheets scopes.
+The saved Google refresh token was rejected as expired or revoked during verification. In Google Cloud OAuth settings, add `https://your-trial.vercel.app/api/google/oauth/callback` as an authorized redirect URI. Configure OAuth client ID, client secret, operations spreadsheet ID privately on the backend. Connect Google Sheets from the admin portal, then activate Google Sheets. The new OAuth request includes only the Sheets scope.
 
 The backend persists refreshed OAuth credentials and integration modes in its private SQLite database. Protect that persistent volume and its backups. Existing initial credentials can be loaded from environment variables or a private local `.env`. Keep credentials out of the frontend and source repository.
 
-Paste [google-apps-script/script.js](google-apps-script/script.js) into Apps Script (or use the identical `Code.gs`), then run `setupSuccessOnlineWorkbook`. Setup preserves existing case and payment rows. `rebuildDailyReport` refreshes only the derived Daily Report tab. The backend creates the reporting schema itself when Sheets is activated.
+Paste [google-apps-script/script.js](google-apps-script/script.js) into Apps Script (or use the identical `Code.gs`), then run `setupSuccessOnlineWorkbook`. Setup preserves existing case and payment rows. Only All Workings and Cash Flow are created; old tabs can be removed manually. The backend creates the reporting schema itself when Sheets is activated.
 
 ## Trial acceptance
 
@@ -60,7 +60,7 @@ Paste [google-apps-script/script.js](google-apps-script/script.js) into Apps Scr
 4. Checkout is created with intake. Forward processing requires complete documents and an admin-verified receiving-account payment. Unpaid and awaiting-verification cases remain Pending; administrator exceptions cannot bypass this requirement.
 5. Back office opens a case and chooses Download all files. Supporting browsers show a save-location picker; other browsers follow their download settings. Extracting the ZIP creates the named folder with a subfolder per document type.
 6. Process through Document Received, upload the final document, and submit it. Sales can then download the final document.
-7. After Google reconnection, confirm new service tabs, Required Documents / Uploaded Required Documents / Missing Documents / Drive Folder columns, and the Documents register. Verify a Drive-backed individual download and ZIP from the hosted domain.
+7. After Google reconnection, confirm only All Workings and Cash Flow receive updates, with the assigned employee, document status, verified paid amount, payment mode, and work status. Verify a private-storage individual download and ZIP from the hosted domain.
 
 Local development seeds demo users. A fresh production database creates the configured administrator; create staff accounts from Employees. Use synthetic client data for the trial. Administrators can enable direct UPI checkout by confirming business ownership of the configured account; a setup test UTR is not required. Follow PAYMENTS.md; no gateway adapter is required.
 

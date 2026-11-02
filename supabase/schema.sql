@@ -15,6 +15,7 @@
     CREATE TABLE IF NOT EXISTS upload_intents (id TEXT PRIMARY KEY, case_id TEXT, user_id TEXT, doc_type TEXT, file_name TEXT, mime_type TEXT, size INTEGER, storage_path TEXT, expires_at TEXT, completed_at TEXT);
 
 CREATE TABLE IF NOT EXISTS service_prices (variant_id TEXT PRIMARY KEY, price INTEGER NOT NULL CHECK(price >= 0), original_price INTEGER NOT NULL, original_config TEXT NOT NULL, updated_by TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS salesperson_prices (sales_user_id TEXT NOT NULL REFERENCES users(id), variant_id TEXT NOT NULL REFERENCES variants(id), price INTEGER NOT NULL CHECK(price > 0 AND price <= 100000000), updated_by TEXT NOT NULL REFERENCES users(id), updated_at TEXT NOT NULL, PRIMARY KEY(sales_user_id,variant_id));
 CREATE TABLE IF NOT EXISTS upi_orders (payment_id TEXT PRIMARY KEY REFERENCES payments(id), upi_id TEXT NOT NULL, payee_name TEXT NOT NULL, service_name TEXT NOT NULL, created_by TEXT NOT NULL, payment_method TEXT, initiated_at TEXT, submitted_at TEXT, verified_by TEXT, verification_notes TEXT, expires_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS payment_attempts (id TEXT PRIMARY KEY, payment_id TEXT NOT NULL REFERENCES payments(id), action TEXT NOT NULL, method TEXT, utr TEXT, actor_id TEXT NOT NULL, notes TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS verified_upi_refs (utr TEXT PRIMARY KEY, payment_id TEXT UNIQUE NOT NULL REFERENCES payments(id));
@@ -67,6 +68,8 @@ ALTER TABLE public.upload_intents ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.upload_intents FROM anon, authenticated;
 ALTER TABLE public.service_prices ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.service_prices FROM anon, authenticated;
+ALTER TABLE public.salesperson_prices ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.salesperson_prices FROM anon, authenticated;
 ALTER TABLE public.upi_orders ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.upi_orders FROM anon, authenticated;
 ALTER TABLE public.payment_attempts ENABLE ROW LEVEL SECURITY;

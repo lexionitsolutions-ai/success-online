@@ -7,6 +7,7 @@
     "dev": "node --watch server.js",
     "start": "node server.js",
     "migrate": "node scripts/migrate.js",
+    "migrate:pricing": "node scripts/migrate-salesperson-pricing.js",
     "seed": "node scripts/seed.js",
     "setup:supabase": "node scripts/setup-supabase.js",
     "import:supabase": "node scripts/import-supabase.js",

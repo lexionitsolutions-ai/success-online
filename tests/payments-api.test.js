@@ -10,7 +10,7 @@ import {confirmations} from './payment-fixture.js';
 
 test('direct UPI security, attempts, expiry, manual verification, prices, refunds and receipts',{timeout:30000},async()=>{
   const root=mkdtempSync(join(tmpdir(),'upi-test-')),port=45000+Math.floor(Math.random()*5000),origin=`http://localhost:${port}`,path=join(root,'test.sqlite');
-  const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),DATABASE_PATH:path,STORAGE_PATH:join(root,'files'),DRIVE_MODE:'demo',SHEETS_MODE:'demo',TEST_PRICING_MODE:'true',SESSION_SECRET:'test-secret-for-isolated-payment-db-only',APP_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
+  const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),DATABASE_PATH:path,STORAGE_PATH:join(root,'files'),SHEETS_MODE:'demo',TEST_PRICING_MODE:'true',SESSION_SECRET:'test-secret-for-isolated-payment-db-only',APP_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
   let output='';child.stderr.on('data',c=>output+=c);
   try {
     await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(output)),15000);child.stdout.on('data',d=>{if(String(d).includes('running')) {clearTimeout(timer);resolve();}});child.on('exit',()=>{clearTimeout(timer);reject(Error(output));});});
@@ -74,6 +74,55 @@ test('direct UPI security, attempts, expiry, manual verification, prices, refund
     assert.equal((await create()).payment.amount,100,'Test pricing overrides stored standard price');
     await request('/api/payment-settings',{cookie:admin,body:{action:'test-pricing',enabled:false}});
     assert.equal((await create()).payment.amount,345);
+    // Individual prices are isolated by salesperson and applied by the server.
+    assert.equal((await request('/api/admin/pricing',{cookie:sales})).status,403);
+    assert.equal((await request('/api/admin/pricing',{cookie:office})).status,403);
+    assert.equal((await request('/api/admin/pricing')).status,401);
+    assert.equal((await request('/api/admin/pricing',{cookie:admin,body:{price:20000}})).status,400);
+    assert.equal((await request('/api/admin/employees',{cookie:admin,body:{name:'Third Salesperson',username:'pricingthird',role:'sales',password:'Demo@12345'}})).status,201);
+    const third=await login('pricingthird');
+    const pricing=(await request('/api/admin/pricing',{cookie:admin})).data;
+    const salesId=username=>pricing.salespeople.find(p=>p.username===username).id;
+    const savePrice=(username,price,cookie=admin,variantId=variant.id)=>request('/api/admin/pricing',{cookie,body:{salesUserId:salesId(username),variantId,price}});
+    assert.equal((await savePrice('sales01',20000,sales)).status,403);
+    for(const price of [0,-1,1.5,100000001,'20000']) assert.equal((await savePrice('sales01',price)).status,400);
+    assert.equal((await savePrice('sales01',20000,admin,'missing')).status,404);
+    const officeId=(await request('/api/me',{cookie:office})).data.user.id;
+    assert.equal((await request('/api/admin/pricing',{cookie:admin,body:{salesUserId:officeId,variantId:variant.id,price:20000}})).status,400);
+    const createFor=async cookie=>{
+      const r=await request('/api/cases',{cookie,body:{variantId:variant.id,details:pfDetails,customer:{name:'Pricing Customer',mobile:'9876543210'},consent:true,price:1}});
+      assert.equal(r.status,201);return r.data.case;
+    };
+    const ownOrders=[];
+    await request('/api/payment-settings',{cookie:admin,body:{action:'test-pricing',enabled:true}});
+    for(const [username,cookie,price] of [['sales01',sales,20000],['sales02',other,25000],['pricingthird',third,17000]]) {
+      assert.equal((await savePrice(username,price)).status,200);
+      const catalog=(await request('/api/services',{cookie})).data.services;
+      assert.equal(catalog.flatMap(s=>s.variants).find(v=>v.id===variant.id).amounts.total,price);
+      const own=await createFor(cookie);ownOrders.push(own);
+      assert.equal(own.payment.amount,price);assert.equal(own.amounts.total,price);
+      const checkout=(await request('/api/payments/'+own.payment.id,{cookie})).data;
+      assert.equal(checkout.amount,price);
+      assert.equal(new URL(checkout.upiIntent).searchParams.get('am'),(price/100).toFixed(2));
+      const ews=pricing.prices.find(p=>p.service_name==='EWS Certificate');
+      assert.ok(ews);
+      assert.equal((await savePrice(username,price,admin,ews.variant_id)).status,200);
+      const refreshed=(await request('/api/services',{cookie})).data.services;
+      assert.equal(refreshed.flatMap(s=>s.variants).find(v=>v.id===ews.variant_id).amounts.total,price);
+    }
+    assert.equal((await savePrice('sales01',22000)).status,200);
+    assert.equal((await createFor(sales)).payment.amount,22000);
+    assert.equal((await request('/api/payments/'+ownOrders[0].payment.id,{cookie:admin})).data.amount,20000);
+    // An admin opening another employee's replacement checkout uses that employee's price.
+    await request('/api/payments/'+ownOrders[1].payment.id+'/cancel',{cookie:admin,body:{}});
+    assert.equal((await request(`/api/cases/${ownOrders[1].id}/payment-order`,{cookie:admin,method:'POST'})).data.amount,25000);
+    assert.equal((await savePrice('sales01',null)).status,200);
+    assert.equal((await createFor(sales)).payment.amount,100,'Removing an individual price restores the configured test/default rules');
+    await request('/api/payment-settings',{cookie:admin,body:{action:'test-pricing',enabled:false}});
+    assert.equal((await createFor(sales)).payment.amount,345);
+    const savedPricing=(await request('/api/admin/pricing',{cookie:admin})).data;
+    assert.equal(savedPricing.overrides.find(p=>p.sales_user_id===salesId('sales02') && p.variant_id===variant.id).price,25000);
+    assert.equal(savedPricing.overrides.some(p=>p.sales_user_id===salesId('sales01') && p.variant_id===variant.id),false);
     assert.equal((await request(base,{cookie:sales})).data.amount,100,'Existing orders remain frozen');
     assert.equal((await request(`/api/cases/${c.id}/payment-exception`,{cookie:sales,body:{reason:'Unauthorized'}})).status,403);
     assert.equal((await request(`/api/cases/${c.id}/payment-exception`,{cookie:admin,body:{reason:''}})).status,409);

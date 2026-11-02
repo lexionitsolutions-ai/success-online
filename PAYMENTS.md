@@ -52,7 +52,7 @@ If Google Pay opens with the correct recipient and amount but rejects the websit
 
 ## Google Sheets and reports
 
-The existing server Google OAuth integration mirrors records into Payments, Payment History, All Cases and Cashflow. No additional connector authorization is needed. Payment and event rows use immutable internal IDs. Cashflow uses the payment ID for new UPI entries; legacy references are preserved. Only verified collections count as revenue. Refunds update the same cashflow row to `REFUNDED`, which daily reports exclude. The Payments tab lists unverified claims separately. Existing case/service/employee collection reports use `PAID` records and exclude demo payments.
+The server Google OAuth integration writes only All Workings and Cash Flow. All Workings tracks the case, assigned staff, paid amount, balance, payment mode and statuses. Cash Flow contains only confirmed receipts, with separate negative refund entries. Cash Flow uses payment IDs as stable references so retries do not duplicate receipts. Unverified claims do not count as cash received. Existing business collection reports continue to exclude refunded and demo payments.
 
 Copy the regenerated `google-apps-script/Code.gs` into the existing workbook and run setup. `rebuildDailyReport` counts verified cashflow rows and excludes demo/refunded rows; it does not verify money. Sync failures retain database records and failed jobs. Use the admin Payments retry control after reconnection, or POST `/api/payments-sync`, to retry pending/failed jobs without changing payment status. On Vercel, retry requires an explicit invocation; no durable background scheduler has been provisioned. Keep the spreadsheet access restricted because it contains customer data.
 

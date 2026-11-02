@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import {PNG} from 'pngjs';
 import jsQR from 'jsqr';
 const root=mkdtempSync(join(tmpdir(),'upi-browser-')),port=51000+Math.floor(Math.random()*2000),origin=`http://localhost:${port}`;
-const child=spawn(process.execPath,['server.js'],{env:{...process.env,PORT:String(port),APP_ORIGIN:origin,NODE_ENV:'test',DATABASE_URL:'',DATABASE_PATH:join(root,'db.sqlite'),STORAGE_PATH:join(root,'docs'),VERCEL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',TEST_PRICING_MODE:'true',DRIVE_MODE:'demo',SHEETS_MODE:'demo'},stdio:['ignore','pipe','pipe']});
+const child=spawn(process.execPath,['server.js'],{env:{...process.env,PORT:String(port),APP_ORIGIN:origin,NODE_ENV:'test',DATABASE_URL:'',DATABASE_PATH:join(root,'db.sqlite'),STORAGE_PATH:join(root,'docs'),VERCEL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',TEST_PRICING_MODE:'true',SHEETS_MODE:'demo'},stdio:['ignore','pipe','pipe']});
 let browser,errors='',browserErrors=[];child.stderr.on('data',d=>errors+=d);
 const screenshots='deliverables/payments-preview';mkdirSync(screenshots,{recursive:true});
 try {

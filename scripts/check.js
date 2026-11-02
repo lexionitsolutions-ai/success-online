@@ -15,5 +15,5 @@ for (const file of ['server.js','announcements.js','database.js','storage.js','i
   const check = spawnSync(process.execPath, ['--check', file], { stdio: 'inherit' });
   if (check.status) process.exit(check.status);
 }
-const test = spawnSync(process.execPath, ['--test', 'tests/service-catalog-sync.test.js', 'tests/background-uploads.test.js', 'tests/shop-services.test.js', 'tests/marathi-input.test.js', 'tests/announcements.test.js', 'tests/income-rules.test.js', 'tests/business.test.js', 'tests/api.test.js', 'tests/ui.test.js', 'tests/postgres.test.js', 'tests/initial-accounts.test.js','tests/payments.test.js','tests/payments-api.test.js','tests/payment-batches.test.js','tests/reuploads.test.js'], { stdio: 'inherit' });
+const test = spawnSync(process.execPath, ['--test', 'tests/service-catalog-sync.test.js', 'tests/background-uploads.test.js', 'tests/shop-services.test.js', 'tests/marathi-input.test.js', 'tests/announcements.test.js', 'tests/income-rules.test.js', 'tests/business.test.js', 'tests/operations-schema.test.js', 'tests/api.test.js', 'tests/ui.test.js', 'tests/postgres.test.js', 'tests/initial-accounts.test.js','tests/payments.test.js','tests/payments-api.test.js','tests/payment-batches.test.js','tests/reuploads.test.js'], { stdio: 'inherit' });
 process.exit(test.status);

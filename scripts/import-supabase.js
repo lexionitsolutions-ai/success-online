@@ -22,7 +22,8 @@ try {
     for (const table of tables) {
       const rows = source.prepare(`SELECT * FROM ${table}`).all();
       for (const row of rows) {
-        if (table === 'documents' && row.storage_path && !row.storage_path.startsWith('gdrive://') && !row.storage_path.startsWith('supabase://')) {
+        if (table === 'documents' && row.storage_path?.includes('://') && !row.storage_path.startsWith('supabase://')) throw new Error('Import requires documents in local files or private Storage.');
+        if (table === 'documents' && row.storage_path && !row.storage_path.startsWith('supabase://')) {
           const file = resolve(row.storage_path);
           if (!existsSync(file)) throw new Error(`Local document is missing for ${row.id}. Restore the document before importing.`);
           const path = `cases/${row.case_id}/${randomUUID()}/${safeFileName(row.file_name)}`;

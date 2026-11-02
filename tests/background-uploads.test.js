@@ -11,7 +11,7 @@ import {pfDetails} from './pf-fixture.js';
 
 test('a paid case remains hidden until every selected file and optional page is confirmed and finalized',async()=>{
   const root=mkdtempSync(join(tmpdir(),'background-intake-')),port=33000+Math.floor(Math.random()*9000),origin=`http://localhost:${port}`,path=join(root,'test.sqlite');
-  const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),DATABASE_PATH:path,STORAGE_PATH:join(root,'docs'),DRIVE_MODE:'demo',SHEETS_MODE:'demo',SESSION_SECRET:'isolated-background-upload-secret-32-characters',APP_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
+  const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),DATABASE_PATH:path,STORAGE_PATH:join(root,'docs'),SHEETS_MODE:'demo',SESSION_SECRET:'isolated-background-upload-secret-32-characters',APP_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
   let errors='';child.stderr.on('data',data=>errors+=data);
   try {
     await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(errors||'Startup timeout')),15000);child.stdout.on('data',data=>{if(String(data).includes('running')){clearTimeout(timer);resolve();}});child.on('exit',()=>{clearTimeout(timer);reject(Error(errors));});});

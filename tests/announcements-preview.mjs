@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import assert from 'node:assert/strict';
 const root=mkdtempSync(join(tmpdir(),'announcement-preview-'));
 const port=45000+Math.floor(Math.random()*1500),origin=`http://localhost:${port}`;
-const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),APP_ORIGIN:origin,DATABASE_PATH:join(root,'test.sqlite'),STORAGE_PATH:join(root,'files'),DRIVE_MODE:'demo',SHEETS_MODE:'demo',SESSION_SECRET:'announcement-browser-isolated-secret'},stdio:['ignore','pipe','pipe']});
+const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),APP_ORIGIN:origin,DATABASE_PATH:join(root,'test.sqlite'),STORAGE_PATH:join(root,'files'),SHEETS_MODE:'demo',SESSION_SECRET:'announcement-browser-isolated-secret'},stdio:['ignore','pipe','pipe']});
 let browser,stderr='';child.stderr.on('data',d=>stderr+=d);
 const screenshots='deliverables/announcements';mkdirSync(screenshots,{recursive:true});
 try {

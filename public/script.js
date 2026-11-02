@@ -242,7 +242,7 @@ const h = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;
 const dateTime = value => value ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '-';
 const roleName = role => ({admin:'Administrator',sales:'Sales employee',backoffice:'Back office'}[role] || role);
 function icon(name) {
-  const paths={download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',dashboard:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',cases:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',completed:'<rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>',queue:'<path d="M4 5h16v14H4zM4 13h5l2 3h2l2-3h5M8 9h8"/>',payments:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',admin:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',employees:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',plus:'<path d="M12 5v14M5 12h14"/>',more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',logout:'<path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h12"/>',switch:'<path d="M4 7h15l-3-3M20 17H5l3 3M20 7v4M4 17v-4"/>'};
+  const paths={pricing:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',dashboard:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',cases:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',completed:'<rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>',queue:'<path d="M4 5h16v14H4zM4 13h5l2 3h2l2-3h5M8 9h8"/>',payments:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',admin:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',employees:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',plus:'<path d="M12 5v14M5 12h14"/>',more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',logout:'<path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h12"/>',switch:'<path d="M4 7h15l-3-3M20 17H5l3 3M20 7v4M4 17v-4"/>'};
   return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name === 'pending' ? 'queue' : name]||paths.profile}</svg>`;
 }
 function labelTables() {
@@ -286,7 +286,7 @@ async function boot() {
     const googleResult = new URLSearchParams(location.search).get('google');
     if (googleResult) {
       history.replaceState({}, '', location.pathname);
-      toast(googleResult === 'connected' ? 'Google Drive connected and live' : 'Google Drive connection failed');
+      toast(googleResult === 'connected' ? 'Google Sheets connected' : 'Google Sheets connection failed');
     }
   } catch {
     renderLogin();
@@ -313,6 +313,7 @@ async function load() {
 async function loadViewData() {
   if(view==='admin') [googleStatus,sheetsStatus,adminAnalytics] = await Promise.all([api('/api/google/status'),api('/api/google/sheets/status'),api(`/api/admin/dashboard?period=${analyticsPeriod}`)]);
   if(view==='employees') employeeData=await api(employeeUrl());
+  if(view==='pricing') await loadPricing();
 }
 
 function renderLogin() {
@@ -358,13 +359,13 @@ function renderLogin() {
   };
 }
 
-const navLabels = { dashboard: 'Overview', cases: 'Active Cases', pending: 'Pending Cases', completed: 'Completed Cases', payments: 'Payments', queue: 'Operations', admin: 'Business analytics', employees: 'Employees' };
+const navLabels = { dashboard: 'Overview', cases: 'Active Cases', pending: 'Pending Cases', completed: 'Completed Cases', payments: 'Payments', queue: 'Operations', admin: 'Business analytics', employees: 'Employees', pricing: 'Pricing' };
 
 function shell(content) {
-  const links = ['dashboard','cases','pending','completed','payments','queue','admin','employees']
+  const links = ['dashboard','cases','pending','completed','payments','queue','admin','employees','pricing']
     .filter(item => item !== 'queue' || me.role !== 'sales')
 
-    .filter(item => !['admin','employees'].includes(item) || me.role === 'admin');
+    .filter(item => !['admin','employees','pricing'].includes(item) || me.role === 'admin');
   const canCreate = ['sales','admin'].includes(me.role);
   const primaryLinks=links.filter(item=>['dashboard','cases','pending','completed'].includes(item));
   const moreLinks=links.filter(item=>!primaryLinks.includes(item));
@@ -390,7 +391,7 @@ function shell(content) {
 function render() {
   if (!me) return renderLogin();
   caseListNeedsRender = false;
-  const content = view === 'pending' ? renderPendingCases() : view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : renderDashboard();
+  const content = view === 'pending' ? renderPendingCases() : view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : view === 'pricing' ? renderPricing() : renderDashboard();
   app.innerHTML = shell(content);
   labelTables();
   renderBackgroundUploads();
@@ -630,7 +631,6 @@ function renderAdmin() {
   const data = adminAnalytics;
   const m = data.metrics;
   const o = data.operations;
-  const driveLabel = googleStatus?.reconnectRequired ? 'Reconnect required' : googleStatus?.folderInvalid ? 'Folder needs correction' : googleStatus?.live ? 'Live' : googleStatus?.connected ? 'Connected' : 'Not connected';
   const sheetsLabel = sheetsStatus?.live ? 'Live' : sheetsStatus?.configured ? 'Ready' : 'Not configured';
   return `${pageHead('Business analytics', 'Financial performance, team output, and operational health.', periodControl())}
     <section class="metric-grid admin-metrics">
@@ -652,9 +652,8 @@ function renderAdmin() {
       <section class="analytics-panel"><div class="panel-title"><div><h2>Back-office workload</h2><p>Assigned work and delivery output.</p></div></div>${staffTable(data.staffPerformance.backoffice, 'backoffice')}</section>
       <section class="analytics-panel"><div class="panel-title"><div><h2>Recent payments</h2><p>Latest verified collections.</p></div></div>${paymentList(data.recentPayments)}</section>
       <section class="analytics-panel span-2"><div class="panel-title"><div><h2>Connected services</h2><p>Operational data destinations and health.</p></div></div><div class="integration-list">
-        <div><span class="integration-mark drive">D</span><div><strong>Google Drive</strong><small>${googleStatus?.reconnectRequired ? 'Authorization expired. Reconnect to resume uploads.' : 'Customer document storage'}</small></div>${statusBadge(driveLabel)}<button onclick="connectGoogleDrive()">${googleStatus?.reconnectRequired ? 'Reconnect Google Drive' : 'Connect Google Drive'}</button></div>
-        <div><span class="integration-mark sheets">S</span><div><strong>Google Sheets</strong><small>Operations reporting mirror</small></div>${statusBadge(sheetsLabel)}<button onclick="activateGoogleSheets()">Activate Google Sheets</button></div>
-      </div><div class="summary-box"><label>Main Google Drive folder<input id="driveRootFolder" placeholder="Paste the Google Drive folder link" value="${h(googleStatus?.rootFolderId || '')}"></label><p>Use a folder the connected business Google account can edit.</p><button onclick="saveDriveRootFolder(this)">Verify and save folder</button><p>For a Google redirect mismatch, add this exact URL under Authorized redirect URIs in your OAuth client:</p><code style="overflow-wrap:anywhere">${h(googleStatus?.callbackUrl || location.origin + '/api/google/oauth/callback')}</code>${googleStatus?.oauthClientSettingsUrl ? `<p><a href="${h(googleStatus.oauthClientSettingsUrl)}" target="_blank" rel="noopener noreferrer">Open Google OAuth client settings</a></p>` : ''}</div></section>
+        <div><span class="integration-mark sheets">S</span><div><strong>Google Sheets</strong><small>All Workings and Cash Flow</small></div>${statusBadge(sheetsLabel)}<button onclick="connectGoogleSheets()">${googleStatus?.reconnectRequired ? 'Reconnect Google Sheets' : 'Connect Google Sheets'}</button><button onclick="activateGoogleSheets()">Activate Google Sheets</button></div>
+      </div></section>
     </div>
     <section class="section-head"><div><h2>All cases</h2><p>Complete operational register.</p></div><span class="count-label">${number(cases.length)} total</span></section>
     <div class="table-shell">${caseTable(cases)}</div>`;
@@ -773,7 +772,7 @@ function drawWizard() {
 
 function wizardBody(service, variant) {
   if (draft.step === 1) return `<div class="formgrid"><label>Full name<input id="name" oninput="removeNameNumbers(this)" autocomplete="name" value="${h(draft.customer.name || '')}"></label><label>Mobile number<input id="mobile" type="tel" inputmode="numeric" maxlength="10" pattern="[0-9]{10}" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" autocomplete="tel-national" placeholder="10-digit mobile number" value="${h(draft.customer.mobile || '')}"></label><label>Address<input id="address" autocomplete="street-address" value="${h(draft.customer.address || '')}"></label></div><div class="form-actions"><button class="primary" onclick="saveStep1()">Continue</button></div>`;
-  if (draft.step === 2) return `<div class="formgrid"><label>Service<select id="service">${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label></div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="primary" onclick="saveStep2()">Continue</button></div>`;
+  if (draft.step === 2) return `<div class="formgrid"><label>Service<select id="service"><option value="" disabled hidden ${!draft.serviceId ? 'selected' : ''}>Choose...</option>${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label></div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="primary" onclick="saveStep2()">Continue</button></div>`;
   if (draft.step === 3) {
     const docs = applicableDocuments(variant?.documents || [], draft.details);
     const missing = docs.filter(item => item.required && !draft.docs[item.label]);
@@ -819,6 +818,13 @@ function bindWizard() {
   const collectFields = () => document.querySelectorAll('#serviceFields [data-field]').forEach(input => { draft.details[decodeURIComponent(input.dataset.field)] = input.value; });
   const update = () => {
     const service = services.find(item => item.id === serviceSelect.value);
+    if (!service) {
+      draft.serviceId = '';
+      draft.variantId = '';
+      document.querySelector('#serviceFields').innerHTML = '';
+      document.querySelector('#svcInfo').innerHTML = '';
+      return;
+    }
     const variant = service.variants.find(item => item.id === draft.variantId) || service.variants[0];
     draft.serviceId = service.id;
     draft.variantId = variant.id;
@@ -913,7 +919,7 @@ function incomeGuidance(variant, details) {
 
 function rerenderWizard({keepScroll=false}={}) {const scroll=keepScroll?(document.querySelector('#drawer .panel')?.scrollTop||0):0;closeDrawer();drawWizard();if(keepScroll) document.querySelector('#drawer .panel').scrollTop=scroll;}
 function fieldWarning(input) {
-  const label = input.dataset.field ? decodeURIComponent(input.dataset.field) : ({ name: 'Full name', mobile: 'Mobile number' }[input.id] || input.name || 'this field');
+  const label = input.dataset.field ? decodeURIComponent(input.dataset.field) : ({ name: 'Full name', mobile: 'Mobile number', service: 'a service' }[input.id] || input.name || 'this field');
   const value = input.value.trim();
   if (input.dataset.marathiInput !== undefined && value && !IntakeRules.isMarathiName(value)) return 'Please enter this name in Marathi.';
   const required = input.required || (input.tagName === 'SELECT' && input.dataset.optional !== 'true') || ['name', 'mobile'].includes(input.id);
@@ -967,6 +973,7 @@ function saveStep1() {
 }
 function saveStep2() {
   draft.validationStep = 2;
+  if (!validateWizardFields([document.querySelector('#service')])) return;
   const variant = services.find(service => service.id === draft.serviceId)?.variants.find(variant => variant.id === draft.variantId);
   const answers = Object.fromEntries([...document.querySelectorAll('#serviceFields [data-field]')].map(input => [decodeURIComponent(input.dataset.field), input.value]));
   if (IntakeRules.missingAnswerGroups(variant?.fields || [], answers).length) return toast('Answer at least one ration card question to continue.');
@@ -1564,35 +1571,86 @@ function closeDrawer() {
   document.querySelector('#drawer')?.remove();
   document.body?.classList?.remove('payment-open');
 }
-async function connectGoogleDrive() { try { location.href = (await api('/api/google/oauth/start')).authorizationUrl; } catch (error) { toast(error.message); } }
-async function saveDriveRootFolder(button) {
-  button.disabled = true;
-  try { await api('/api/google/root-folder',{method:'POST',body:{folder:document.querySelector('#driveRootFolder').value}}); await load(); toast('Drive folder verified and saved. Retry your pending uploads.'); }
-  catch (error) { toast(error.message); }
-  finally { button.disabled = false; }
-}
+async function connectGoogleSheets() { try { location.href = (await api('/api/google/oauth/start')).authorizationUrl; } catch (error) { toast(error.message); } }
 async function activateGoogleSheets() { try { toast('Verifying workbook and syncing cases'); const result = await api('/api/google/sheets/activate', { method:'POST' }); await load(); toast(`Google Sheets live: ${result.syncedCases} cases synced`); } catch (error) { toast(error.message); } }
 async function setAnalyticsPeriod(period) { analyticsPeriod = period; adminAnalytics = await api(`/api/admin/dashboard?period=${period}`); render(); }
-async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/logout', { method:'POST' });clearTimeout(updatesTimer);caseNotifications=[];recentUpdatesOpen=false;announcements=[];announcementsUnavailable=false;announcementPosting=false;if(announcementPreviewUrl) URL.revokeObjectURL(announcementPreviewUrl);announcementPreviewUrl=''; me = null;restoredUploadOwner=null;renderBackgroundUploads();view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';renderLogin(); }
+async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/logout', { method:'POST' });clearTimeout(updatesTimer);caseNotifications=[];recentUpdatesOpen=false;announcements=[];announcementsUnavailable=false;announcementPosting=false;if(announcementPreviewUrl) URL.revokeObjectURL(announcementPreviewUrl);announcementPreviewUrl=''; me = null;restoredUploadOwner=null;renderBackgroundUploads();view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';pricingData=null;pricingSalesId='';pricingError='';pricingRequest++;renderLogin(); }
 async function setView(next) {
   if(drawerBusy) return;
   closeDrawer();view=next;render();
   if(next==='payments') {await refreshPayments();return;}
   void refreshCaseUpdates();
-  if(me.role==='admin' && ['admin','employees'].includes(next)) {
+  if(me.role==='admin' && ['admin','employees','pricing'].includes(next)) {
     try {await loadViewData();if(view===next) render();} catch(error) {toast(error.message);}
   }
 }
 
-Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, previewDraftDocument, previewDocument, closeDocumentPreview, changePreviewPage, zoomDocumentPreview, uploadCaseDocument, showReuploadRequest, submitReupload, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleDrive, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
+Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, previewDraftDocument, previewDocument, closeDocumentPreview, changePreviewPage, zoomDocumentPreview, uploadCaseDocument, showReuploadRequest, submitReupload, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleSheets, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
 Object.assign(window, { downloadCaseFiles, wizardBack, removeNameNumbers, rememberNoticeState, rememberRecentUpdates, setIntakeLanguage });
 Object.assign(window,{previewAnnouncementPicture,clearAnnouncementPicture,publishAnnouncement,removeAnnouncement});
-Object.assign(window, { saveDriveRootFolder });
 Object.assign(window, { toggleEmployeeDates, applyEmployeePeriod, createEmployee });
 Object.assign(window,{focusSignIn,switchAccount});
 document.addEventListener('click',event=>{document.querySelectorAll('.profile[open],.mobile-more[open]').forEach(menu=>{if(!menu.contains(event.target)) menu.open=false;});});
 document.addEventListener('keydown',event=>{if(event.key==='Escape') document.querySelectorAll('.profile[open],.mobile-more[open]').forEach(menu=>{menu.open=false;menu.querySelector('summary')?.focus();});});
 // Direct UPI checkout uses the existing staff session and UI.
+
+let pricingData = null, pricingSalesId = '', pricingError = '';
+let pricingRequest = 0;
+async function loadPricing() {
+  const request=++pricingRequest, owner=me?.id;
+  pricingError='';
+  if(view==='pricing') render();
+  try {
+    const data=await api('/api/admin/pricing',{signal:AbortSignal.timeout(15000)});
+    if(request!==pricingRequest || me?.id!==owner) return;
+    if(!Array.isArray(data.salespeople) || !Array.isArray(data.prices) || !Array.isArray(data.overrides)) throw Error('The pricing response is incomplete. Please retry.');
+    pricingData=data;
+  } catch(error) {
+    if(request!==pricingRequest || me?.id!==owner) return;
+    pricingError=['TimeoutError','AbortError'].includes(error.name) ? 'Pricing took too long to load. Please retry.' : error.message;
+  } finally {
+    if(request===pricingRequest && me?.id===owner && view==='pricing') render();
+  }
+}
+function renderPricing() {
+  if (me.role !== 'admin') return empty('Admin access required.');
+  const head = pageHead('Pricing','Set individual service prices for each salesperson.');
+  if (pricingError) return `${head}<section class="analytics-panel"><p role="alert">Could not load pricing: ${h(pricingError)}</p><button class="primary" onclick="loadPricing()">Retry</button></section>`;
+  if (!pricingData) return head + empty('Loading pricing...');
+  const selected = pricingData.salespeople.find(person => person.id === pricingSalesId);
+  return `${head}<section class="analytics-panel pricing-panel"><label class="pricing-salesperson">Salesperson<select id="pricingSalesperson" onchange="selectPricingSalesperson(this.value)"><option value="">Choose a salesperson...</option>${pricingData.salespeople.map(person=>`<option value="${h(person.id)}" ${person.id===pricingSalesId?'selected':''}>${h(person.name)} (${h(person.username)})${person.active?'':' - Inactive'}</option>`).join('')}</select></label></section>${selected?`<section class="pricing-grid" aria-label="Service prices for ${h(selected.name)}">${pricingData.prices.map(price=>{
+    const custom=pricingData.overrides.find(item=>item.sales_user_id===selected.id && item.variant_id===price.variant_id);
+    return `<form class="analytics-panel pricing-card" onsubmit="saveSalespersonPrice(event,'${h(price.variant_id)}')"><h2>${h(price.service_name)}</h2><small>${h(price.variant_name)}</small><p>Default: ${money(custom?.price ?? price.price)} <span class="badge ${custom?'success':'neutral'}">${custom?'Individual price':'Default price'}</span></p><label>Service price (Rs.)<input name="price" aria-label="${h(price.service_name)} price" type="number" min="0.01" max="1000000" step="0.01" value="${((custom?.price ?? price.price)/100).toFixed(2)}" required></label><div class="pricing-actions"><button class="primary" type="submit">Save price</button>${custom?`<button type="button" onclick="resetSalespersonPrice(this,'${h(price.variant_id)}')">Use default</button>`:''}</div><small class="pricing-result" role="status"></small></form>`;
+  }).join('')}</section>`:empty(pricingData.salespeople.length?'Choose a salesperson to edit their service prices.':'Create a sales employee in Employees to set their prices.')}`;
+}
+function selectPricingSalesperson(value) { pricingSalesId=value;render(); }
+async function persistSalespersonPrice(form,variantId,price) {
+  const salesUserId=pricingSalesId, owner=me?.id;
+  const buttons=[...form.querySelectorAll('button')];
+  const result=form.querySelector('.pricing-result');
+  buttons.forEach(button=>button.disabled=true);result.textContent='Saving...';
+  try {
+    await api('/api/admin/pricing',{method:'POST',body:{salesUserId,variantId,price}});
+    if(me?.id!==owner) return;
+    pricingData.overrides=pricingData.overrides.filter(item=>item.sales_user_id!==salesUserId || item.variant_id!==variantId);
+    if(price!==null) pricingData.overrides.push({sales_user_id:salesUserId,variant_id:variantId,price});
+    if(view==='pricing' && pricingSalesId===salesUserId) {
+      // Replace only this card so unsaved prices in other cards stay intact.
+      const holder=document.createElement('div');holder.innerHTML=renderPricing();
+      const replacement=[...holder.querySelectorAll('.pricing-card')].find(card=>card.getAttribute('onsubmit')===form.getAttribute('onsubmit'));
+      if(replacement && form.isConnected) {form.replaceWith(replacement);replacement.querySelector('.pricing-result').textContent=price===null?'Default price restored.':'Price saved.';}
+    }
+  } catch(error) {result.textContent=error.message;}
+  finally {buttons.forEach(button=>button.disabled=false);}
+}
+async function saveSalespersonPrice(event,variantId) {
+  event.preventDefault();
+  const price=Math.round(Number(event.target.elements.price.value)*100);
+  await persistSalespersonPrice(event.target,variantId,price);
+}
+async function resetSalespersonPrice(button,variantId) {await persistSalespersonPrice(button.closest('form'),variantId,null);}
+Object.assign(window,{loadPricing,selectPricingSalesperson,saveSalespersonPrice,resetSalespersonPrice});
+
 let paymentData = null, paymentSettings = null, checkout = null;
 let paymentFilters = '';
 const selectedPaymentCases=new Set();
@@ -1651,7 +1709,7 @@ function paymentSettingsPanel() {
     ${!c.receiverReady ? `<form class="formgrid" onsubmit="confirmReceiver(event)"><label class="check"><input name="ownerConfirmed" type="checkbox" required>I confirm this UPI account belongs to SUCCESS ONLINE SERVICES and want checkout enabled</label><button class="primary">Enable UPI checkout</button></form>` : `<p>Enabled by ${c.receiverActivationBasis==='owner_confirmation' ? 'business account confirmation' : 'received test transfer confirmation'}. Customer payments still require individual verification.</p>`}
     <p>Saved standard prices remain available when test pricing is disabled. Existing orders keep their original amount.</p><button onclick="setTestPricing(${!c.testPricingMode})">${c.testPricingMode ? 'Disable' : 'Enable'} ₹1 test pricing</button>
     <div class="formgrid">${c.prices.map(p=>`<form onsubmit="saveServicePrice(event,'${p.variant_id}')"><label>${h(p.service_name)} — standard ₹ price<input name="price" type="number" min="0.01" max="1000000" step="0.01" value="${(p.price/100).toFixed(2)}" required></label><small>Original: ${money(p.original_price)}</small><button>Save price</button></form>`).join('')}</div>
-    <button onclick="retryPaymentSync()">Retry pending Google Drive / Sheets sync</button></details>`;
+    <button onclick="retryPaymentSync()">Retry pending Google Sheets sync</button></details>`;
 }
 async function filterPayments(event) {
   event.preventDefault();

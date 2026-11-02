@@ -10,7 +10,7 @@ test('announcements persist text and private pictures, enforce admin permissions
   const port=39000+Math.floor(Math.random()*2000),origin=`http://localhost:${port}`;
   let child;
   async function start() {
-    child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),APP_ORIGIN:origin,DATABASE_PATH:join(root,'test.sqlite'),STORAGE_PATH:join(root,'files'),DRIVE_MODE:'demo',SHEETS_MODE:'demo',SESSION_SECRET:'isolated-announcements-test-secret'},stdio:['ignore','pipe','pipe']});
+    child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),APP_ORIGIN:origin,DATABASE_PATH:join(root,'test.sqlite'),STORAGE_PATH:join(root,'files'),SHEETS_MODE:'demo',SESSION_SECRET:'isolated-announcements-test-secret'},stdio:['ignore','pipe','pipe']});
     let errors='';child.stderr.on('data',d=>errors+=d);
     await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(errors)),15000);child.stdout.on('data',d=>{if(String(d).includes('running')){clearTimeout(timer);resolve();}});child.on('exit',code=>{clearTimeout(timer);reject(Error(`Exited ${code}: ${errors}`));});});
   }

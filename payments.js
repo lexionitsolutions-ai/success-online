@@ -13,9 +13,9 @@ export function receiverActivation(confirmation, activation) {
   if(matches(confirmation) && confirmation.verifiedBy && confirmation.verifiedAt && /^\d{12}$/.test(confirmation.utr || '')) return {ready:true,basis:'test_transfer'};
   return {ready:false,basis:null};
 }
-export function priceAmounts(v, override, original) {
-  if (paymentConfig().testPricingMode && !original?.testPricingExempt) return { serviceCharge:100, officialFee:0, tax:0, total:100 };
-  const serviceCharge = override ?? v.service_charge ?? 0, officialFee = original?.officialFee ?? v.official_fee ?? 0;
+export function priceAmounts(v, override, original, salespersonPrice) {
+  if (salespersonPrice == null && paymentConfig().testPricingMode && !original?.testPricingExempt) return { serviceCharge:100, officialFee:0, tax:0, total:100 };
+  const serviceCharge = salespersonPrice ?? override ?? v.service_charge ?? 0, officialFee = original?.officialFee ?? v.official_fee ?? 0;
   const tax = Math.round(serviceCharge * (original?.taxRate ?? v.tax_rate ?? 0) / 100);
   return {serviceCharge, officialFee, tax, total:serviceCharge + officialFee + tax};
 }
@@ -32,8 +32,10 @@ export function generateUPIPaymentURL({upiId, payeeName, amount, orderId, servic
   const description = [customer.slice(0,customerBudget), service.slice(0,budget-customerBudget), reference].filter(Boolean).join(' - ');
   return 'upi://pay?' + Object.entries({pa:upiId,pn:payeeName,am:(amount/100).toFixed(2),cu:'INR',tn:description}).map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('&');
 }
+export const salespersonPricingSchema = `CREATE TABLE IF NOT EXISTS salesperson_prices (sales_user_id TEXT NOT NULL REFERENCES users(id), variant_id TEXT NOT NULL REFERENCES variants(id), price INTEGER NOT NULL CHECK(price > 0 AND price <= 100000000), updated_by TEXT NOT NULL REFERENCES users(id), updated_at TEXT NOT NULL, PRIMARY KEY(sales_user_id,variant_id));`;
 export const paymentSchema = `
 CREATE TABLE IF NOT EXISTS service_prices (variant_id TEXT PRIMARY KEY, price INTEGER NOT NULL CHECK(price >= 0), original_price INTEGER NOT NULL, original_config TEXT NOT NULL, updated_by TEXT, updated_at TEXT);
+${salespersonPricingSchema}
 CREATE TABLE IF NOT EXISTS upi_orders (payment_id TEXT PRIMARY KEY REFERENCES payments(id), upi_id TEXT NOT NULL, payee_name TEXT NOT NULL, service_name TEXT NOT NULL, created_by TEXT NOT NULL, payment_method TEXT, initiated_at TEXT, submitted_at TEXT, verified_by TEXT, verification_notes TEXT, expires_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS payment_attempts (id TEXT PRIMARY KEY, payment_id TEXT NOT NULL REFERENCES payments(id), action TEXT NOT NULL, method TEXT, utr TEXT, actor_id TEXT NOT NULL, notes TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS verified_upi_refs (utr TEXT PRIMARY KEY, payment_id TEXT UNIQUE NOT NULL REFERENCES payments(id));
@@ -92,7 +94,8 @@ export function createPayments({db, recomputeCase, send, body}) {
     const existing = await one("SELECT * FROM payments WHERE case_id=$case AND gateway='direct_upi' AND status IN ('PENDING','INITIATED','AWAITING_VERIFICATION','PAID') ORDER BY CASE WHEN status='PAID' THEN 0 WHEN status='AWAITING_VERIFICATION' THEN 1 ELSE 2 END,created_at DESC LIMIT 1",{$case:c.id});
     if (existing) return existing;
     const variant = await one('SELECT v.*,s.price configured_price,s.original_config FROM variants v LEFT JOIN service_prices s ON s.variant_id=v.id WHERE v.id=$id',{$id:c.variant_id});
-    const base = priceAmounts(variant,variant.configured_price,variant.original_config ? JSON.parse(variant.original_config) : undefined);
+    const custom = await one('SELECT price FROM salesperson_prices WHERE sales_user_id=$sales AND variant_id=$variant',{$sales:c.sales_user_id,$variant:c.variant_id});
+    const base = priceAmounts(variant,variant.configured_price,variant.original_config ? JSON.parse(variant.original_config) : undefined,custom?.price);
     const a = JSON.parse(variant.fields_json || '[]').some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base, JSON.parse(c.details_json || '{}')) : base;
     if (!Number.isSafeInteger(a.total) || a.total <= 0) fail(409,'Configure a positive service price first');
     const service = await one('SELECT name FROM services WHERE id=$id',{$id:c.service_id});
@@ -129,6 +132,30 @@ export function createPayments({db, recomputeCase, send, body}) {
   const batches=createBatchPayments({db,send,body,createOrder,recomputeCase,receiverReady,event,config:paymentConfig,generateURL:generateUPIPaymentURL});
   async function handle(req,res,url,user) {
     if(await batches.handle(req,res,url,user)) return true;
+    if (url.pathname === '/api/admin/pricing') {
+      if (user.role !== 'admin') fail(403,'Admin access required');
+      if (req.method === 'GET') {
+        const [salespeople,prices,overrides] = await Promise.all([
+          all("SELECT id,name,username,active FROM users WHERE role='sales' ORDER BY name,username"),
+          all('SELECT p.variant_id,p.price,v.name variant_name,s.name service_name FROM service_prices p JOIN variants v ON v.id=p.variant_id JOIN services s ON s.id=v.service_id WHERE v.active=1 AND s.active=1 ORDER BY s.name,v.name'),
+          all('SELECT sales_user_id,variant_id,price FROM salesperson_prices')
+        ]);
+        send(res,200,{salespeople,prices,overrides,testPricingMode:paymentConfig().testPricingMode});return true;
+      }
+      if (req.method !== 'POST') fail(405,'Method not allowed');
+      const b = await body(req);
+      if (typeof b.salesUserId !== 'string' || !b.salesUserId || typeof b.variantId !== 'string' || !b.variantId) fail(400,'Choose a salesperson and service');
+      if (!await one("SELECT id FROM users WHERE id=$id AND role='sales'",{$id:b.salesUserId})) fail(400,'Choose a valid salesperson');
+      if (!await one('SELECT v.id FROM variants v JOIN services s ON s.id=v.service_id WHERE v.id=$id AND v.active=1 AND s.active=1',{$id:b.variantId})) fail(404,'Service not found');
+      if (b.price === null) {
+        await run('DELETE FROM salesperson_prices WHERE sales_user_id=$sales AND variant_id=$variant',{$sales:b.salesUserId,$variant:b.variantId});
+      } else {
+        if (!Number.isSafeInteger(b.price) || b.price < 1 || b.price > 100000000) fail(400,'Price must be positive integer paise');
+        await run('INSERT INTO salesperson_prices(sales_user_id,variant_id,price,updated_by,updated_at) VALUES ($sales,$variant,$price,$actor,$at) ON CONFLICT(sales_user_id,variant_id) DO UPDATE SET price=$price,updated_by=$actor,updated_at=$at',{$sales:b.salesUserId,$variant:b.variantId,$price:b.price,$actor:user.id,$at:at()});
+      }
+      await audit(user,'salesperson-price',b.variantId,JSON.stringify({salesUserId:b.salesUserId,price:b.price}));
+      send(res,200,{ok:true});return true;
+    }
     if (url.pathname === '/api/payment-settings') {
       if (req.method === 'GET') { const receiver=await receiverStatus();send(res,200,{...paymentConfig(),receiverReady:receiver.ready,receiverActivationBasis:receiver.basis,prices:user.role==='admin' ? await all('SELECT p.*,v.name,s.name service_name FROM service_prices p JOIN variants v ON v.id=p.variant_id JOIN services s ON s.id=v.service_id') : []}); return true; }
       if (user.role !== 'admin') fail(403,'Admin access required');

@@ -21,6 +21,15 @@ function client() {
   return { context, run: source => vm.runInContext(source, context) };
 }
 
+test('admin integrations show Sheets reporting without Drive controls',()=>{
+  const {run}=client();
+  run("me={role:'admin'};cases=[];googleStatus={connected:true};sheetsStatus={configured:true};adminAnalytics={metrics:{},operations:{},trend:[],statusBreakdown:[],servicePerformance:[],staffPerformance:{sales:[],backoffice:[]},recentPayments:[]}");
+  const markup=run('renderAdmin()');
+  assert.match(markup,/Google Sheets/);
+  assert.match(markup,/connectGoogleSheets/);
+  assert.doesNotMatch(markup,/Google Drive|driveRootFolder|connectGoogleDrive/);
+});
+
 test('all services render Marathi document checklists and separate bilingual notes',()=>{
   const {context,run}=client();
   for (const service of serviceCatalog) {

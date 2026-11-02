@@ -50,6 +50,7 @@ test('test pricing covers new services and preserves standard pricing for restor
   const previous=process.env.TEST_PRICING_MODE;
   try {
     process.env.TEST_PRICING_MODE='true';assert.equal(priceAmounts({service_charge:90000,official_fee:10000,tax_rate:18},12300).total,100);
+    assert.deepEqual(priceAmounts({service_charge:90000,official_fee:0,tax_rate:0},12300,undefined,25000),{serviceCharge:25000,officialFee:0,tax:0,total:25000});
     assert.equal(priceAmounts({}).total,100);
     assert.deepEqual(priceAmounts({service_charge:20000,official_fee:0,tax_rate:0},20000,{testPricingExempt:true,officialFee:0,taxRate:0}),{serviceCharge:20000,officialFee:0,tax:0,total:20000});
     process.env.TEST_PRICING_MODE='false';assert.deepEqual(priceAmounts({service_charge:1000,official_fee:200,tax_rate:18},3000),{serviceCharge:3000,officialFee:200,tax:540,total:3740});

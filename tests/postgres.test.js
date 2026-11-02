@@ -52,7 +52,7 @@ test('PostgreSQL bindings preserve literals and reuse named parameter positions'
 
 test('PostgreSQL API and signed cloud uploads: access, large files, retries, analytics and completion', {timeout:60000}, async () => {
   const port = 22000 + Math.floor(Math.random()*5000)*2, origin = `http://localhost:${port}`;
-  const child = spawn(process.execPath,['tests/postgres-server.mjs'],{env:{...process.env,NODE_ENV:'test',PORT:String(port),APP_ORIGIN:origin,VERCEL:'1',DATABASE_URL:'postgresql://test:test@localhost/test',INITIAL_ADMIN_USERNAME:'admin',INITIAL_ADMIN_PASSWORD:'AdminPassword123',SESSION_SECRET:'cloud-test-private-session-secret-12345',DRIVE_MODE:'live',SHEETS_MODE:'demo',PAYMENT_MODE:'demo',TEST_GOOGLE_REVOKED:'1',TEST_GOOGLE_DELAY_MS:'2000',GOOGLE_OAUTH_CLIENT_ID:'mock',GOOGLE_OAUTH_CLIENT_SECRET:'mock',GOOGLE_OAUTH_REFRESH_TOKEN:'mock',GOOGLE_ROOT_FOLDER_ID:'root'},stdio:['ignore','pipe','pipe']});
+  const child = spawn(process.execPath,['tests/postgres-server.mjs'],{env:{...process.env,NODE_ENV:'test',PORT:String(port),APP_ORIGIN:origin,VERCEL:'1',DATABASE_URL:'postgresql://test:test@localhost/test',INITIAL_ADMIN_USERNAME:'admin',INITIAL_ADMIN_PASSWORD:'AdminPassword123',SESSION_SECRET:'cloud-test-private-session-secret-12345',SHEETS_MODE:'demo',PAYMENT_MODE:'demo',TEST_GOOGLE_REVOKED:'1',TEST_GOOGLE_DELAY_MS:'2000',GOOGLE_OAUTH_CLIENT_ID:'mock',GOOGLE_OAUTH_CLIENT_SECRET:'mock',GOOGLE_OAUTH_REFRESH_TOKEN:'mock',GOOGLE_ROOT_FOLDER_ID:'root'},stdio:['ignore','pipe','pipe']});
   let output = '';
   child.stderr.on('data',chunk => output += chunk);
   try {
@@ -111,10 +111,8 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const checkoutStarted=performance.now();
     assert.equal((await request(path+'/payment-order',{cookie:accounts.sales,method:'POST'})).status,201);
     assert.ok(performance.now()-checkoutStarted<1500,'Checkout must not wait on the in-flight Google mirror');
-    assert.equal(first.result.data.googleSyncPending,true,'An expired optional Google mirror must not fail the Supabase upload');
-    const reconnectDeadline=Date.now()+5000;
-    while(!(await request('/api/google/status',{cookie:admin})).data.reconnectRequired && Date.now()<reconnectDeadline) await new Promise(resolve=>setTimeout(resolve,30));
-    assert.equal((await request('/api/google/status',{cookie:admin})).data.reconnectRequired,true);
+    assert.equal(first.result.data.googleSyncPending,undefined,'Storage uploads do not schedule Drive copies');
+    assert.equal((await request('/api/google/status',{cookie:admin})).data.reconnectRequired,false,'Uploads never request Google authorization');
     const retry = await request(path+'/documents',{cookie:accounts.sales,body:{uploadId:first.uploadId}});assert.equal(retry.status,200);
     const bad = await upload('Photo',Buffer.from('not a pdf'));
     assert.equal(bad.result.status,400);
@@ -199,7 +197,7 @@ test('cloud payments commit before delayed Sheets work and preserve retryable jo
   const root=mkdtempSync(join(tmpdir(),'payment-cloud-sync-'));
   const port=34000+Math.floor(Math.random()*4000)*2, origin=`http://localhost:${port}`;
   const failure=join(root,'google-failure'), workbookFile=join(root,'sheets.json');
-  const child=spawn(process.execPath,['--import','./tests/google-mock.mjs','tests/postgres-server.mjs'],{env:{...process.env,NODE_ENV:'test',PORT:String(port),APP_ORIGIN:origin,VERCEL:'1',DATABASE_URL:'postgresql://test:test@localhost/test',INITIAL_ADMIN_USERNAME:'admin',INITIAL_ADMIN_PASSWORD:'AdminPassword123',SESSION_SECRET:'cloud-payment-test-private-session-secret',DRIVE_MODE:'live',GOOGLE_ROOT_FOLDER_ID:'root',SHEETS_MODE:'live',TEST_GOOGLE_REVOKED:'0',GOOGLE_OAUTH_CLIENT_ID:'mock',GOOGLE_OAUTH_CLIENT_SECRET:'mock',GOOGLE_OAUTH_REFRESH_TOKEN:'mock',GOOGLE_OPERATIONS_SPREADSHEET_ID:'workbook',GOOGLE_MOCK_FAILURE_FILE:failure,GOOGLE_MOCK_SHEETS_FILE:workbookFile},stdio:['ignore','pipe','pipe']});
+  const child=spawn(process.execPath,['--import','./tests/google-mock.mjs','tests/postgres-server.mjs'],{env:{...process.env,NODE_ENV:'test',PORT:String(port),APP_ORIGIN:origin,VERCEL:'1',DATABASE_URL:'postgresql://test:test@localhost/test',INITIAL_ADMIN_USERNAME:'admin',INITIAL_ADMIN_PASSWORD:'AdminPassword123',SESSION_SECRET:'cloud-payment-test-private-session-secret',GOOGLE_ROOT_FOLDER_ID:'root',SHEETS_MODE:'live',TEST_GOOGLE_REVOKED:'0',GOOGLE_OAUTH_CLIENT_ID:'mock',GOOGLE_OAUTH_CLIENT_SECRET:'mock',GOOGLE_OAUTH_REFRESH_TOKEN:'mock',GOOGLE_OPERATIONS_SPREADSHEET_ID:'workbook',GOOGLE_MOCK_FAILURE_FILE:failure,GOOGLE_MOCK_SHEETS_FILE:workbookFile},stdio:['ignore','pipe','pipe']});
   let errors='';child.stderr.on('data',chunk=>errors+=chunk);
   try {
     await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(errors)),20000);child.stdout.on('data',chunk=>{if(String(chunk).includes('running')){clearTimeout(timer);resolve();}});child.on('exit',code=>{clearTimeout(timer);reject(Error('Cloud fixture exited '+code+': '+errors));});});
@@ -223,12 +221,12 @@ test('cloud payments commit before delayed Sheets work and preserve retryable jo
     let mirrored=false;
     while(Date.now()<mirrorDeadline && !mirrored) {
       if(existsSync(workbookFile)) {
-        try { mirrored=Object.values(JSON.parse(readFileSync(workbookFile,'utf8')).Documents || {}).some(row=>row[9]==='https://drive.google.com/file/d/mock-file/view'); }
+        try { mirrored=Object.values(JSON.parse(readFileSync(workbookFile,'utf8'))['All Workings'] || {}).some(row=>row[0]===c.ref && row[6]==='complete'); }
         catch(error) { if(!(error instanceof SyntaxError)) throw error; } // The mock writer may still be replacing the JSON contents.
       }
       if(!mirrored) await new Promise(resolve=>setTimeout(resolve,30));
     }
-    assert.ok(mirrored,'A deferred document mirror must eventually populate the Drive link in Sheets');
+    assert.ok(mirrored,'The single operations row eventually records complete documents');
     await api('/api/payments/'+c.payment.id+'/submit',{utr:'444444444444'});
     await api('/api/payments-sync',undefined,'POST');
     writeFileSync(failure,'sheets-slow-fail');
@@ -243,8 +241,8 @@ test('cloud payments commit before delayed Sheets work and preserve retryable jo
     await api('/api/payments-sync',undefined,'POST');
     assert.ok(existsSync(workbookFile));
     const workbook=JSON.parse(readFileSync(workbookFile,'utf8'));
-    assert.equal(Object.values(workbook.Cashflow).length,1);
-    assert.equal(Object.values(workbook.Cashflow)[0][3],c.payment.id);
+    assert.equal(Object.values(workbook['Cash Flow']).length,1);
+    assert.equal(Object.values(workbook['Cash Flow'])[0][7],c.payment.id);
     await api('/api/admin/employees',{name:'Status Test Office',username:'statusoffice',role:'backoffice',password:'OfficeTestPassword123'});
     const officeLogin=await fetch(origin+'/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'statusoffice',password:'OfficeTestPassword123'})});
     const officeCookie=officeLogin.headers.get('set-cookie').split(';')[0];
@@ -265,8 +263,8 @@ test('cloud payments commit before delayed Sheets work and preserve retryable jo
     assert.equal(saved.notes.filter(n=>n.note==='Validated status update fixture').length,1);
     unlinkSync(failure);
     await api('/api/payments-sync',undefined,'POST');
-    const mirroredStatus=Object.values(JSON.parse(readFileSync(workbookFile,'utf8'))['All Cases']).find(row=>row[0]===c.ref);
-    assert.equal(mirroredStatus[9],'Ready to Submit','Retry eventually mirrors the saved back-office status');
+    const mirroredStatus=Object.values(JSON.parse(readFileSync(workbookFile,'utf8'))['All Workings']).find(row=>row[0]===c.ref);
+    assert.equal(mirroredStatus[13],'Ready to Submit','Retry eventually mirrors the saved back-office status');
     assert.ok(!errors.includes('Deferred Sheets sync failed'),errors);
   } finally {child.kill();}
 });

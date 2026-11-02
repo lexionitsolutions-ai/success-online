@@ -1,8 +1,12 @@
 # Success Online
 
-Internal web app for Success Online, a private Indian e-Seva assistance business. It includes sales intake, back-office queues, admin oversight, employee performance reviews, role checks, Supabase PostgreSQL and private Storage support, optional Google Drive/Sheets integrations, and isolated integration tests. Direct UPI payments use manual receiving-account verification; every service costs INR 1 while test pricing is enabled.
+Internal web app for Success Online, a private Indian e-Seva assistance business. It includes sales intake, back-office queues, admin oversight, employee performance reviews, role checks, Supabase PostgreSQL and private Storage support, optional Google Sheets reporting, and isolated integration tests. Direct UPI payments use manual receiving-account verification; services without an individual salesperson price use INR 1 test pricing when enabled, except services configured to retain their standard price. Saved individual salesperson prices apply at checkout even during test pricing.
 
 For Vercel hosting with Supabase, follow [supabase/README.md](supabase/README.md).
+
+When upgrading an existing cloud database to salesperson pricing, run
+`npm.cmd run migrate:pricing` against the target database before deploying.
+This creates the pricing table and restricts direct access without changing existing records.
 
 The mobile workspace uses a fixed header with a profile menu, bottom navigation,
 case cards, larger form controls and labeled employee metrics. The profile menu
@@ -47,7 +51,7 @@ npm.cmd run build
 
 - Sales can create service-specific cases, collect application information, and upload JPG/PNG/PDF checklist documents.
 - Required documents and pending uploads gate progression. A single native document picker offers the device's supported sources. Loaders show case creation and upload progress.
-- Back office and admin can download current case files in one ZIP, with a named root folder and document-type subfolders. Live Drive downloads are served through authenticated API routes.
+- Back office and admin can download current case files in one ZIP, with a named root folder and document-type subfolders. Private documents are served through authenticated API routes.
 - `public/script.js` is the generated browser entry point. `google-apps-script/script.js` is the complete paste-ready Apps Script, identical to `Code.gs`.
 - The service catalog includes all 15 services listed in the client PDF, with conditional requirements for income, age, caste, and ration-card cases.
 - PF password entry is not collected or stored by the case intake; the customer is directed to enter it in the official portal during an assisted session.
@@ -56,7 +60,7 @@ npm.cmd run build
 - Back office users see operational queues, claim ready cases atomically, and post status updates with notes.
 - Admin users see all cases, business metrics, employee performance over custom dates, and can create sales/back-office accounts with credentials.
 - Case references are readable (`SO-2026-000001`) while internal IDs are non-guessable UUIDs.
-- Demo Drive writes private local files under `demo-integrations/Success Online Customers`.
+- Local development writes private files under `demo-integrations/documents`.
 - Demo Sheets writes/upserts case summaries into `demo-integrations/Success Online Operations.json` keyed by case ID.
 - Direct UPI orders have server-controlled amounts, UTR claims, admin verification and database uniqueness controls.
 - Apps Script source is in `google-apps-script/` for workbook setup and report maintenance.
@@ -65,18 +69,9 @@ The checklists reproduce the client-provided PDF. Confirm current official requi
 
 ## Integration setup
 
-### Google Drive
-
-Set `DRIVE_MODE=live` only after choosing one production mode:
-
-- Google Workspace Shared Drive: create a Google Cloud project, enable Drive API and Sheets API, create a service account, add it to the Shared Drive with appropriate permissions, set `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_KEY_FILE`, `GOOGLE_SHARED_DRIVE_ID`, and `GOOGLE_ROOT_FOLDER_ID`.
-- Dedicated business My Drive: create OAuth credentials, complete OAuth consent, store refresh credentials privately, and set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN`, and `GOOGLE_ROOT_FOLDER_ID`.
-
-Service accounts cannot own files in an ordinary consumer My Drive unless the Drive is shared with them through supported access. Keep all files private and serve authorized access through the app.
-
 ### Google Sheets
 
-Create `Success Online Operations`, copy `google-apps-script/Code.gs` into Extensions > Apps Script, run `setupSuccessOnlineWorkbook`, and set `GOOGLE_OPERATIONS_SPREADSHEET_ID`. The database stays authoritative; Sheets is a mirror and reporting surface.
+Use the existing spreadsheet, copy `google-apps-script/script.js` into Extensions > Apps Script, and run `setupSuccessOnlineWorkbook`. The backend syncs only **All Workings** and **Cash Flow**. Set `GOOGLE_OPERATIONS_SPREADSHEET_ID` to the same spreadsheet. All Workings keeps one current row per case; Cash Flow keeps verified receipts and separate negative refund entries. Stable references prevent duplicate rows. The database remains authoritative; private document files stay in storage.
 
 ### Payments
 
@@ -88,7 +83,7 @@ The local build hashes passwords, uses HTTP-only cookies, validates uploads, mas
 
 ## Backups and retention
 
-Back up the SQLite database and the business-controlled Drive root daily. Keep document retention aligned with Success Online's privacy notice and delete case documents when the lawful retention period ends.
+Back up the SQLite database and the private document storage daily. Keep document retention aligned with Success Online's privacy notice and delete case documents when the lawful retention period ends.
 
 
 ### Combined case payments and uploads
@@ -97,4 +92,4 @@ In case review, **Save & create another** starts the next intake and **Save & pa
 
 Run the database migration before deploying this feature: `payment_batches` and `payment_batch_items` use the same private RLS policy as the other server-only tables.
 
-Cloud intake uploads at most three documents concurrently. Signed uploads are validated and retained in their original private object rather than copied again. Intake schedules Google Drive/Sheets mirroring after all files finish; the response does not wait for Google. Pending/failed mirrors remain in `sync_jobs` and can be retried from Payments settings. Storage cleanup preserves objects referenced by document records, including completed signed uploads.
+Cloud intake uploads at most three documents concurrently. Signed uploads are validated and retained in their original private object rather than copied again. Intake schedules Google Sheets reporting after all files finish; the response does not wait for Google. Pending/failed reporting jobs remain in `sync_jobs` and can be retried from Payments settings. Storage cleanup preserves objects referenced by document records, including completed signed uploads.

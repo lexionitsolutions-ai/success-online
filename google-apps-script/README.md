@@ -1,13 +1,15 @@
-# Success Online Operations Apps Script
+# Success Online: two-tab workbook
 
-1. Create or open the `Success Online Operations` spreadsheet.
-2. Open Extensions > Apps Script.
-3. Paste `Code.gs` or the identical `script.js`, save, and run `setupSuccessOnlineWorkbook`. Setup preserves existing rows.
-4. Authorize the script with the business Google account.
-5. Keep authoritative writes in the backend API. This script prepares reporting tabs and scheduled reports only.
+1. Open your existing spreadsheet, then Extensions > Apps Script.
+2. Replace the old script with the entire contents of `script.js` (or identical `Code.gs`).
+3. Save, select `setupSuccessOnlineWorkbook`, click Run, and authorize it.
+4. Keep **All Workings** and **Cash Flow**. Delete unwanted older tabs yourself after saving any records you need. Setup never deletes tabs or data rows.
+5. Share the same spreadsheet link to connect the updated backend. Activation syncs existing database cases and verified cash receipts into the two tabs.
 
-Do not deploy an unauthenticated `doPost` web app for identity documents, payments, or case updates.
+All Workings has one row per application: SORO number (the application's existing case reference), date in India, client name, mobile, service, salesperson, document status, assigned work person, total amount, paid amount, balance, payment mode, payment status, work status, and last updated.
 
-The generated schema includes all 15 service tabs, required/uploaded/missing document counts, Drive folder links, and a document-version register. Run `rebuildDailyReport` to rebuild daily creation, collection, completion, pending, and overdue totals. Pending and overdue counts are current snapshots on today's row.
+Cash Flow includes date, payment description, amount in rupees, payment mode, SORO number, client, service, payment reference, and status. Only confirmed receipts enter cash flow. Refunds add separate negative entries, preserving receipt history. Stable references prevent duplicate entries when sync is retried.
 
-Run `npm run build` after changing the backend reporting schema to regenerate both paste-ready files.
+The Apps Script prepares the workbook only. The authenticated application backend writes and updates records through the Sheets API. No web-app deployment or Apps Script time trigger is needed. Remove old Daily Report triggers if you previously installed them. Spreadsheet rows are an operations fallback; document files remain in private storage.
+
+Run `npm.cmd run build` to regenerate both script files after changing the reporting schema.

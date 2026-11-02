@@ -459,7 +459,7 @@ test('ZIP preserves Unicode names and valid central-directory count', () => {
   assert.equal(zip.readUInt16LE(zip.length - 12), 1);
 });
 
-test('live Google adapter: workbook sync, Drive upload and private downloads (mock Google)', async () => {
+test('Sheets reporting and private local uploads remain independent of Google authorization', async () => {
   const root = mkdtempSync(join(tmpdir(), 'success-google-test-'));
   const port = 42000 + Math.floor(Math.random() * 10000), origin = `http://localhost:${port}`;
   const child = spawn(process.execPath, ['--import','./tests/google-mock.mjs','server.js'], { env:{ ...process.env, NODE_ENV:'test', VERCEL:'', DATABASE_URL:'', SUPABASE_URL:'', SUPABASE_SECRET_KEY:'', PORT:String(port), APP_ORIGIN:origin, DATABASE_PATH:join(root,'test.sqlite'), STORAGE_PATH:join(root,'files'), DRIVE_MODE:'live', SHEETS_MODE:'live', PAYMENT_MODE:'demo', SESSION_SECRET:'google-test-secret-with-at-least-32-characters', GOOGLE_OAUTH_CLIENT_ID:'mock', GOOGLE_OAUTH_CLIENT_SECRET:'mock', GOOGLE_OAUTH_REFRESH_TOKEN:'mock', GOOGLE_ROOT_FOLDER_ID:'root', GOOGLE_OPERATIONS_SPREADSHEET_ID:'workbook', GOOGLE_MOCK_FAILURE_FILE:join(root,'revoked'), GOOGLE_MOCK_SHEETS_FILE:join(root,'sheets.json') }, stdio:['ignore','pipe','pipe'] });
@@ -476,13 +476,14 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
       assert.ok(r.ok, path + ' returned ' + r.status); return r.json();
     }
     const oauth = await api('/api/google/oauth/start');
-    assert.ok(new URL(oauth.authorizationUrl).searchParams.get('scope').includes('auth/spreadsheets'));
+    assert.equal(new URL(oauth.authorizationUrl).searchParams.get('scope'),'https://www.googleapis.com/auth/spreadsheets');
+    for(const path of ['/api/google/root-folder','/api/google/normalize-folders']) assert.equal((await fetch(origin+path,{method:'POST',headers:{cookie,'content-type':'application/json'},body:'{}'})).status,404);
     const services = (await api('/api/services')).services;
     const variant = services.find(s => s.slug === 'pf-assistance').variants[0];
     writeFileSync(join(root,'revoked'),'sheets-missing-tab');
-    const c = (await api('/api/cases',{variantId:variant.id,details:pfDetails,customer:{name:'Drive Trial',mobile:'9876543210'},consent:true})).case;
+    const c = (await api('/api/cases',{variantId:variant.id,details:pfDetails,customer:{name:'Storage Trial',mobile:'9876543210'},consent:true})).case;
     const countStoredCases=()=>{const db=new DatabaseSync(join(root,'test.sqlite'));try{return db.prepare('SELECT COUNT(*) n FROM cases').get().n;}finally{db.close();}};
-    const pdf = Buffer.from('%PDF-1.4\nmock-drive-file\n%%EOF');
+    const pdf = Buffer.from('%PDF-1.4\nmock-storage-file\n%%EOF');
     await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
     const documents = (await api(`/api/cases/${c.id}`)).documents;
     assert.equal(documents[0].storage_path, undefined);
@@ -491,12 +492,11 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     const zip = await fetch(origin + `/api/cases/${c.id}/download-all`,{headers:{cookie}});
     assert.equal(zip.status,200); assert.equal(Buffer.from(await zip.arrayBuffer()).readUInt32LE(),0x04034b50);
     const repairedWorkbook=JSON.parse(readFileSync(join(root,'sheets.json'),'utf8'));
-    assert.ok(Object.values(repairedWorkbook['PF Working (Provident Fund)']||{}).some(row=>row[0]===c.ref),'Missing/renamed service tabs heal automatically before manual activation');
+    assert.ok(Object.values(repairedWorkbook['All Workings']||{}).some(row=>row[0]===c.ref),'Missing operations tab heals automatically before manual activation');
     unlinkSync(join(root,'revoked'));
     const sync = await api('/api/google/sheets/activate', undefined, 'POST');
-    assert.equal(sync.syncedCases,1); assert.equal(sync.workbook.tabs.length,24);
-    assert.ok(sync.workbook.tabs.includes('Documents'));
-    assert.ok(sync.workbook.tabs.includes('Income Certificate'));
+    assert.equal(sync.syncedCases,1); assert.deepEqual(sync.workbook.tabs,['All Workings','Cash Flow']);
+    assert.equal(sync.workbook.tabs.length,2);
     await api('/api/payment-settings',{action:'confirm-receiver',utr:'100000000001',amount:1,received:true,correctRecipient:true,notes:'Synthetic fixture, not a real transfer'});
     await api(`/api/payments/${c.payment.id}/submit`,{utr:'333333333333'});
     writeFileSync(join(root,'revoked'),'sheets-slow-fail');
@@ -513,45 +513,30 @@ test('live Google adapter: workbook sync, Drive upload and private downloads (mo
     await api('/api/payments-sync',undefined,'POST');
     await api('/api/google/sheets/activate',undefined,'POST');
     const workbook=JSON.parse(readFileSync(join(root,'sheets.json'),'utf8'));
-    assert.equal(Object.values(workbook.Payments).length,1);
-    assert.equal(Object.values(workbook.Payments)[0][9],'PAID');
-    assert.equal(Object.values(workbook.Cashflow).length,1,'Retries upsert the same cashflow ID');
-    assert.equal(Object.values(workbook.Cashflow)[0][3],c.payment.id);
-    assert.equal(Object.values(workbook.Cashflow)[0][7],1);
+    assert.deepEqual(Object.keys(workbook).sort(),['All Workings','Cash Flow']);
+    const work=Object.values(workbook['All Workings'])[0];
+    assert.equal(work[9],1);assert.equal(work[12],'PAID');
+    assert.equal(Object.values(workbook['Cash Flow']).length,1,'Retries upsert the same cashflow ID');
+    assert.equal(Object.values(workbook['Cash Flow'])[0][7],c.payment.id);
+    assert.equal(Object.values(workbook['Cash Flow'])[0][2],1);
 
     writeFileSync(join(root,'revoked'), 'mock revoked token');
     const failedCase = await fetch(origin + '/api/cases', {method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({variantId:variant.id,details:pfDetails,customer:{name:'Retry Trial',mobile:'9876543210'},consent:true})});
-    assert.equal(failedCase.status,409);
-    assert.equal((await failedCase.json()).code,'GOOGLE_RECONNECT_REQUIRED');
-    assert.equal(countStoredCases(),1, 'Expired authorization must not save another case');
+    assert.equal(failedCase.status,201);
+    assert.equal(countStoredCases(),2,'Expired reporting authorization must not block case intake');
     const state = await api('/api/google/status');
     assert.equal(state.reconnectRequired,true); assert.equal(state.connected,false);
-    const failedUpload = await fetch(origin + `/api/cases/${c.id}/documents`, {method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')})});
-    assert.equal(failedUpload.status,409);
-    assert.equal((await api(`/api/cases/${c.id}`)).documents.length,1, 'Failed replacement must preserve existing document');
-    unlinkSync(join(root,'revoked')); // Simulate successful Google reconnection.
     await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
-    assert.equal((await api('/api/google/status')).reconnectRequired,false);
-    assert.equal(countStoredCases(),1);
-    writeFileSync(join(root,'revoked'),'missing-root');
-    const missingRoot = await fetch(origin + '/api/cases',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({variantId:variant.id,details:pfDetails,customer:{name:'Root Trial',mobile:'9876543210'},consent:true})});
-    assert.equal(missingRoot.status,409);
-    assert.equal((await missingRoot.json()).code,'GOOGLE_ROOT_FOLDER_INVALID');
-    assert.equal(countStoredCases(),1,'Missing root must not save a new case');
-    assert.equal((await api('/api/google/status')).folderInvalid,true);
-    for (const folder of ['missing-folder','read-only-folder']) {
-      const invalid = await fetch(origin + '/api/google/root-folder',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({folder})});
-      assert.equal(invalid.status,409);
-      assert.equal((await api('/api/google/status')).rootFolderId,'root','Invalid root must not replace configured root');
-    }
-    const saved = await api('/api/google/root-folder',{folder:'https://drive.google.com/drive/u/0/folders/new-root'});
-    assert.equal(saved.folder.id,'new-root');
-    assert.equal((await api('/api/google/status')).folderInvalid,false);
-    assert.equal((await api('/api/google/status')).rootFolderId,'new-root');
-    await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
-    const salesLogin = await fetch(origin + '/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'sales01',password:'Demo@12345'})});
-    const salesCookie = salesLogin.headers.get('set-cookie').split(';')[0];
-    assert.equal((await fetch(origin + '/api/google/root-folder',{method:'POST',headers:{cookie:salesCookie,'content-type':'application/json'},body:JSON.stringify({folder:'new-root'})})).status,403);
+    const savedDocuments=(await api(`/api/cases/${c.id}`)).documents.filter(document=>document.state==='uploaded');
+    assert.equal(savedDocuments.length,1);
+    const savedDownload=await fetch(origin+savedDocuments[0].download_url,{headers:{cookie}});
+    assert.equal(savedDownload.status,200);assert.deepEqual(Buffer.from(await savedDownload.arrayBuffer()),pdf);
+    const inspectStorage=new DatabaseSync(join(root,'test.sqlite'));
+    assert.equal(inspectStorage.prepare("SELECT COUNT(*) n FROM sync_jobs WHERE type IN ('drive','drive-case')").get().n,0);
+    assert.equal(inspectStorage.prepare("SELECT COUNT(*) n FROM documents WHERE storage_path LIKE 'gdrive://%' OR drive_file_id!=''").get().n,0);
+    inspectStorage.close();
     unlinkSync(join(root,'revoked'));
+    await api('/api/payments-sync',undefined,'POST');
+    assert.equal((await api('/api/google/status')).reconnectRequired,false);
   } finally { child.kill(); }
 });

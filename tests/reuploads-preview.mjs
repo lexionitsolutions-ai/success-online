@@ -10,7 +10,7 @@ import {confirmations} from './payment-fixture.js';
 
 const root=mkdtempSync(join(tmpdir(),'reupload-browser-'));
 const port=46000+Math.floor(Math.random()*2000), origin=`http://localhost:${port}`;
-const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),APP_ORIGIN:origin,DATABASE_PATH:join(root,'test.sqlite'),STORAGE_PATH:join(root,'files'),DRIVE_MODE:'demo',SHEETS_MODE:'demo',SESSION_SECRET:'reupload-test-only-session-secret'},stdio:['ignore','pipe','pipe']});
+const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),APP_ORIGIN:origin,DATABASE_PATH:join(root,'test.sqlite'),STORAGE_PATH:join(root,'files'),SHEETS_MODE:'demo',SESSION_SECRET:'reupload-test-only-session-secret'},stdio:['ignore','pipe','pipe']});
 let serverErrors='',browser;
 child.stderr.on('data',data=>serverErrors+=data);
 const screenshots='deliverables/reuploads-preview';mkdirSync(screenshots,{recursive:true});

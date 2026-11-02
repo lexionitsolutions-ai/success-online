@@ -16,7 +16,7 @@ import { serviceCatalog } from './service-catalog.js';
 import { currentServiceForms, applyCurrentServiceForm } from './service-catalog-sync.js';
 import { PF_PASSWORD_KEY, encryptPFPassword, decryptPFPassword, publicCaseDetails } from './pf-credentials.js';
 import { INTAKE_UPLOADS, createUploadBatch, uploadBatchState, uploadManifestEntry } from './intake-uploads.js';
-import { sheetHeaders, serviceTabs } from './operations-schema.js';
+import { sheetHeaders, operationsRows } from './operations-schema.js';
 import { createPayments, paymentSchema, paymentConfig, priceAmounts } from './payments.js';
 import { correctionStatuses, reuploadState } from './reuploads.js';
 import {announcementSchema, createAnnouncements} from './announcements.js';
@@ -36,7 +36,6 @@ let activeServiceForms = new Map();
 const one = async (...args) => applyCurrentServiceForm(await db.one(...args), activeServiceForms);
 const all = async (...args) => (await db.all(...args)).map(row => applyCurrentServiceForm(row, activeServiceForms));
 const deferredSheets = new AsyncLocalStorage();
-const deferredDrive = new AsyncLocalStorage();
 const sheetsContext = new AsyncLocalStorage();
 const paymentSystem = createPayments({db, recomputeCase, send, body});
 const announcementSystem = createAnnouncements({db, send, body});
@@ -63,6 +62,7 @@ const transitions = {
   'Cancelled': []
 };
 
+// Legacy Drive ID columns remain inert for compatibility with existing databases.
 async function migrate() {
   await db.exec(`
     PRAGMA journal_mode = WAL;
@@ -200,7 +200,6 @@ function oauthConfig() {
     clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || '',
     clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || '',
     refreshToken: process.env.GOOGLE_OAUTH_REFRESH_TOKEN || '',
-    rootFolderId: process.env.GOOGLE_ROOT_FOLDER_ID || '',
     redirectUri: `${APP_ORIGIN}/api/google/oauth/callback`
   };
 }
@@ -231,7 +230,7 @@ async function tokenRequest(params) {
   if (!response.ok) {
     if (params.grant_type === 'refresh_token' && result.error === 'invalid_grant') {
       (await updateEnv('GOOGLE_RECONNECT_REQUIRED', '1'));
-      throw Object.assign(new Error('Google connection expired. An admin must reconnect Google Drive from Business analytics, then retry the upload.'), { status: 409, code: 'GOOGLE_RECONNECT_REQUIRED' });
+      throw Object.assign(new Error('Google connection expired. An admin must reconnect Google Sheets from Business analytics, then retry reporting sync.'), { status: 409, code: 'GOOGLE_RECONNECT_REQUIRED' });
     }
     throw new Error(result.error_description || result.error || 'Google token request failed');
   }
@@ -241,23 +240,11 @@ async function googleAccessToken() {
   const batch = sheetsContext.getStore();
   if (batch?.token) return batch.token;
   const config = oauthConfig();
-  if (!config.clientId || !config.clientSecret || !config.refreshToken) throw new Error('Google Drive OAuth is not connected');
+  if (!config.clientId || !config.clientSecret || !config.refreshToken) throw new Error('Google Sheets OAuth is not connected');
   const token = await tokenRequest({ client_id: config.clientId, client_secret: config.clientSecret, refresh_token: config.refreshToken, grant_type: 'refresh_token' });
   if (process.env.GOOGLE_RECONNECT_REQUIRED === '1') (await updateEnv('GOOGLE_RECONNECT_REQUIRED', '0'));
   if (batch) batch.token = token.access_token;
   return token.access_token;
-}
-async function driveRequest(path, options = {}) {
-  const token = await googleAccessToken();
-  const response = await fetch(`https://www.googleapis.com${path}`, {
-    signal:sheetsContext.getStore()?.signal || AbortSignal.timeout(10000),
-    ...options,
-    headers: { authorization: `Bearer ${token}`, ...(options.headers || {}) }
-  });
-  const text = await response.text();
-  const result = text ? JSON.parse(text) : {};
-  if (!response.ok) throw Object.assign(new Error(result.error?.message || `Google Drive request failed (${response.status})`), { googleStatus: response.status });
-  return result;
 }
 async function sheetsRequest(path, options = {}) {
   const token = await googleAccessToken();
@@ -324,26 +311,13 @@ async function upsertSheetRows(tab, entries, keyColumn='A:A') {
   });
   await sheetsRequest(`/v4/spreadsheets/${encodeURIComponent(spreadsheetId())}/values:batchUpdate`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({valueInputOption:'RAW',data})});
 }
-function serviceSheet(name) { return serviceTabs[name]; }
 async function syncCaseToGoogle(caseId) {
-  const c = (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: caseId }))));
-  const missing = (await missingDocuments(c));
-  const required = c.variant.documents.filter(d => d.required && matchesIntake(d.when, c.details, true)).length;
-  const master = [c.ref, sheetSafe(c.customer.name), c.customer.mobile, c.service.name, c.created_at, c.sales.name, c.backoffice?.name || '', c.document_state, c.payment_state, c.status, c.updated_at, c.follow_up_date || '', c.completed_at || '', required, required - missing.length, missing.join('; '), c.drive_case_folder_id ? `https://drive.google.com/drive/folders/${c.drive_case_folder_id}` : ''];
-  await upsertSheetRow('All Cases', c.ref, master);
-  const tab = serviceSheet(c.service.name);
-  if (tab) await upsertSheetRow(tab, c.ref, [c.ref, sheetSafe(c.customer.name), c.customer.mobile, c.service.name, c.status, c.payment_state, c.document_state, c.updated_at]);
-  const documents=await all('SELECT * FROM documents WHERE case_id=$id ORDER BY created_at',{$id:caseId});
-  await upsertSheetRows('Documents',documents.map(d=>[d.id,[d.id,c.ref,sheetSafe(d.doc_type),sheetSafe(d.file_name),d.mime_type,d.size,d.version,d.state,d.created_at,d.drive_file_id && !d.drive_file_id.startsWith('demo-') ? `https://drive.google.com/file/d/${d.drive_file_id}/view` : d.storage_path.startsWith('supabase://') ? 'Private cloud storage' : 'Local demo storage']]));
-  for (const p of await paymentSystem.list(caseId,{role:'admin'})) {
-    await upsertSheetRow('Payments',p.id,[p.id,p.created_at,p.gateway_order_id,sheetSafe(p.customer_name),p.customer_mobile,sheetSafe(p.service_name),p.amount/100,p.payment_method || '',p.transaction_id || '',p.status,sheetSafe(p.employee_name),p.verified_by || '',p.verified_at || '']);
-  }
-  for (const e of await all('SELECT * FROM payment_attempts WHERE payment_id IN (SELECT id FROM payments WHERE case_id=$id)',{$id:caseId})) await upsertSheetRow('Payment History',e.id,[e.id,e.payment_id,e.action,e.method || '',e.utr || '',e.actor_id,sheetSafe(e.notes),e.created_at]);
-  const payments = (await all("SELECT * FROM payments WHERE case_id=$id AND (status IN ('PAID','verified','offline_approved','REFUNDED')) AND gateway!='demo' ORDER BY created_at", { $id: caseId }));
-  for (const payment of payments) {
-    const reference = payment.gateway === 'direct_upi' ? payment.id : payment.transaction_id || payment.gateway_order_id;
-    await upsertSheetRow('Cashflow', reference, [payment.verified_at || payment.created_at, c.ref, payment.gateway, reference, payment.service_charge / 100, payment.official_fee / 100, payment.tax / 100, payment.amount / 100, payment.status], 'D:D');
-  }
+  const c=await caseRow(await one('SELECT * FROM cases WHERE id=$id',{$id:caseId}));
+  const payments=await paymentSystem.list(caseId,{role:'admin'});
+  const refunds=await all("SELECT payment_id,created_at FROM payment_attempts WHERE action='refund' AND payment_id IN (SELECT id FROM payments WHERE case_id=$id)",{$id:caseId});
+  const rows=operationsRows(c,payments,refunds);
+  await upsertSheetRow('All Workings',c.ref,rows.working);
+  await upsertSheetRows('Cash Flow',rows.cash,'H:H');
 }
 let sheetsSyncChain = Promise.resolve();
 async function queueSheetsSync(caseId) {
@@ -372,94 +346,6 @@ async function performSheetsSync(caseId) {
   };
   sheetsSyncChain = sheetsSyncChain.catch(() => {}).then(() => db.cloud ? db.transaction(sync) : sync());
   await sheetsSyncChain;
-}
-async function performDriveSync(caseId) {
-  const sync = async () => {
-    // A short, durable lease prevents duplicate mirrors without holding case locks
-    // during Google requests. Checkout and the next upload remain independent.
-    const stamp=now();
-    const claim=await run("INSERT INTO sync_jobs VALUES ($id,'drive-case',$case,'processing',1,NULL,$at,$at) ON CONFLICT(type,entity_id) DO UPDATE SET status='processing',attempts=sync_jobs.attempts+1,updated_at=$at WHERE sync_jobs.status!='processing' OR sync_jobs.updated_at<$cutoff",{$id:id('sync'),$case:caseId,$at:stamp,$cutoff:new Date(Date.now()-120000).toISOString()});
-    if (!claim.changes) return;
-    try {
-      const pending = await all("SELECT d.* FROM documents d JOIN sync_jobs j ON j.entity_id=d.id AND j.type='drive' WHERE d.case_id=$case AND d.state='uploaded' AND j.status IN ('pending','failed') AND d.storage_path LIKE 'supabase://%' AND (d.drive_file_id IS NULL OR d.drive_file_id='')",{$case:caseId});
-      if (!pending.length) return;
-      let foldersPromise,cursor=0;
-      const mirror=async()=>{while(cursor<pending.length){
-        const document=pending[cursor++];
-        try {
-          sheetsContext.getStore()?.signal.throwIfAborted();
-          if (process.env.GOOGLE_RECONNECT_REQUIRED==='1') throw Object.assign(new Error('Google reconnection is required'),{code:'GOOGLE_RECONNECT_REQUIRED'});
-          const c=await one('SELECT * FROM cases WHERE id=$id',{$id:caseId});
-          if (!c) return;
-          foldersPromise ||= (async()=>driveFoldersForCase(c,await one('SELECT * FROM customers WHERE id=$id',{$id:c.customer_id}),await one('SELECT * FROM services WHERE id=$id',{$id:c.service_id})))();
-          const folders=await foldersPromise;
-          const uploaded=await uploadDriveFile(document.file_name,document.mime_type,folders.caseFolderId,await readStorage(document.storage_path.slice(11)));
-          await run('UPDATE documents SET drive_file_id=$drive WHERE id=$id',{$drive:uploaded.id,$id:document.id});
-          await run("UPDATE sync_jobs SET status='ok',attempts=attempts+1,last_error=NULL,updated_at=$at WHERE type='drive' AND entity_id=$id",{$id:document.id,$at:now()});
-        } catch(error) {
-          await run("UPDATE sync_jobs SET status='failed',attempts=attempts+1,last_error=$error,updated_at=$at WHERE type='drive' AND entity_id=$id",{$id:document.id,$error:typeof error.code==='string'?error.code:error.message,$at:now()});
-        }
-      }};
-      await Promise.all(Array.from({length:Math.min(3,pending.length)},mirror));
-      if (process.env.SHEETS_MODE==='live') await run("UPDATE sync_jobs SET status='pending',updated_at=$at WHERE type='sheets' AND entity_id=$case",{$case:caseId,$at:now()});
-    } finally {
-      const remaining=await one("SELECT COUNT(*) n FROM sync_jobs j JOIN documents d ON d.id=j.entity_id WHERE j.type='drive' AND d.case_id=$case AND d.state='uploaded' AND j.status IN ('pending','failed')",{$case:caseId});
-      await run("UPDATE sync_jobs SET status=$status,updated_at=$at WHERE type='drive-case' AND entity_id=$case",{$case:caseId,$status:remaining.n?'failed':'ok',$at:now()});
-    }
-  };
-  await sheetsContext.run({signal:AbortSignal.timeout(30000)},sync);
-}
-async function verifyDriveRoot(folderId = oauthConfig().rootFolderId) {
-  try {
-    if (!folderId) throw Object.assign(new Error('The main Google Drive folder has not been configured.'),{invalidRoot:true});
-    const folder = await driveRequest(`/drive/v3/files/${encodeURIComponent(folderId)}?supportsAllDrives=true&fields=id,name,mimeType,trashed,capabilities(canAddChildren)`);
-    if (folder.trashed || folder.mimeType !== 'application/vnd.google-apps.folder') throw Object.assign(new Error('The main Google Drive folder is deleted or is not a folder.'),{invalidRoot:true});
-    if (folder.capabilities?.canAddChildren === false) throw Object.assign(new Error('The connected Google account cannot upload into the main Drive folder.'),{invalidRoot:true});
-    if (folderId === oauthConfig().rootFolderId && process.env.GOOGLE_ROOT_FOLDER_INVALID === '1') (await updateEnv('GOOGLE_ROOT_FOLDER_INVALID', '0'));
-    return folder;
-  } catch (error) {
-    if (error.code === 'GOOGLE_RECONNECT_REQUIRED') throw error;
-    if (!error.invalidRoot && ![403,404].includes(error.googleStatus)) throw error;
-    if (folderId === oauthConfig().rootFolderId) (await updateEnv('GOOGLE_ROOT_FOLDER_INVALID', '1'));
-    throw Object.assign(new Error('The main Google Drive folder is unavailable or not writable. An admin must open Business analytics and set a Drive folder the connected Google account can edit.'), {status:409,code:'GOOGLE_ROOT_FOLDER_INVALID'});
-  }
-}
-async function createDriveFolder(name, parentId) {
-  return driveRequest('/drive/v3/files?supportsAllDrives=true&fields=id,name', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
-  });
-}
-function customerDriveFolderName(customer) {
-  const name = String(customer.name || 'Customer').trim().replace(/[\\/:*?"<>|]/g, '-');
-  const shortId = String(customer.id || '').replace(/^cus_/, '').slice(0, 8).toUpperCase();
-  return `${name} - CUST-${shortId}`;
-}
-async function renameDriveFile(fileId, name) {
-  return driveRequest(`/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id,name`, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name })
-  });
-}
-async function uploadDriveFile(name, mimeType, parentId, content) {
-  const boundary = `success_online_${randomBytes(12).toString('hex')}`;
-  const metadata = Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name, parents: [parentId] })}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`);
-  const ending = Buffer.from(`\r\n--${boundary}--`);
-  return driveRequest('/upload/drive/v3/files?supportsAllDrives=true&uploadType=multipart&fields=id,name,webViewLink', {
-    method: 'POST',
-    headers: { 'content-type': `multipart/related; boundary=${boundary}` },
-    body: Buffer.concat([metadata, content, ending])
-  });
-}
-async function driveFoldersForCase(c, customer, service) {
-  let customerFolderId = c.drive_customer_folder_id || (await one('SELECT drive_customer_folder_id id FROM cases WHERE customer_id=$id AND drive_customer_folder_id IS NOT NULL LIMIT 1', { $id: c.customer_id }))?.id;
-  if (!customerFolderId) customerFolderId = (await createDriveFolder(customerDriveFolderName(customer), oauthConfig().rootFolderId)).id;
-  let caseFolderId = c.drive_case_folder_id;
-  if (!caseFolderId) caseFolderId = (await createDriveFolder(`${c.ref} - ${service.name}`, customerFolderId)).id;
-  (await run('UPDATE cases SET drive_customer_folder_id=$customer,drive_case_folder_id=$case WHERE id=$id', { $customer: customerFolderId, $case: caseFolderId, $id: c.id }));
-  return { customerFolderId, caseFolderId };
 }
 async function body(req) {
   if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body;
@@ -497,14 +383,16 @@ async function caseRows(rows) {
     const params = Object.fromEntries(ids.map((value,index)=>['$v'+index,value]));
     return all(`SELECT ${fields} FROM ${table} WHERE ${column} IN (${ids.map((_,index)=>'$v'+index).join(',')})${condition}`,params);
   };
-  const [variants,customers,serviceRows,users,documents,payments] = await Promise.all([
+  const [variants,customers,serviceRows,users,documents,payments,customPrices] = await Promise.all([
     related('variants','id',rows.map(c=>c.variant_id)),
     related('customers','id',rows.map(c=>c.customer_id),'id,name,mobile,email'),
     related('services','id',rows.map(c=>c.service_id),'id,name'),
     related('users','id',rows.flatMap(c=>[c.sales_user_id,c.backoffice_user_id]),'id,username,name,role'),
     related('documents','case_id',rows.map(c=>c.id),'id,case_id,doc_type,file_name,mime_type,created_at'," AND state='uploaded' ORDER BY created_at DESC"),
-    related('payments','case_id',rows.map(c=>c.id),'*'," AND gateway!='demo' ORDER BY created_at DESC")
+    related('payments','case_id',rows.map(c=>c.id),'*'," AND gateway!='demo' ORDER BY created_at DESC"),
+    related('salesperson_prices','sales_user_id',rows.map(c=>c.sales_user_id))
   ]);
+  const customPriceMap = new Map(customPrices.map(p=>[p.sales_user_id + ':' + p.variant_id,p.price]));
   const byId = items => new Map(items.map(item=>[item.id,item]));
   const variantMap=byId(variants),customerMap=byId(customers),serviceMap=byId(serviceRows),userMap=byId(users);
   const have=new Map();
@@ -516,10 +404,10 @@ async function caseRows(rows) {
     const requirements=json(variant,'documents_json',[]);
     const received=documents.find(doc=>doc.case_id===c.id && doc.doc_type===RECEIVED_DOCUMENT_TYPE);
     const missing=(uploads && !uploads.complete) || requirements.some(d=>d.required && matchesIntake(d.when, details, true) && !have.get(c.id)?.has(d.label));
-    return {...c,uploads,details_json:JSON.stringify(details),payment_state:payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received ? publicDocument(received) : null,amounts:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : amounts(variant,details),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
+    return {...c,uploads,details_json:JSON.stringify(details),payment_state:payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received ? publicDocument(received) : null,amounts:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : amounts(variant,details,customPriceMap.get(c.sales_user_id + ':' + c.variant_id)),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
   });
 }
-function amounts(v, details = {}) { const p=servicePrices.get(v.id);const base=priceAmounts(v,p?.price,p?.original);return json(v,'fields_json',[]).some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base,details) : base; }
+function amounts(v, details = {}, override) { const p=servicePrices.get(v.id);const base=priceAmounts(v,p?.price,p?.original,override);return json(v,'fields_json',[]).some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base,details) : base; }
 async function caseDetailData(c, user) {
   const [item, documents, notes] = await Promise.all([
     caseRow(c),
@@ -577,7 +465,7 @@ async function syncCase(caseId) {
   }
   const c = (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: caseId }))));
   const safe = v => String(v ?? '').replace(/^[=+\-@]/, "'$&");
-  const row = { missingDocuments: (await missingDocuments(c)), driveFolder: c.drive_case_folder_id || null, caseId: c.ref, customer: safe(c.customer.name), phone: maskPhone(c.customer.mobile), service: c.service.name, status: c.status, payment: c.payment_state, documents: c.document_state, sales: c.sales.name, backoffice: c.backoffice?.name || '', updated: c.updated_at };
+  const row = { missingDocuments: (await missingDocuments(c)), caseId: c.ref, customer: safe(c.customer.name), phone: maskPhone(c.customer.mobile), service: c.service.name, status: c.status, payment: c.payment_state, documents: c.document_state, sales: c.sales.name, backoffice: c.backoffice?.name || '', updated: c.updated_at };
   const file = join(DEMO_ROOT, 'Success Online Operations.json');
   const data = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : { allCases: {}, cashflow: [], syncLog: [] };
   data.allCases[c.ref] = row;
@@ -594,12 +482,6 @@ async function syncCase(caseId) {
 
 async function readDocument(document) {
   if (document.storage_path?.startsWith('supabase://')) return readStorage(document.storage_path.slice(11));
-  if (document.storage_path?.startsWith('gdrive://')) {
-    const token = await googleAccessToken();
-    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(document.drive_file_id)}?alt=media&supportsAllDrives=true`, { headers: { authorization: `Bearer ${token}` } });
-    if (!response.ok) throw Object.assign(new Error('Google Drive document download failed'), { status: 502 });
-    return Buffer.from(await response.arrayBuffer());
-  }
   const path = resolve(document.storage_path || '');
   if (!path.startsWith(resolve(DEMO_ROOT) + '/') && !path.startsWith(resolve(DEMO_ROOT) + '\\')) throw Object.assign(new Error('Invalid document path'), { status: 403 });
   if (!existsSync(path)) throw Object.assign(new Error('Document file is missing'), { status: 404 });
@@ -690,12 +572,9 @@ async function routeApi(req, res, url) {
     if (user.role !== 'admin') return send(res, 403, { error: 'Admin access required' });
     const config = oauthConfig();
     return send(res, 200, {
-      configured: Boolean(config.clientId && config.clientSecret && config.rootFolderId),
+      configured: Boolean(config.clientId && config.clientSecret),
       connected: Boolean(config.refreshToken) && process.env.GOOGLE_RECONNECT_REQUIRED !== '1',
       reconnectRequired: process.env.GOOGLE_RECONNECT_REQUIRED === '1',
-      folderInvalid: process.env.GOOGLE_ROOT_FOLDER_INVALID === '1',
-      live: process.env.DRIVE_MODE === 'live',
-      rootFolderId: config.rootFolderId || null,
       callbackUrl: config.redirectUri,
       oauthClientSettingsUrl: config.clientId ? 'https://console.cloud.google.com/apis/credentials/oauthclient/' + encodeURIComponent(config.clientId) : null
     });
@@ -703,18 +582,6 @@ async function routeApi(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/google/sheets/status') {
     if (user.role !== 'admin') return send(res, 403, { error: 'Admin access required' });
     return send(res, 200, { configured: Boolean(spreadsheetId()), live: process.env.SHEETS_MODE === 'live', spreadsheetId: spreadsheetId() || null });
-  }
-  if (req.method === 'POST' && url.pathname === '/api/google/root-folder') {
-    if (user.role !== 'admin') return send(res,403,{error:'Admin access required'});
-    return body(req).then(async b => {
-      const value = String(b.folder || '').trim();
-      const folderId = value.match(/^https:\/\/drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\/([A-Za-z0-9_-]+)/)?.[1] || value;
-      if (!/^[A-Za-z0-9_-]{3,200}$/.test(folderId)) return send(res,400,{error:'Paste a valid Google Drive folder link or folder ID'});
-      const folder = await verifyDriveRoot(folderId);
-      (await updateEnv('GOOGLE_ROOT_FOLDER_ID',folderId));
-      (await updateEnv('GOOGLE_ROOT_FOLDER_INVALID','0'));
-      return send(res,200,{ok:true,folder:{id:folder.id,name:folder.name}});
-    });
   }
   if (req.method === 'POST' && url.pathname === '/api/google/sheets/activate') {
     if (user.role !== 'admin') return send(res, 403, { error: 'Admin access required' });
@@ -726,34 +593,17 @@ async function routeApi(req, res, url) {
       send(res, 200, { live: true, workbook, syncedCases: caseIds.length });
     })();
   }
-  if (req.method === 'POST' && url.pathname === '/api/google/normalize-folders') {
-    if (user.role !== 'admin') return send(res, 403, { error: 'Admin access required' });
-    if (process.env.DRIVE_MODE !== 'live') return send(res, 409, { error: 'Google Drive is not live' });
-    return (async () => {
-      const folders = (await all('SELECT customer_id,drive_customer_folder_id FROM cases WHERE drive_customer_folder_id IS NOT NULL GROUP BY customer_id,drive_customer_folder_id'));
-      let renamed = 0;
-      for (const folder of folders) {
-        const customer = (await one('SELECT id,name FROM customers WHERE id=$id', { $id: folder.customer_id }));
-        if (!customer) continue;
-        await renameDriveFile(folder.drive_customer_folder_id, customerDriveFolderName(customer));
-        renamed += 1;
-      }
-      (await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)', { $id: id('aud'), $actor: user.id, $action: 'google_drive.normalize_folders', $type: 'integration', $entity: oauthConfig().rootFolderId, $reason: `${renamed} customer folders renamed`, $at: now() }));
-      send(res, 200, { renamed });
-    })();
-  }
   if (req.method === 'GET' && url.pathname === '/api/google/oauth/start') {
     if (user.role !== 'admin') return send(res, 403, { error: 'Admin access required' });
     const config = oauthConfig();
-    if (!config.clientId || !config.clientSecret || !config.rootFolderId) return send(res, 400, { error: 'Google OAuth client or root folder configuration is incomplete' });
+    if (!config.clientId || !config.clientSecret) return send(res, 400, { error: 'Google Sheets OAuth client configuration is incomplete' });
     const params = new URLSearchParams({
       client_id: config.clientId,
       redirect_uri: config.redirectUri,
       response_type: 'code',
-      scope: 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets',
+      scope: 'https://www.googleapis.com/auth/spreadsheets',
       access_type: 'offline',
       prompt: 'consent',
-      include_granted_scopes: 'true',
       state: signedOAuthState(user)
     });
     return send(res, 200, { authorizationUrl: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
@@ -769,21 +619,19 @@ async function routeApi(req, res, url) {
       const tokens = await tokenRequest({ client_id: config.clientId, client_secret: config.clientSecret, code, grant_type: 'authorization_code', redirect_uri: config.redirectUri });
       if (!tokens.refresh_token) throw new Error('Google did not return a refresh token. Revoke the app permission and connect again.');
       (await updateEnv('GOOGLE_OAUTH_REFRESH_TOKEN', tokens.refresh_token));
-      const folder = await verifyDriveRoot();
       (await updateEnv('GOOGLE_RECONNECT_REQUIRED', '0'));
-      (await updateEnv('DRIVE_MODE', 'live'));
-      (await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)', { $id: id('aud'), $actor: user.id, $action: 'google_drive.connect', $type: 'integration', $entity: folder.id, $reason: folder.name, $at: now() }));
+      (await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)', { $id: id('aud'), $actor: user.id, $action: 'google_sheets.connect', $type: 'integration', $entity: spreadsheetId(), $reason: 'Sheets authorization connected', $at: now() }));
       redirect(res, '/?google=connected');
     })();
   }
   if (req.method === 'GET' && url.pathname === '/api/services') {
-    const [serviceRows,variants]=await Promise.all([all('SELECT * FROM services WHERE active=1'),all('SELECT * FROM variants WHERE active=1')]);
-    return send(res,200,{demoPayments:false,directUPI:true,testPricingMode:paymentConfig().testPricingMode,cloudUploads:storageEnabled(),services:serviceRows.map(service=>({...service,name:serviceCatalog.find(current=>current.slug===service.slug)?.name || service.name,variants:variants.filter(v=>v.service_id===service.id).map(v=>({...v,fields:json(v,'fields_json',[]),documents:json(v,'documents_json',[]),amounts:amounts(v)}))}))});
+    const [serviceRows,variants,customPrices]=await Promise.all([all('SELECT * FROM services WHERE active=1'),all('SELECT * FROM variants WHERE active=1'),all('SELECT variant_id,price FROM salesperson_prices WHERE sales_user_id=$id',{$id:user.id})]);
+    const customPriceMap=new Map(customPrices.map(p=>[p.variant_id,p.price]));
+    return send(res,200,{demoPayments:false,directUPI:true,testPricingMode:paymentConfig().testPricingMode,cloudUploads:storageEnabled(),services:serviceRows.map(service=>({...service,name:serviceCatalog.find(current=>current.slug===service.slug)?.name || service.name,variants:variants.filter(v=>v.service_id===service.id).map(v=>({...v,fields:json(v,'fields_json',[]),documents:json(v,'documents_json',[]),amounts:amounts(v,{},customPriceMap.get(v.id))}))}))});
   }
   if(req.method==='POST' && url.pathname==='/api/payments-sync') {
     if(user.role!=='admin') return send(res,403,{error:'Admin access required'});
     if(process.env.SHEETS_MODE!=='live') return send(res,409,{error:'Google Sheets is not configured in live mode'});
-    for(const job of await all("SELECT DISTINCT d.case_id FROM documents d JOIN sync_jobs j ON j.entity_id=d.id WHERE j.type='drive' AND j.status IN ('failed','pending')")) deferredDrive.getStore()?.add(job.case_id);
     for(const job of await all("SELECT entity_id FROM sync_jobs WHERE type='sheets' AND status IN ('failed','pending')")) await queueSheetsSync(job.entity_id);
     return send(res,200,{ok:true});
   }
@@ -834,7 +682,6 @@ async function routeApi(req, res, url) {
     }
     const batch = createUploadBatch(b.uploadManifest, json(variant,'documents_json',[]),b.details,matchesIntake);
     // Supabase is the primary store; Google availability must not block intake.
-    if (process.env.DRIVE_MODE === 'live' && !storageEnabled()) await verifyDriveRoot();
     let customerId = b.customerId;
     if (!customerId) {
       customerId = id('cus');
@@ -950,7 +797,6 @@ async function routeApi(req, res, url) {
         await run('UPDATE cases SET details_json=$details WHERE id=$id',{$details:c.details_json,$id:c.id});
         await run('UPDATE upload_intents SET expires_at=$at WHERE case_id=$id AND completed_at IS NULL',{$at:now(),$id:c.id});
       }
-      deferredDrive.getStore()?.add(c.id);
       await recomputeCase(c.id);
       await notifyCaseUpdate(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}),user,'Documents updated');
       return send(res,200,{ok:true,case:await caseRow(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}))});
@@ -1000,7 +846,6 @@ async function routeApi(req, res, url) {
       if (typeof b.fileName !== 'string' || !b.fileName || b.fileName.length > 255) return send(res, 400, { error: 'A valid file name is required' });
       if (!['image/jpeg','image/png','application/pdf'].includes(b.mimeType) || Number(b.size) > 10_000_000) return send(res, 400, { error: 'Only JPG, PNG, or PDF up to 10 MB is allowed' });
       const customer = (await one('SELECT * FROM customers WHERE id=$id', { $id: c.customer_id }));
-      const service = (await one('SELECT * FROM services WHERE id=$id', { $id: c.service_id }));
       const safeName = `${b.docType}${multiple ? ' - ' + randomUUID().slice(0,8) : ''} - ${customer.name} - ${c.ref}${extname(b.fileName) || '.bin'}`.replace(/[\\/:*?"<>|]/g, '-');
       const content = intent ? await readStorage(intent.storage_path) : Buffer.from(b.content || '', 'base64');
       if (!content.length || content.length > 10_000_000) return send(res, 400, { error: 'Uploaded file content is empty or exceeds 10 MB' });
@@ -1009,49 +854,27 @@ async function routeApi(req, res, url) {
       const signatureOK = b.mimeType === 'application/pdf' ? content.subarray(0, 5).toString() === '%PDF-' : b.mimeType === 'image/png' ? content.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : content[0] === 255 && content[1] === 216 && content[2] === 255;
       if (!signatureOK) return send(res, 400, { error: 'File content does not match JPG, PNG, or PDF format' });
       let storage;
-      let driveFileId;
-      let googleSyncError;
-      if (process.env.DRIVE_MODE === 'live' && !storageEnabled()) {
-        try {
-          if(process.env.GOOGLE_RECONNECT_REQUIRED==='1' && storageEnabled()) throw Object.assign(new Error('Google reconnection is required'),{status:409,code:'GOOGLE_RECONNECT_REQUIRED'});
-          const folders = await driveFoldersForCase(c, customer, service);
-          const uploaded = await uploadDriveFile(safeName, b.mimeType, folders.caseFolderId, content);
-          storage = `gdrive://${uploaded.id}`;
-          driveFileId = uploaded.id;
-        } catch (error) {
-          if (!storageEnabled()) throw error;
-          googleSyncError = error.code || 'GOOGLE_SYNC_FAILED';
-        }
-      } else if (!storageEnabled()) {
-        const folder = join(DEMO_ROOT, 'Success Online Customers', customerDriveFolderName(customer), safeFileName(`${c.ref} - ${service.name}`));
-        mkdirSync(folder, { recursive: true });
-        storage = join(folder, `${randomUUID()} - ${safeName}`);
-        writeFileSync(storage, content);
-        driveFileId = `demo-drive-${randomUUID()}`;
-      }
       if (storageEnabled()) {
         const path = intent ? intent.storage_path : `cases/${c.id}/${randomUUID()}/${safeFileName(safeName)}`;
         if (!intent) await writeStorage(path,content,b.mimeType);
         storage = `supabase://${path}`;
-        driveFileId ||= '';
+      } else {
+        const folder = join(DEMO_ROOT, 'documents', c.id);
+        mkdirSync(folder, { recursive: true });
+        storage = join(folder, `${randomUUID()} - ${safeName}`);
+        writeFileSync(storage, content);
       }
       const old = (await one('SELECT MAX(version) v FROM documents WHERE case_id=$id AND doc_type=$t', { $id: c.id, $t: b.docType }))?.v || 0;
       if (old && !multiple) (await run('UPDATE documents SET state=$replaced WHERE case_id=$id AND doc_type=$t AND state!=$replaced', { $id: c.id, $t: b.docType, $replaced: 'replaced' }));
       const documentId = id('doc');
-      (await run('INSERT INTO documents VALUES ($id,$case_id,$doc_type,$file_name,$mime_type,$size,$storage,$drive,$state,$version,$created)', { $id: documentId, $case_id: c.id, $doc_type: b.docType, $file_name: safeName, $mime_type: b.mimeType, $size: content.length, $storage: storage, $drive: driveFileId, $state: 'uploaded', $version: old + 1, $created: now() }));
-      if (storageEnabled() && process.env.DRIVE_MODE === 'live') {
-        googleSyncError='GOOGLE_SYNC_PENDING';
-        await run("INSERT INTO sync_jobs VALUES ($id,'drive',$entity,'pending',0,NULL,$at,$at) ON CONFLICT(type,entity_id) DO UPDATE SET status='pending',updated_at=$at",{$id:id('sync'),$entity:documentId,$at:now()});
-        if (!b.deferMirrors) deferredDrive.getStore()?.add(c.id);
-      }
-      if (googleSyncError && googleSyncError!=='GOOGLE_SYNC_PENDING') await run('INSERT INTO sync_jobs VALUES ($id,$type,$entity,$status,1,$error,$at,$at)',{$id:id('sync'),$type:'drive',$entity:documentId,$status:'failed',$error:googleSyncError,$at:now()});
+      (await run('INSERT INTO documents VALUES ($id,$case_id,$doc_type,$file_name,$mime_type,$size,$storage,$drive,$state,$version,$created)', { $id: documentId, $case_id: c.id, $doc_type: b.docType, $file_name: safeName, $mime_type: b.mimeType, $size: content.length, $storage: storage, $drive: '', $state: 'uploaded', $version: old + 1, $created: now() }));
       if (intent) await run('UPDATE upload_intents SET completed_at=$at WHERE id=$id',{$id:intent.id,$at:now()});
       await recordIntakeUpload(c,b,documentId);
       if (intent && !multiple) await run('UPDATE upload_intents SET expires_at=$at WHERE case_id=$case AND doc_type=$type AND completed_at IS NULL',{$at:now(),$case:c.id,$type:b.docType});
-      if (b.deferMirrors) return send(res,201,{ok:true,documentId,googleSyncPending:Boolean(googleSyncError)});
+      if (b.deferMirrors) return send(res,201,{ok:true,documentId});
       await recomputeCase(c.id);
       await notifyCaseUpdate(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}),user,'Document uploaded');
-      send(res, 201, { ok: true, documentId, googleSyncPending:Boolean(googleSyncError), case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
+      send(res, 201, { ok: true, documentId, case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
     });
     if (req.method === 'POST' && caseMatch[2] === 'payment-order') {
       if (!['sales','admin'].includes(user.role)) return send(res,403,{error:'Only sales or admin can open checkout'});
@@ -1128,7 +951,7 @@ async function routeApi(req, res, url) {
       unpaid: (await one("SELECT COUNT(*) n FROM cases WHERE payment_state!='paid' AND status NOT IN ('Closed','Cancelled')")).n,
       followUpsDue: (await one("SELECT COUNT(*) n FROM cases WHERE follow_up_date IS NOT NULL AND follow_up_date <= date('now') AND status NOT IN ('Closed','Delivered','Cancelled','Rejected')")).n,
       overdue: (await one("SELECT COUNT(*) n FROM cases WHERE due_date IS NOT NULL AND due_date < date('now') AND status NOT IN ('Closed','Delivered','Cancelled','Rejected')")).n,
-      syncFailures: (await one("SELECT COUNT(*) n FROM sync_jobs WHERE status='failed'")).n
+      syncFailures: (await one("SELECT COUNT(*) n FROM sync_jobs WHERE type='sheets' AND status='failed'")).n
     };
     const statusBreakdown = (await all(`SELECT status,COUNT(*) count FROM cases WHERE created_at >= $start GROUP BY status ORDER BY count DESC`, params));
     const serviceCases = (await all(`SELECT s.id,s.name,COUNT(c.id) cases,
@@ -1173,7 +996,7 @@ async function routeApi(req, res, url) {
       staffPerformance: { sales: salesPerformance, backoffice: backofficePerformance },
       trend: [...trendMap.values()].sort((a,b) => a.bucket.localeCompare(b.bucket)),
       recentPayments,
-      integrations: { drive: process.env.DRIVE_MODE === 'live', sheets: process.env.SHEETS_MODE === 'live' }
+      integrations: { sheets: process.env.SHEETS_MODE === 'live' }
     });
   }
   if (url.pathname === '/api/admin/employees') {
@@ -1269,7 +1092,7 @@ export async function handler(req, res) {
       end(content) { response ||= {status:200,headers:{}}; response.content = content; },
       setHeader(key,value) { res.setHeader(key,value); }
     };
-    const sheetsJobs = new Set(), driveJobs = new Set();
+    const sheetsJobs = new Set();
     const documentRequest = req.method==='POST' && (url.pathname==='/api/cases' || /\/api\/cases\/[^/]+\/(documents|finish-uploads)$/.test(url.pathname));
     const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|submit-received-document|request-reupload|submit-reupload)$/.test(url.pathname);
     const paymentRequest = /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/payment-order$/.test(url.pathname);
@@ -1291,10 +1114,9 @@ export async function handler(req, res) {
       if (db.cloud && (/^\/api\/payments\//.test(url.pathname) || /\/payment-order$/.test(url.pathname))) await one('SELECT pg_advisory_xact_lock(73194204)');
       await routeApi(req, buffered, url);
     };
-    await deferredDrive.run(driveJobs, () => deferredSheets.run(sheetsJobs, () => readOnly && db.cloud ? route() : db.transaction(route)));
+    await deferredSheets.run(sheetsJobs, () => readOnly && db.cloud ? route() : db.transaction(route));
     const syncWork = async () => {
-      await Promise.all([...driveJobs].map(caseId=>performDriveSync(caseId)));
-      const reportingJobs=new Set([...sheetsJobs,...(process.env.SHEETS_MODE==='live'?[...driveJobs]:[])]);
+      const reportingJobs=sheetsJobs;
       await Promise.all([...reportingJobs].map(caseId=>performSheetsSync(caseId)));
     };
     if (!paymentRequest && !documentRequest && !workflowRequest) {
@@ -1305,7 +1127,7 @@ export async function handler(req, res) {
       }
     }
     res.writeHead(response.status, response.headers); res.end(response.content);
-    if ((paymentRequest || documentRequest || workflowRequest) && (sheetsJobs.size || driveJobs.size)) {
+    if ((paymentRequest || documentRequest || workflowRequest) && sheetsJobs.size) {
       const work = syncWork().catch(error=>console.error('Deferred Sheets sync failed:',error.code || error.name));
       if (process.env.VERCEL) waitUntil(work);
     }

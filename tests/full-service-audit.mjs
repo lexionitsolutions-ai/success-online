@@ -200,7 +200,7 @@ try{
  if(live){loadEnvFile('.env');base='https://success-online.vercel.app';}
  else{
   const root=previous?join(previous.database,'..'):mkdtempSync(join(tmpdir(),'full-service-qa-')),port=34000+Math.floor(Math.random()*5000);base=`http://localhost:${port}`;report.database=previous?.database||join(root,'test.sqlite');
-  child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',DATABASE_PATH:report.database,STORAGE_PATH:join(root,'docs'),PORT:String(port),APP_ORIGIN:base,DRIVE_MODE:'demo',SHEETS_MODE:'demo',SESSION_SECRET:'full-audit-isolated-secret-32-characters'},stdio:['ignore','pipe','pipe']});
+  child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',DATABASE_PATH:report.database,STORAGE_PATH:join(root,'docs'),PORT:String(port),APP_ORIGIN:base,SHEETS_MODE:'demo',SESSION_SECRET:'full-audit-isolated-secret-32-characters'},stdio:['ignore','pipe','pipe']});
   let errors='';child.stderr.on('data',data=>errors+=data);
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(errors||'Server startup timeout')),15000);child.stdout.on('data',data=>{if(String(data).includes('running')){clearTimeout(timer);resolve();}});child.on('exit',()=>{clearTimeout(timer);reject(Error(errors));});});
  }
