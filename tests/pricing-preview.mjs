@@ -44,21 +44,22 @@ try {
   const ews=()=>page.locator('.pricing-card').filter({has:page.getByRole('heading',{name:'EWS Certificate',exact:true})});
   await page.getByRole('spinbutton',{name:'Caste Certificate price',exact:true}).fill('555');
   await page.getByRole('spinbutton',{name:'EWS Certificate price',exact:true}).fill('210.50');
-  await ews().getByRole('button',{name:'Save price',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('.pricing-result').textContent==='Price saved.');
+  await ews().getByRole('button',{name:'Update price',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.pricing-result').textContent==='Price updated.');
   assert.deepEqual(await page.evaluate(()=>window.saves.at(-1)),{salesUserId:'one',variantId:'ews',price:21050});
-  assert.match(await ews().locator('p').textContent(),/Default:.*210\.50/);
-  assert.equal(await page.getByRole('spinbutton',{name:'Caste Certificate price',exact:true}).inputValue(),'555');
-  await ews().getByRole('button',{name:'Use default',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('.pricing-result').textContent==='Default price restored.');
-  assert.equal(await page.getByRole('spinbutton',{name:'EWS Certificate price',exact:true}).inputValue(),'300.00');
-  assert.match(await ews().locator('p').textContent(),/Default:.*300\.00/);
+  assert.equal(await page.getByRole('spinbutton',{name:'EWS Certificate price',exact:true}).inputValue(),'210.50');
+  assert.equal(await ews().getByText(/Default:|Individual price|Default price/).count(),0);
   assert.equal(await ews().getByRole('button',{name:'Use default',exact:true}).count(),0);
+  assert.equal(await page.getByRole('spinbutton',{name:'Caste Certificate price',exact:true}).inputValue(),'555');
+  await page.locator('#pricingSalesperson').selectOption('two');
+  assert.equal(await page.getByRole('spinbutton',{name:'EWS Certificate price',exact:true}).inputValue(),'250.00');
+  await page.locator('#pricingSalesperson').selectOption('one');
+  assert.equal(await page.getByRole('spinbutton',{name:'EWS Certificate price',exact:true}).inputValue(),'210.50');
   await page.evaluate(()=>window.failSave=true);
   await page.getByRole('spinbutton',{name:'EWS Certificate price',exact:true}).fill('220');
-  await ews().getByRole('button',{name:'Save price',exact:true}).click();
+  await ews().getByRole('button',{name:'Update price',exact:true}).click();
   assert.equal(await ews().getByRole('status').textContent(),'Could not save price');
-  assert.equal(await ews().getByRole('button',{name:'Save price',exact:true}).isEnabled(),true);
+  assert.equal(await ews().getByRole('button',{name:'Update price',exact:true}).isEnabled(),true);
   for(const width of [390,1280]) {
     await page.setViewportSize({width,height:1000});
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`No horizontal overflow at ${width}`);
@@ -76,5 +77,5 @@ try {
     assert.equal(await page.getByRole('alert').count(),0);
   }
   assert.deepEqual(errors,[]);
-  console.log('PASS: pricing navigation, failure/timeout/incomplete response recovery, salesperson prices, save/reset, unsaved edits, role navigation, and mobile/desktop layout.');
+  console.log('PASS: pricing navigation, failure/timeout/incomplete response recovery, salesperson prices, price updates, unsaved edits, role navigation, and mobile/desktop layout.');
 } finally {await browser.close();}

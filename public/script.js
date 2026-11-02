@@ -772,7 +772,7 @@ function drawWizard() {
 
 function wizardBody(service, variant) {
   if (draft.step === 1) return `<div class="formgrid"><label>Full name<input id="name" oninput="removeNameNumbers(this)" autocomplete="name" value="${h(draft.customer.name || '')}"></label><label>Mobile number<input id="mobile" type="tel" inputmode="numeric" maxlength="10" pattern="[0-9]{10}" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" autocomplete="tel-national" placeholder="10-digit mobile number" value="${h(draft.customer.mobile || '')}"></label><label>Address<input id="address" autocomplete="street-address" value="${h(draft.customer.address || '')}"></label></div><div class="form-actions"><button class="primary" onclick="saveStep1()">Continue</button></div>`;
-  if (draft.step === 2) return `<div class="formgrid"><label>Service<select id="service"><option value="" disabled hidden ${!draft.serviceId ? 'selected' : ''}>Choose...</option>${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label></div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="primary" onclick="saveStep2()">Continue</button></div>`;
+  if (draft.step === 2) return `<div class="formgrid"><label>Service<select id="service"><option value="" disabled hidden ${!draft.serviceId ? 'selected' : ''}>Choose...</option>${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label></div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="quiet" onclick="wizardBack(1)">Back</button><button class="primary" onclick="saveStep2()">Continue</button></div>`;
   if (draft.step === 3) {
     const docs = applicableDocuments(variant?.documents || [], draft.details);
     const missing = docs.filter(item => item.required && !draft.docs[item.label]);
@@ -993,7 +993,17 @@ function saveStep3() {
   document.querySelectorAll('.toast').forEach(item => item.remove());
   draft.step = 4; rerenderWizard();
 }
-function wizardBack(step) { draft.step = step; rerenderWizard(); }
+function wizardBack(step) {
+  if (draft.step === 2) {
+    draft.serviceId = document.querySelector('#service').value;
+    document.querySelectorAll('#serviceFields [data-field]').forEach(input => {
+      globalThis.MarathiInput?.commit(input);
+      draft.details[decodeURIComponent(input.dataset.field)] = input.value;
+    });
+  }
+  draft.step = step;
+  rerenderWizard();
+}
 function uploadControls(encodedType, caseId = '', multiple = false) {
   const handler = caseId ? `uploadCaseDocument('${caseId}','${encodedType}',this)` : multiple ? `pickDocs('${encodedType}',this.files)` : `pickDoc('${encodedType}',this.files[0])`;
   return `<span class="upload-options"><label class="file-action">${multiple ? 'Add files' : 'Upload document'}<input type="file" ${multiple ? 'multiple' : ''} accept="image/jpeg,image/png,application/pdf" onchange="${handler}"></label></span>`;
@@ -1614,13 +1624,13 @@ async function loadPricing() {
 }
 function renderPricing() {
   if (me.role !== 'admin') return empty('Admin access required.');
-  const head = pageHead('Pricing','Set individual service prices for each salesperson.');
+  const head = pageHead('Pricing','View and update service prices for each salesperson.');
   if (pricingError) return `${head}<section class="analytics-panel"><p role="alert">Could not load pricing: ${h(pricingError)}</p><button class="primary" onclick="loadPricing()">Retry</button></section>`;
   if (!pricingData) return head + empty('Loading pricing...');
   const selected = pricingData.salespeople.find(person => person.id === pricingSalesId);
   return `${head}<section class="analytics-panel pricing-panel"><label class="pricing-salesperson">Salesperson<select id="pricingSalesperson" onchange="selectPricingSalesperson(this.value)"><option value="">Choose a salesperson...</option>${pricingData.salespeople.map(person=>`<option value="${h(person.id)}" ${person.id===pricingSalesId?'selected':''}>${h(person.name)} (${h(person.username)})${person.active?'':' - Inactive'}</option>`).join('')}</select></label></section>${selected?`<section class="pricing-grid" aria-label="Service prices for ${h(selected.name)}">${pricingData.prices.map(price=>{
     const custom=pricingData.overrides.find(item=>item.sales_user_id===selected.id && item.variant_id===price.variant_id);
-    return `<form class="analytics-panel pricing-card" onsubmit="saveSalespersonPrice(event,'${h(price.variant_id)}')"><h2>${h(price.service_name)}</h2><small>${h(price.variant_name)}</small><p>Default: ${money(custom?.price ?? price.price)} <span class="badge ${custom?'success':'neutral'}">${custom?'Individual price':'Default price'}</span></p><label>Service price (Rs.)<input name="price" aria-label="${h(price.service_name)} price" type="number" min="0.01" max="1000000" step="0.01" value="${((custom?.price ?? price.price)/100).toFixed(2)}" required></label><div class="pricing-actions"><button class="primary" type="submit">Save price</button>${custom?`<button type="button" onclick="resetSalespersonPrice(this,'${h(price.variant_id)}')">Use default</button>`:''}</div><small class="pricing-result" role="status"></small></form>`;
+    return `<form class="analytics-panel pricing-card" onsubmit="saveSalespersonPrice(event,'${h(price.variant_id)}')"><h2>${h(price.service_name)}</h2><small>${h(price.variant_name)}</small><label>Current price (Rs.)<input name="price" aria-label="${h(price.service_name)} price" type="number" min="0.01" max="1000000" step="0.01" value="${((custom?.price ?? price.price)/100).toFixed(2)}" required></label><div class="pricing-actions"><button class="primary" type="submit">Update price</button></div><small class="pricing-result" role="status"></small></form>`;
   }).join('')}</section>`:empty(pricingData.salespeople.length?'Choose a salesperson to edit their service prices.':'Create a sales employee in Employees to set their prices.')}`;
 }
 function selectPricingSalesperson(value) { pricingSalesId=value;render(); }
@@ -1638,7 +1648,7 @@ async function persistSalespersonPrice(form,variantId,price) {
       // Replace only this card so unsaved prices in other cards stay intact.
       const holder=document.createElement('div');holder.innerHTML=renderPricing();
       const replacement=[...holder.querySelectorAll('.pricing-card')].find(card=>card.getAttribute('onsubmit')===form.getAttribute('onsubmit'));
-      if(replacement && form.isConnected) {form.replaceWith(replacement);replacement.querySelector('.pricing-result').textContent=price===null?'Default price restored.':'Price saved.';}
+      if(replacement && form.isConnected) {form.replaceWith(replacement);replacement.querySelector('.pricing-result').textContent='Price updated.';}
     }
   } catch(error) {result.textContent=error.message;}
   finally {buttons.forEach(button=>button.disabled=false);}
@@ -1648,8 +1658,7 @@ async function saveSalespersonPrice(event,variantId) {
   const price=Math.round(Number(event.target.elements.price.value)*100);
   await persistSalespersonPrice(event.target,variantId,price);
 }
-async function resetSalespersonPrice(button,variantId) {await persistSalespersonPrice(button.closest('form'),variantId,null);}
-Object.assign(window,{loadPricing,selectPricingSalesperson,saveSalespersonPrice,resetSalespersonPrice});
+Object.assign(window,{loadPricing,selectPricingSalesperson,saveSalespersonPrice});
 
 let paymentData = null, paymentSettings = null, checkout = null;
 let paymentFilters = '';
