@@ -95,5 +95,7 @@ body.payment-open{overflow:hidden}
 .pending-cash-form { margin-top:10px; display:grid; gap:10px; }
 .pending-cash-form[hidden] { display:none; }
 .cash-pending-table td { vertical-align:top; }
+.cash-pending-metric { text-align:left; cursor:pointer; font:inherit; }
+.cash-pending-metric:focus-visible { outline:3px solid #2b79c2; outline-offset:3px; }
 @media(max-width:700px) { .cash-pending-panel { padding:14px; } .payment-tabs button { flex:1; } }
 @media(max-width:700px) { .cash-receipt-layout { padding:18px; } }

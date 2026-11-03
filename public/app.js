@@ -1829,9 +1829,15 @@ const selectedPaymentCases=new Set();
 const confirmingPayments=new Set();
 const paymentSearchFields={all:'All fields',customer:'Customer',utr:'UTR',mobile:'Mobile',service:'Service',employee:'Employee',order:'Order / case',status:'Status',from:'From date',to:'To date'};
 async function loadPayments() {
-  paymentData=await api('/api/payments'+paymentFilters);
+  const [data]=await Promise.all([api('/api/payments'+paymentFilters),['admin','sales'].includes(me?.role)?loadCashPending():Promise.resolve()]);
+  paymentData=data;
   paymentSettings=null;
-  if(paymentTab==='cashPending') await loadCashPending();
+}
+function cashPendingMetricCard() {
+  if(!['admin','sales'].includes(me?.role)) return '';
+  const rows=cashPendingData?.cases;
+  const amount=cashPendingError?'Unavailable':rows?money(rows.reduce((sum,c)=>sum+c.pending_amount,0)):'—';
+  return `<button type="button" class="metric-card amber cash-pending-metric" onclick="setPaymentTab('cashPending')" aria-label="View cash pending amount"><span>Cash pending amount</span><strong>${amount}</strong><small>${cashPendingError?'Retry pending balances':`${number(rows?.length || 0)} cases · View pending payments`}</small></button>`;
 }
 async function loadCashPending() {
   cashPendingLoading=true;cashPendingError='';
@@ -1927,7 +1933,7 @@ function renderPayments() {
   const unpaid = latest.filter(p => ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) && !['Cancelled','Closed','Delivered'].includes(p.case_status) && !paymentData.payments.some(row => row.case_id === p.case_id && ['PAID','AWAITING_VERIFICATION'].includes(row.status))).length;
   const selected = selectablePaymentCases().filter(p => selectedPaymentCases.has(p.case_id)).length;
   const heading=`<section class="payments-workspace">${pageHead('Payments', 'A clear view of your collections, checkouts, and payment activity.')}
-    ${me.role==='admin' ? `<section class="metric-grid compact payment-metrics">${metricCard('Verified collections',money(m.collected),'Confirmed in the receiving account','green')}${metricCard('Collected today',money(m.today),'Verified today','green')}${metricCard('Under review',number(m.awaiting),'Awaiting verification','amber')}${metricCard('Failed / cancelled',number(m.failed),'Checkout history')}${metricCard('Verified transfers',number(m.verified),'Individual and combined transfers','green')}</section>` : `<section class="metric-grid payment-metrics">${metricCard('Unpaid cases',number(unpaid),'Individual or combined checkout','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting payment verification','amber')}${metricCard('Verified collections',money(m.collected),'Confirmed payments','green')}</section>`}
+    ${me.role==='admin' ? `<section class="metric-grid compact payment-metrics">${metricCard('Verified collections',money(m.collected),'Confirmed in the receiving account','green')}${metricCard('Collected today',money(m.today),'Verified today','green')}${metricCard('Under review',number(m.awaiting),'Awaiting verification','amber')}${metricCard('Failed / cancelled',number(m.failed),'Checkout history')}${metricCard('Verified transfers',number(m.verified),'Individual and combined transfers','green')}${cashPendingMetricCard()}</section>` : `<section class="metric-grid payment-metrics">${metricCard('Unpaid cases',number(unpaid),'Individual or combined checkout','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting payment verification','amber')}${metricCard('Verified collections',money(m.collected),'Confirmed payments','green')}${cashPendingMetricCard()}</section>`}
     ${paymentTabs()}`;
   if(paymentTab==='cashPending') return heading+renderCashPending()+'</section>';
   return heading+`

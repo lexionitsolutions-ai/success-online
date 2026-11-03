@@ -688,6 +688,7 @@ test('Cash pending payments shows the remaining balance and payment options with
   run(`me={id:'sales',role:'sales',cashPaymentsAllowed:true};paymentData={payments:[],metrics:{}};cashPendingData={cases:[{case_id:'case1',ref:'SO-1',sales_user_id:'sales',customer_name:'Client',employee_name:'Mahalaxmi',service_name:'Income Certificate',case_status:'Closed',total:50000,confirmed_paid:30000,pending_amount:20000,amount_to_pay:20000,awaiting_verification:0}]};paymentTab='cashPending';`);
   const html=run('renderPayments()');
   assert.match(html,/Cash pending payments/);assert.match(html,/₹200\.00/);assert.match(html,/Pay in cash/);assert.match(html,/with UPI/);
+  assert.match(html,/aria-label="View cash pending amount"/);assert.match(run('cashPendingMetricCard()'),/Cash pending amount<\/span><strong>₹200\.00/);
   assert.doesNotMatch(html,/Receiver &amp; service pricing|Receiver & service pricing/);
   run("me={role:'admin'}");
   assert.doesNotMatch(run('renderPayments()'),/Record cash payment/);

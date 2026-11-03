@@ -30,7 +30,9 @@ try {
     await page.goto('https://cash-pending.test');await page.getByRole('heading',{name:role==='sales'?'Sales workspace':'Operations workspace'}).waitFor();
     if(width<901) await page.locator('.mobile-more summary').click();
     await page.locator(`${width<901?'.more-menu':'.side'} [data-view="payments"]`).click();
-    await page.getByRole('tab',{name:'Cash pending payments',exact:true}).click();
+    const pendingCard=page.getByRole('button',{name:'View cash pending amount',exact:true});
+    await pendingCard.waitFor();assert.match(await pendingCard.innerText(),/₹200\.00/);
+    await pendingCard.click();
     await page.locator('.cash-pending-table').waitFor();
     assert.match(await page.locator('.cash-pending-panel').innerText(),/₹200\.00/);
     assert.equal(await page.getByText(/Receiver & service pricing/).count(),0);
