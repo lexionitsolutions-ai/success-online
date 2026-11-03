@@ -15,6 +15,7 @@ export function createBatchPayments({db,send,body,createOrder,recomputeCase,rece
     const batch=await one('SELECT * FROM payment_batches WHERE id=$id',{$id:id});
     if(!batch) fail(404,'Combined payment not found');
     const items=await all('SELECT p.*,c.ref,c.sales_user_id,c.status case_status,cu.name customer_name,o.service_name FROM payment_batch_items i JOIN payments p ON p.id=i.payment_id JOIN cases c ON c.id=p.case_id JOIN customers cu ON cu.id=c.customer_id JOIN upi_orders o ON o.payment_id=p.id WHERE i.batch_id=$id ORDER BY c.id',{$id:id});
+    if(items.some(item=>item.case_status==='Deleted')) fail(410,'This combined checkout includes a deleted case. Open a new checkout for the remaining cases.');
     if(user.role==='sales' && (batch.created_by!==user.id || items.some(p=>p.sales_user_id!==user.id))) fail(403,'Not allowed');
     if(['PENDING','INITIATED'].includes(batch.status) && batch.expires_at<now()) {
       batch.status='EXPIRED';
@@ -38,7 +39,8 @@ export function createBatchPayments({db,send,body,createOrder,recomputeCase,rece
     for(const id of [...caseIds].sort()) {
       const c=await one('SELECT * FROM cases WHERE id=$id'+(db.cloud?' FOR UPDATE':''),{$id:id});
       if(!c || (user.role==='sales' && c.sales_user_id!==user.id)) fail(403,'You can only combine your own cases');
-      if(['Cancelled','Closed','Delivered'].includes(c.status)) fail(409,'A selected case is closed or cancelled');
+      if(await one('SELECT case_id FROM cash_accounts WHERE case_id=$id',{$id:c.id})) fail(409,'Pay cash-plan balances individually from the case payment panel.');
+      if(['Cancelled','Closed','Delivered','Deleted'].includes(c.status)) fail(409,'A selected case is closed, cancelled or deleted');
       selected.push(c);
     }
     if(new Set(selected.map(c=>c.sales_user_id)).size!==1) fail(400,'Select cases belonging to one salesperson');

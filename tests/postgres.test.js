@@ -99,6 +99,13 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     assert.ok(first.elapsed<1500,`Upload must return before the delayed Google mirror (${first.elapsed} ms)`);
     const stats=await (await fetch(`http://localhost:${port+1}/test/storage-stats`)).json();
     assert.equal(stats.uploadWrites,1);assert.equal(stats.copyWrites,0,'The signed upload must not be copied into storage a second time');
+    const recoveryPath='/api/cases/'+concurrent[0].data.case.id;
+    const recoveryAuth=await request(recoveryPath+'/upload-url',{cookie:accounts.sales,body:{docType:'Aadhaar Card',fileName:'recover.pdf',mimeType:'application/pdf',size:pdf.length}});
+    assert.equal(recoveryAuth.status,201);
+    assert.equal((await fetch(recoveryAuth.data.uploadUrl,{method:'PUT',headers:{'content-type':'application/pdf'},body:pdf})).status,200);
+    const recovered=await request(recoveryPath+'/documents',{cookie:admin,body:{uploadId:recoveryAuth.data.uploadId,deferMirrors:true}});
+    assert.equal(recovered.status,201,JSON.stringify(recovered.data));
+    assert.equal((await request(recoveryPath,{cookie:accounts.sales})).data.documents.length,1,'Admin can recover an existing stored upload with full validation');
     const storedDocument=(await request(path,{cookie:accounts.backoffice})).data.documents[0];
     const preview=await request(`/api/documents/${storedDocument.id}/preview`,{cookie:accounts.backoffice});
     assert.equal(preview.status,200);

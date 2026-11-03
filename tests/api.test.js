@@ -349,7 +349,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.match(inline.headers.get('content-disposition'),/^inline;/);
     assert.deepEqual(Buffer.from(await inline.arrayBuffer()),pdf);
     assert.equal((await request(preview.data.url,{cookie:sales})).status,200);
-    assert.equal((await request(previewPath,{cookie:admin})).status,200);
+    assert.equal((await request(previewPath,{cookie:admin})).status,403,'Admin cannot preview unpaid cases');
     const download = await fetch(origin + firstDoc.download_url, { headers:{cookie:office} });
     assert.equal(download.status, 200); assert.deepEqual(Buffer.from(await download.arrayBuffer()), pdf);
     assert.equal((await request(firstDoc.download_url, { cookie:otherSales })).status, 403);
@@ -362,6 +362,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const order = (await request(path + '/payment-order', { cookie:sales, method:'POST' })).data;
     assert.equal((await request(path + '/verify-payment', { cookie:sales, body:{orderId:order.orderId} })).status, 403);
     await verifyTestOrder(request,admin,sales,order.id);
+    assert.equal((await request(previewPath,{cookie:admin})).status,200);
     assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 200);
     assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 409);
     assert.equal((await request(path+'/progress',{cookie:office,body:{status:'Correction Required',note:'   '}})).status,400);
@@ -485,12 +486,7 @@ test('Sheets reporting and private local uploads remain independent of Google au
     const countStoredCases=()=>{const db=new DatabaseSync(join(root,'test.sqlite'));try{return db.prepare('SELECT COUNT(*) n FROM cases').get().n;}finally{db.close();}};
     const pdf = Buffer.from('%PDF-1.4\nmock-storage-file\n%%EOF');
     await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
-    const documents = (await api(`/api/cases/${c.id}`)).documents;
-    assert.equal(documents[0].storage_path, undefined);
-    const download = await fetch(origin + documents[0].download_url,{headers:{cookie}});
-    assert.equal(download.status,200); assert.deepEqual(Buffer.from(await download.arrayBuffer()),pdf);
-    const zip = await fetch(origin + `/api/cases/${c.id}/download-all`,{headers:{cookie}});
-    assert.equal(zip.status,200); assert.equal(Buffer.from(await zip.arrayBuffer()).readUInt32LE(),0x04034b50);
+    assert.equal((await fetch(origin + `/api/cases/${c.id}`,{headers:{cookie}})).status,403,'Admin waits for confirmed payment');
     const repairedWorkbook=JSON.parse(readFileSync(join(root,'sheets.json'),'utf8'));
     assert.ok(Object.values(repairedWorkbook['All Workings']||{}).some(row=>row[0]===c.ref),'Missing operations tab heals automatically before manual activation');
     unlinkSync(join(root,'revoked'));
@@ -505,6 +501,12 @@ test('Sheets reporting and private local uploads remain independent of Google au
     assert.ok(performance.now()-started<1500,'Payment verification must return before a slow Sheets request');
     assert.equal(verified.payment.status,'PAID','Sheets outage must not lose database verification');
     assert.equal((await api(`/api/payments/${c.payment.id}`)).status,'PAID','The committed payment remains readable while Google is still waiting');
+    const documents = (await api(`/api/cases/${c.id}`)).documents;
+    assert.equal(documents[0].storage_path, undefined);
+    const download = await fetch(origin + documents[0].download_url,{headers:{cookie}});
+    assert.equal(download.status,200); assert.deepEqual(Buffer.from(await download.arrayBuffer()),pdf);
+    const zip = await fetch(origin + `/api/cases/${c.id}/download-all`,{headers:{cookie}});
+    assert.equal(zip.status,200); assert.equal(Buffer.from(await zip.arrayBuffer()).readUInt32LE(),0x04034b50);
     const inspect=new DatabaseSync(join(root,'test.sqlite'));
     const deadline=Date.now()+6000;
     while(inspect.prepare("SELECT status FROM sync_jobs WHERE type='sheets' AND entity_id=?").get(c.id).status!=='failed' && Date.now()<deadline) await new Promise(resolve=>setTimeout(resolve,50));

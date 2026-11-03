@@ -75,3 +75,15 @@ body.payment-open{overflow:hidden}
 .payment-search-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .payment-search-actions button{font-size:11px;min-height:32px;padding:6px 10px}
 @media(max-width:700px){.payment-list-tools{display:block}#paymentFilters.payment-search{grid-template-columns:112px minmax(0,1fr) 40px;gap:6px}.payment-search-actions{justify-content:flex-end;margin-top:6px}#paymentFilters input,#paymentFilters select{font-size:16px;padding:8px}.payment-search-by>span{font-size:10px}}
+/* The Mahalaxmi account can choose cash directly from individual checkout. */
+.checkout-cash-choice { margin-bottom:26px; padding:20px; border:1px solid #bbd9cb; border-radius:14px; background:#f4fbf7; }
+.checkout-cash-choice h3 { margin:0 0 14px; }
+.checkout-cash-buttons { display:flex; gap:12px; flex-wrap:wrap; }
+.checkout-cash-form { margin-top:20px; }
+.checkout-cash-form[hidden] { display:none; }
+.checkout-cash-form label { display:grid; gap:8px; }
+.checkout-cash-form p { font-size:13px; line-height:1.7; }
+.cash-receipt-layout { padding:24px; }
+.payment-row-actions.has-confirm { flex-direction:column; align-items:stretch; }
+.payment-row-actions.has-confirm button { width:100%; min-width:0; height:auto; min-height:36px; white-space:normal; line-height:1.35; }
+@media(max-width:700px) { .cash-receipt-layout { padding:18px; } }

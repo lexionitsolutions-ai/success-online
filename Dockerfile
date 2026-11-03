@@ -1,6 +1,6 @@
 FROM node:24-bookworm-slim
 WORKDIR /app
-COPY package.json package-lock.json server.js database.js storage.js service-catalog.js archive.js operations-schema.js ./
+COPY package.json package-lock.json *.js ./
 RUN npm ci --omit=dev
 COPY public ./public
 COPY scripts/vendor-pdfjs.js ./scripts/vendor-pdfjs.js

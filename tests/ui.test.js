@@ -641,6 +641,48 @@ test('cloud upload transfers file bytes directly and retries only finalization',
   assert.equal(run('finalizations'),2);
 });
 
+test('stored uploads recover from duplicate storage responses and interrupted connections without losing file confirmations',async()=>{
+  for(const failure of ['duplicate','connection']) {
+    const {context,run}=client();let transfers=0;
+    context.fetch=async()=>{transfers++;if(failure==='connection') throw Error('Connection reset');return {ok:false,status:400,json:async()=>({statusCode:'409',error:'Duplicate',message:'The resource already exists'})};};
+    run(`const documentFile={fileName:'proof.pdf',mimeType:'application/pdf',size:100,file:{bytes:'file'}};let confirmations=0;api=async path=>{if(path.endsWith('/upload-url')) return {uploadId:'upload1',uploadUrl:'https://storage.example/upload'};confirmations++;return {ok:true,documentId:'saved'};};`);
+    const result=await run("uploadDocument('case1','Caste Certificate',documentFile,{cloud:true,uploadKey:'selected-file'})");
+    assert.equal(result.documentId,'saved');assert.equal(transfers,1);assert.equal(run('documentFile.cloudTransferred'),true);
+    assert.equal(run('confirmations'),1);
+  }
+});
+
+test('Mahalaxmi checkout offers cash directly while ordinary accounts stay online',()=>{
+  const {run}=client();
+  run("me={role:'sales',cashPaymentsAllowed:true};const cashOrder={amount:60000,cashPaymentAllowed:true};");
+  assert.match(run('cashCheckoutOptions(cashOrder)'),/Pay online/);
+  assert.match(run('cashCheckoutOptions(cashOrder)'),/Pay in cash/);
+  assert.match(run('cashCheckoutOptions(cashOrder)'),/Cash amount paid/);
+  run('me.cashPaymentsAllowed=false');assert.equal(run('cashCheckoutOptions(cashOrder)'),'');
+});
+
+test('admin Payments rows offer direct Review and Confirm, and cash confirmation avoids a full workspace reload',async()=>{
+  const {run}=client();
+  run(`me={role:'admin'};paymentData={payments:[{id:'cash1',gateway:'cash',cash_account:'case1',case_id:'case1',status:'AWAITING_VERIFICATION',amount:10000,customer_name:'Client',created_at:'2026-11-03T00:00:00Z'}],metrics:{}};`);
+  const row=run('paymentTableRow(paymentData.payments[0])');
+  assert.match(row,/showPayment\('cash1'\)/);assert.match(row,/>Review<\/button>/);assert.match(row,/confirmPaymentFromList\('cash1',this\)/);assert.match(row,/Confirm cash received/);
+  run(`let reloads=0;let verifies=0;load=async()=>{reloads++;};refreshCaseUpdates=async()=>{};refreshPayments=async()=>{};render=()=>{};api=async()=>{verifies++;return {payment:{...paymentData.payments[0],status:'PAID'}}};`);
+  await run("confirmPaymentFromList('cash1')");
+  assert.equal(run('paymentData.payments[0].status'),'PAID');assert.equal(run('reloads'),0);assert.equal(run('verifies'),1);
+  await run("confirmPaymentFromList('cash1')");assert.equal(run('verifies'),1,'A confirmed row cannot submit another verification');
+  run("me.role='sales';paymentData.payments[0].status='AWAITING_VERIFICATION'");
+  assert.doesNotMatch(run('paymentTableRow(paymentData.payments[0])'),/Confirm cash received/);
+});
+
+test('backoffice has an explicit case reupload form for open cases and sales cannot request reuploads',()=>{
+  const {run}=client();
+  run("const reuploadCase={id:'case',status:'Assigned',details:{},variant:{documents:[{label:'Aadhaar Card',required:true}]}};me={role:'backoffice'};");
+  assert.equal(run('canRequestReupload(reuploadCase)'),true);
+  assert.match(run('caseReuploadForm(reuploadCase)'),/Send reupload request/);
+  run("me.role='sales'");assert.equal(run('caseReuploadForm(reuploadCase)'),'');
+  run("me.role='backoffice';reuploadCase.status='Closed'");assert.equal(run('caseReuploadForm(reuploadCase)'),'');
+});
+
 test('admin overview skips unrelated analytics requests and loads them on the requested tab', async () => {
   const {run}=client();
   run("me={role:'admin'}; const requested=[];api=async path=>{requested.push(path);return {};};view='dashboard';");
@@ -651,6 +693,76 @@ test('admin overview skips unrelated analytics requests and loads them on the re
   assert.ok(run('requested[0]').startsWith('/api/admin/employees?'));
   run("view='admin'");await run('loadViewData()');
   assert.equal(run('requested.length'),4);
+});
+
+test('performance tabs are admin-only, escape employee names and show meaningful empty reviews',async()=>{
+  const {run}=client();
+  run("me={id:'admin',role:'admin',name:'Admin',username:'admin'}");
+  assert.match(run("shell('')"),/Sales Performance/);
+  assert.match(run("shell('')"),/Backoffice Performance/);
+  run("me.role='sales'");
+  assert.doesNotMatch(run("shell('')"),/Sales Performance|Backoffice Performance/);
+  assert.match(run("renderPerformance('sales')"),/Admin access required/);
+  run(`me.role='admin';api=async()=>({employees:[{id:'s',name:'<script>test</script>',username:'sales',active:1}],report:{employee:{id:'s',name:'<script>test</script>',username:'sales',active:1},period:{start:'2026-11-01T00:00:00Z',end:'2026-11-03T00:00:00Z'},metrics:{cases:0,collected:0,serviceRevenue:0,averageSale:null,customers:0,completed:0,active:0,overdue:0,followUps:0,oldestActiveDays:null,cohortCompleted:0,completionRate:null,rejected:0,cancelled:0,tax:0,officialFees:0,correctionCases:0,turnaround:null},services:[],statuses:[],trend:[],cases:[]}});`);
+  await run("loadPerformance('sales')");
+  const markup=run("renderPerformance('sales')");
+  assert.doesNotMatch(markup,/<script>test/);
+  assert.match(markup,/&lt;script&gt;test/);
+  assert.match(markup,/Average sale value/);
+  assert.match(markup,/No cases or collections/);
+  assert.match(markup,/Custom dates/);
+});
+
+test('employee performance loaders keep role filters separate and ignore stale responses',async()=>{
+  const {run}=client();
+  run(`me={role:'admin'};const requests=[];const replies=[];api=url=>{requests.push(url);return new Promise(resolve=>replies.push(resolve));};performanceSettings('sales').employee='first';const first=loadPerformance('sales');performanceSettings('sales').employee='second';const second=loadPerformance('sales');`);
+  run("replies[1]({employees:[],report:{employee:{id:'second'}}})");await run('second');
+  run("replies[0]({employees:[],report:{employee:{id:'first'}}})");await run('first');
+  assert.equal(run("performanceSettings('sales').employee"),'second');
+  assert.equal(run("performanceSettings('backoffice').employee"),'');
+  assert.match(run('requests[1]'),/employee=second/);
+  run("api=async()=>{throw Error('Review unavailable')}");await run("loadPerformance('sales')");
+  assert.match(run("renderPerformance('sales')"),/role="alert">Review unavailable/);
+});
+
+test('cash review belongs only to the enabled account and final cash documents show the balance lock',()=>{
+  const {run}=client();
+  run("me={id:'sales',role:'sales',cashPaymentsAllowed:false};draft.paymentMethod='cash';draft.cashAmount='100';");
+  assert.equal(run('cashReviewOptions({total:60000})'),'');
+  run('me.cashPaymentsAllowed=true');
+  const review=run('cashReviewOptions({total:60000})');
+  assert.match(review,/Pay online/);assert.match(review,/Pay in cash/);assert.match(review,/Pending amount/);assert.match(review,/500\.00/);
+  run(`const cashCase={id:'case1',ref:'SO1',status:'Closed',sales:{id:'sales'},cashPayment:{total:60000,recordedPaid:10000,confirmedPaid:10000,awaitingVerification:0,pendingAmount:50000,amountToPay:50000,releaseAllowed:false,processingAllowed:true},cashReceipts:[]};`);
+  const panel=run('cashCasePanel(cashCase)');
+  assert.match(panel,/Pay the pending amount to receive the document/);
+  assert.match(panel,/Record cash payment/);assert.match(panel,/online with UPI/);
+  assert.equal(run('isPaymentConfirmed(cashCase)'),true);
+  run("me={id:'admin',role:'admin'}");
+  assert.doesNotMatch(run('cashCasePanel(cashCase)'),/Record cash payment/);
+  const receipt="{id:'p',gateway:'cash',amount:10000,status:'AWAITING_VERIFICATION',created_at:'2026-11-03T00:00:00Z',case_id:'case1'}";
+  assert.match(run(`checkoutHTML(${receipt})`),/Confirm cash received/);
+  run("me={id:'sales',role:'sales',cashPaymentsAllowed:true}");
+  assert.doesNotMatch(run(`checkoutHTML(${receipt})`),/Confirm cash received/);
+  run('cashCase.cashPayment.releaseAllowed=true;cashCase.cashPayment.amountToPay=0');
+  assert.doesNotMatch(run('cashCasePanel(cashCase)'),/Record cash payment|Pay the pending amount to receive/);
+});
+
+test('sales deletion is the final table column, blocks paid rows and stops uploads only after successful deletion',async()=>{
+  const {run}=client();
+  run(`me={id:'sales',role:'sales'};cases=[{id:'unpaid',ref:'SO1',customer:{name:'Test Client',mobile:'9876543210'},service:{name:'Income'},variant:{name:'Application'},sales:{id:'sales'},payment_state:'unpaid',status:'Awaiting Payment',amounts:{total:100},deletionAllowed:true}];`);
+  const markup=run('caseTable(cases)');
+  assert.match(markup,/<th>Updated<\/th><th>Delete case<\/th>/);
+  assert.match(markup,/onclick="deleteSalesCase\('unpaid',this\)"\s+aria-label/);
+  run('cases[0].deletionAllowed=false');
+  assert.match(run('caseTable(cases)'),/disabled title="Cases with recorded payments cannot be deleted"/);
+  run("me.role='admin'");assert.doesNotMatch(run('caseTable(cases)'),/Delete case/);
+  run(`me.role='sales';cases[0].deletionAllowed=true;window.confirm=()=>false;const deletions=[];api=async(path,options)=>{deletions.push({path,method:options.method});return {ok:true}};`);
+  await run("deleteSalesCase('unpaid')");assert.equal(run('deletions.length'),0);
+  run(`window.confirm=()=>true;render=()=>{};renderBackgroundUploads=()=>{};uploadJobStorage=async()=>{};const oldJob={id:'unpaid'};uploadJobs.set('unpaid',oldJob);`);
+  await run("deleteSalesCase('unpaid')");
+  assert.equal(run('deletions[0].method'),'DELETE');assert.equal(run('cases.length'),0);
+  assert.equal(run('oldJob.cancelled'),true);assert.equal(run("uploadJobs.has('unpaid')"),false);
+  assert.equal(run("deletedCaseIds.has('unpaid')"),true);
 });
 
 test('a dashboard refresh failure after payment save preserves the saved checkout', async () => {

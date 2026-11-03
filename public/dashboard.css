@@ -9,6 +9,7 @@
 .shell .side-brand strong{font-size:16px;letter-spacing:-.025em}
 .shell .side-brand span{margin-top:3px;color:#a5bdc4}
 .shell .nav{gap:7px;margin-top:30px}
+@media(min-width:901px) { .shell .side .nav { overflow-y:auto; min-height:0; flex:1; align-content:start; } }
 .shell .nav button{min-height:46px;padding:12px 14px;font-size:12px;color:#b7ccd2}
 .shell .nav button .ui-icon{width:18px;height:18px;opacity:.8}
 .shell .nav button.active{background:#1e424b;border-color:#31535b;color:#fff;box-shadow:inset 3px 0 #57d3b0}
@@ -265,6 +266,42 @@
 #svcInfo.summary-box { padding:0; border:0; background:transparent; }
 #svcInfo > .income-download + .intake-notices { margin-top:20px; }
 .pricing-panel { margin-bottom:20px; }
+.performance-filters { flex-wrap:wrap; }
+.performance-filters label:first-child { min-width:230px; flex:1; }
+.performance-filters .performance-date[hidden] { display:none; }
+.performance-heading { display:flex; justify-content:space-between; gap:16px; align-items:center; margin:24px 0; flex-wrap:wrap; }
+.performance-heading h2,.performance-heading p { margin:0 0 5px; }
+.performance-heading p,.performance-note { color:var(--muted); }
+.performance-metrics { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.performance-workload { margin:22px 0; min-height:0; }
+.performance-workload .operations-strip { margin:0; flex-wrap:wrap; }
+.performance-facts { margin:0; }
+.performance-facts>div { display:flex; justify-content:space-between; gap:18px; padding:12px 0; border-bottom:1px solid #edf1f5; }
+.performance-facts dd { margin:0; font-weight:700; text-align:right; }
+.performance-note { font-size:13px; line-height:1.7; margin-top:22px; }
+.cash-review-panel { margin:24px 0; padding:22px; border:1px solid #b9d9cc; border-radius:14px; background:#f4fbf7; }
+.cash-review-panel label { margin:16px 0; }
+.cash-review-panel p,.cash-case-panel p { line-height:1.6; }
+.cash-payment-totals { margin:18px 0; }
+.cash-payment-totals>div { display:flex; justify-content:space-between; gap:20px; padding:12px 0; border-bottom:1px solid #e1e9e5; }
+.cash-payment-totals dd { margin:0; font-weight:700; text-align:right; }
+.cash-document-lock { padding:16px; margin:18px 0; border:1px solid #e8cb90; border-radius:10px; background:#fff8e9; color:#795014; }
+.cash-document-lock p { margin:8px 0 0; }
+.cash-balance-form { display:flex; flex-wrap:wrap; gap:12px; align-items:end; margin:18px 0; }
+.cash-balance-form label { flex:1; min-width:180px; }
+.cash-upi-button { width:100%; margin-bottom:18px; }
+.cash-receipts>div { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 0; border-top:1px solid #e3e9ef; }
+.cash-receipts small { display:block; margin-top:5px; color:var(--muted); }
+.cash-payment-success { padding:14px; background:#e9f7ee; color:#14654b; border-radius:10px; }
+.case-delete-button { color:#a42b2b; border-color:#ebcaca; background:#fff7f7; }
+.case-delete-button:disabled { color:#8b97a5; border-color:#e5e9ee; background:#f7f9fb; cursor:not-allowed; }
+.document-section-actions { display:flex; gap:10px; flex-wrap:wrap; }
+.case-reupload-form { padding:18px; margin:16px 0; border:1px solid #d5e2ef; border-radius:10px; background:#f6f9fd; }
+.case-reupload-form[hidden] { display:none; }
+.case-reupload-form label { margin:12px 0; }
+@media(max-width:900px) { .case-table td.case-delete-cell { grid-column:1/-1; grid-row:7; border-top:1px solid #edf1f5; padding-top:10px; } .case-delete-button { width:100%; min-height:44px; } }
+@media(max-width:900px) { .performance-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .performance-filters label:first-child { min-width:0; width:100%; } .performance-heading .badge { white-space:normal; } }
+@media(max-width:480px) { .performance-metrics { grid-template-columns:1fr; } }
 .pricing-salesperson { max-width:440px; }
 .pricing-panel p,.pricing-card p { color:var(--muted); line-height:1.6; }
 .pricing-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:20px; }

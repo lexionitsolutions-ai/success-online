@@ -25,7 +25,7 @@ CREATE INDEX IF NOT EXISTS upi_status_idx ON payments(gateway,status,created_at)
 
 CREATE TABLE IF NOT EXISTS payment_batches (id TEXT PRIMARY KEY, created_by TEXT NOT NULL REFERENCES users(id), status TEXT NOT NULL, amount INTEGER NOT NULL, transaction_id TEXT, payment_method TEXT, upi_id TEXT NOT NULL, payee_name TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, verified_at TEXT, verified_by TEXT);
 CREATE TABLE IF NOT EXISTS payment_batch_items (batch_id TEXT NOT NULL REFERENCES payment_batches(id), payment_id TEXT UNIQUE NOT NULL REFERENCES payments(id), PRIMARY KEY(batch_id,payment_id));
-
+CREATE TABLE IF NOT EXISTS cash_accounts (case_id TEXT PRIMARY KEY REFERENCES cases(id),total INTEGER NOT NULL CHECK(total>0),service_charge INTEGER NOT NULL,official_fee INTEGER NOT NULL,tax INTEGER NOT NULL,created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS announcements (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
   image_base64 TEXT, image_mime_type TEXT, image_name TEXT,
@@ -82,5 +82,7 @@ ALTER TABLE public.payment_batches ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.payment_batches FROM anon, authenticated;
 ALTER TABLE public.payment_batch_items ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.payment_batch_items FROM anon, authenticated;
+ALTER TABLE public.cash_accounts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.cash_accounts FROM anon, authenticated;
 ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.announcements FROM anon, authenticated;

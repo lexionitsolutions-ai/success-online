@@ -202,12 +202,17 @@ let adminAnalytics = null;
 let analyticsPeriod = 'month';
 let view = 'dashboard';
 let selectedCase = null;
+const deletedCaseIds=new Set();
 let draft = { step: 1, customer: {}, details: {}, docs: {} };
 let drawerBusy = false;
 let employeeData = null;
 let employeePeriod = 'month';
 let employeeFrom = '';
 let employeeTo = '';
+const performanceState = {};
+function performanceSettings(role) {
+  return performanceState[role] ||= {employee:'',period:'month',from:'',to:'',data:null,error:'',loading:false,request:0};
+}
 
 function employeeUrl() {
   return '/api/admin/employees?' + new URLSearchParams({ period: employeePeriod, from: employeeFrom, to: employeeTo });
@@ -243,7 +248,7 @@ const dateTime = value => value ? new Date(value).toLocaleString('en-IN', { date
 const roleName = role => ({admin:'Administrator',sales:'Sales employee',backoffice:'Back office'}[role] || role);
 function icon(name) {
   const paths={pricing:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',dashboard:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',cases:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',completed:'<rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>',queue:'<path d="M4 5h16v14H4zM4 13h5l2 3h2l2-3h5M8 9h8"/>',payments:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',admin:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',employees:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',plus:'<path d="M12 5v14M5 12h14"/>',more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',logout:'<path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h12"/>',switch:'<path d="M4 7h15l-3-3M20 17H5l3 3M20 7v4M4 17v-4"/>'};
-  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name === 'pending' ? 'queue' : name]||paths.profile}</svg>`;
+  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name.endsWith('Performance') ? 'admin' : name === 'pending' ? 'queue' : name]||paths.profile}</svg>`;
 }
 function labelTables() {
   document.querySelectorAll('.table').forEach(table=>{
@@ -265,7 +270,7 @@ async function api(path, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Object.assign(new Error(data.error || 'Request failed'), { code: data.code });
+  if (!response.ok) throw Object.assign(new Error(data.error || 'Request failed'), { code: data.code,status:response.status });
   return data;
 }
 
@@ -302,7 +307,7 @@ async function load() {
   services = serviceData.services;
   testPricingMode = serviceData.testPricingMode;
   cloudUploads = serviceData.cloudUploads === true;
-  cases = caseData.cases;
+  cases = caseData.cases.filter(c=>!deletedCaseIds.has(c.id));
   if(view==='payments') await loadPayments();
   if(me.role==='admin') await loadViewData();
   else googleStatus=sheetsStatus=adminAnalytics=employeeData=null;
@@ -314,6 +319,7 @@ async function loadViewData() {
   if(view==='admin') [googleStatus,sheetsStatus,adminAnalytics] = await Promise.all([api('/api/google/status'),api('/api/google/sheets/status'),api(`/api/admin/dashboard?period=${analyticsPeriod}`)]);
   if(view==='employees') employeeData=await api(employeeUrl());
   if(view==='pricing') await loadPricing();
+  if(['salesPerformance','backofficePerformance'].includes(view)) await loadPerformance(view==='salesPerformance'?'sales':'backoffice');
 }
 
 function renderLogin() {
@@ -359,13 +365,13 @@ function renderLogin() {
   };
 }
 
-const navLabels = { dashboard: 'Overview', cases: 'Active Cases', pending: 'Pending Cases', completed: 'Completed Cases', payments: 'Payments', queue: 'Operations', admin: 'Business analytics', employees: 'Employees', pricing: 'Pricing' };
+const navLabels = { dashboard: 'Overview', cases: 'Active Cases', pending: 'Pending Cases', completed: 'Completed Cases', payments: 'Payments', queue: 'Operations', admin: 'Business analytics', employees: 'Employees', pricing: 'Pricing',salesPerformance:'Sales Performance',backofficePerformance:'Backoffice Performance' };
 
 function shell(content) {
-  const links = ['dashboard','cases','pending','completed','payments','queue','admin','employees','pricing']
+  const links = ['dashboard','cases','pending','completed','payments','queue','admin','salesPerformance','backofficePerformance','employees','pricing']
     .filter(item => item !== 'queue' || me.role !== 'sales')
 
-    .filter(item => !['admin','employees','pricing'].includes(item) || me.role === 'admin');
+    .filter(item => !['admin','employees','pricing','salesPerformance','backofficePerformance'].includes(item) || me.role === 'admin');
   const canCreate = ['sales','admin'].includes(me.role);
   const primaryLinks=links.filter(item=>['dashboard','cases','pending','completed'].includes(item));
   const moreLinks=links.filter(item=>!primaryLinks.includes(item));
@@ -391,7 +397,7 @@ function shell(content) {
 function render() {
   if (!me) return renderLogin();
   caseListNeedsRender = false;
-  const content = view === 'pending' ? renderPendingCases() : view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : view === 'pricing' ? renderPricing() : renderDashboard();
+  const content = view === 'salesPerformance' ? renderPerformance('sales') : view === 'backofficePerformance' ? renderPerformance('backoffice') : view === 'pending' ? renderPendingCases() : view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : view === 'pricing' ? renderPricing() : renderDashboard();
   app.innerHTML = shell(content);
   labelTables();
   renderBackgroundUploads();
@@ -409,7 +415,7 @@ function statusClass(status) {
   return 'neutral';
 }
 function statusLabel(status) { return status === 'Awaiting Payment' ? 'Unpaid Payment' : status; }
-function statusBadge(status) { const label=({paid:'Paid',unpaid:'Unpaid',missing:'Missing',complete:'Complete'})[status]||status;return `<span class="badge ${statusClass(status)}">${h(statusLabel(label))}</span>`; }
+function statusBadge(status) { const label=({paid:'Paid',partially_paid:'Partially paid',unpaid:'Unpaid',missing:'Missing',complete:'Complete'})[status]||status;return `<span class="badge ${statusClass(status)}">${h(statusLabel(label))}</span>`; }
 
 function metricCard(label, value, detail, tone = '') {
   return `<article class="metric-card ${tone}"><span>${h(label)}</span><strong>${value}</strong><small>${h(detail)}</small></article>`;
@@ -418,7 +424,7 @@ function metricCard(label, value, detail, tone = '') {
 function counts() { return cases.reduce((result, item) => { result[item.status] = (result[item.status] || 0) + 1; return result; }, {}); }
 const isCompletedCase = item => ['Closed','Delivered'].includes(item.status);
 
-const isPaymentConfirmed = item => item.payment?.gateway !== 'demo' && ['paid','PAID','verified','offline_approved'].includes(item.payment?.status || item.payment_state);
+const isPaymentConfirmed = item => item.cashPayment ? item.cashPayment.processingAllowed : item.payment?.gateway !== 'demo' && ['paid','PAID','verified','offline_approved'].includes(item.payment?.status || item.payment_state);
 const isPendingCase = item => !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && (!isPaymentConfirmed(item) || item.document_state !== 'complete');
 const isActiveCase = item => !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && isPaymentConfirmed(item) && item.document_state === 'complete';
 function notificationSection(notice) {
@@ -456,7 +462,7 @@ async function refreshCaseUpdates() {
     if (!announcementData.unavailable) announcements = announcementData.announcements || [];
     announcementsUnavailable = Boolean(announcementData.unavailable);
     if (casesChanged || (announcementsChanged && view==='dashboard')) caseListNeedsRender = true;
-    cases = caseData.cases;
+    cases = caseData.cases.filter(c=>!deletedCaseIds.has(c.id));
     caseNotifications = noticeData.notifications || [];
     updateCaseIndicators();
     const editing = document.activeElement?.matches?.('input,select,textarea');
@@ -587,19 +593,38 @@ function renderCompletedCases() {
 }
 
 function caseToolbar(rows, completed) {
-  const serviceFilter = me.role === 'admin' ? `<label class="service-filter"><span>Service</span><select id="caseServiceFilter" onchange="filterCases(${completed})"><option value="">All services</option>${services.map(service => `<option value="${h(service.id)}">${h(service.name)}</option>`).join('')}</select></label>` : '';
+  const serviceFilter = me.role === 'admin' ? `<label class="service-filter"><span>Services</span><select id="caseServiceFilter" onchange="filterCases(${completed})"><option value="">All services</option>${services.map(service => `<option value="${h(service.id)}">${h(service.name)}</option>`).join('')}</select></label>` : '';
   return `<div class="toolbar"><div class="toolbar-controls"><label class="search"><span>Search</span><input id="caseSearch" oninput="filterCases(${completed})" placeholder="Case ID, customer, service, phone"></label>${serviceFilter}</div><span id="caseListCount" class="count-label">${number(rows.length)} ${view === 'pending' ? 'pending' : completed ? 'completed' : 'active'} cases</span></div>`;
 }
 
 function caseTable(rows, completed = false) {
-  return `<table class="table case-table"><thead><tr><th>Case</th><th>Customer</th><th>Service</th><th>Status</th><th>Payment</th><th>Owner</th><th>Updated</th>${completed ? '<th>Download file</th>' : ''}</tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
+  return `<table class="table case-table"><thead><tr><th>Case</th><th>Customer</th><th>Services</th><th>Status</th><th>Payment</th><th>Owner</th><th>Updated</th>${completed ? '<th>Download file</th>' : ''}${me?.role==='sales'?'<th>Delete case</th>':''}</tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
     <td><strong><button class="case-link" onclick="event.stopPropagation();openCase('${item.id}')" aria-label="Open case ${h(item.ref)}"><i class="case-update-dot" data-case-update="${item.id}" ${caseNotifications.some(notice => notice.caseId === item.id) ? '' : 'hidden'} title="Unread case update" aria-hidden="true"></i>${h(item.ref)}</button></strong><small>${h(item.priority)}</small></td>
     <td><strong>${h(item.customer.name)}</strong><small>${h(item.customer.mobile.replace(/\d(?=\d{4})/g, 'x'))}</small></td>
     <td>${h(item.service.name)}<small>${h(item.variant.name)}</small></td>
     <td>${statusBadge(item.status)}</td><td>${statusBadge(item.payment?.status || item.payment_state)}<small>${money(item.amounts.total)}</small><small>${h(item.payment?.gateway_order_id || '')}</small></td>
     <td>${h(item.backoffice?.name || 'Unassigned')}</td><td>${dateTime(item.updated_at)}</td>
-    ${completed ? `<td class="completed-download-cell">${item.received_document ? `<a class="completed-download" href="${h(item.received_document.download_url)}" download onclick="event.stopPropagation()" aria-label="Download completed document for ${h(item.ref)}">${icon('download')}<span>Download</span></a>` : '<span class="muted">Not available</span>'}</td>` : ''}
+    ${completed ? `<td class="completed-download-cell">${item.received_document ? `<a class="completed-download" href="${h(item.received_document.download_url)}" download onclick="event.stopPropagation()" aria-label="Download completed document for ${h(item.ref)}">${icon('download')}<span>Download</span></a>` : item.cashPayment && !item.cashPayment.releaseAllowed ? `<button class="quiet" onclick="event.stopPropagation();openCase('${item.id}')">Pay pending amount</button>` : '<span class="muted">Not available</span>'}</td>` : ''}
+    ${me?.role==='sales'?`<td class="case-delete-cell" onclick="event.stopPropagation()"><button class="case-delete-button" onclick="deleteSalesCase('${item.id}',this)" ${item.deletionAllowed===true && item.sales?.id===me.id?'':'disabled title="Cases with recorded payments cannot be deleted"'} aria-label="Delete case ${h(item.ref)}">Delete</button></td>`:''}
   </tr>`).join('')}</tbody></table>`;
+}
+
+async function deleteSalesCase(caseId,button) {
+  const item=cases.find(c=>c.id===caseId);
+  if(me?.role!=='sales' || !item || !item.deletionAllowed || item.sales?.id!==me.id || button?.disabled) return;
+  if(!window.confirm(`Delete unpaid case ${item.ref}? It will be removed from your case list.`)) return;
+  if(button) {button.disabled=true;button.textContent='Deleting…';}
+  try {
+    await api(`/api/cases/${encodeURIComponent(caseId)}`,{method:'DELETE'});
+    deletedCaseIds.add(caseId);
+    const job=uploadJobs.get(caseId);if(job) job.cancelled=true;
+    uploadJobs.delete(caseId);
+    try {await deleteUploadJob(caseId);}catch {}
+    cases=cases.filter(c=>c.id!==caseId);caseNotifications=caseNotifications.filter(n=>n.caseId!==caseId);
+    selectedPaymentCases.delete(caseId);
+    if(paymentData) paymentData.payments=paymentData.payments.filter(p=>p.case_id!==caseId);
+    renderBackgroundUploads();render();toast(`Deleted unpaid case ${item.ref}.`);
+  } catch(error) {toast(error.message);if(button?.isConnected) {button.disabled=false;button.textContent='Delete';}void refreshCaseUpdates();}
 }
 
 function renderQueue() {
@@ -637,11 +662,11 @@ function renderAdmin() {
       ${metricCard('Collections', money(m.collected), `${number(m.payments)} verified payments`, 'green')}
       ${metricCard('Business revenue', money(m.businessRevenue), 'Service charges and tax', 'blue')}
       ${metricCard('New cases', number(m.newCases), `${number(m.completed)} completed`, '')}
-      ${metricCard('Outstanding', money(m.outstanding), 'Across all unpaid active cases', 'amber')}
+      ${metricCard('Completed cases', number(m.completed), 'Payment confirmed', 'green')}
     </section>
     <section class="operations-strip">
       <div><strong>${number(o.active)}</strong><span>Active</span></div><div><strong>${number(o.ready)}</strong><span>Ready to assign</span></div>
-      <div><strong>${number(o.missingDocuments)}</strong><span>Missing documents</span></div><div><strong>${number(o.unpaid)}</strong><span>Unpaid</span></div>
+      <div><strong>${number(o.missingDocuments)}</strong><span>Missing documents</span></div>
       <div><strong>${number(o.followUpsDue)}</strong><span>Follow-ups due</span></div><div><strong>${number(o.syncFailures)}</strong><span>Sync failures</span></div>
     </section>
     <div class="analytics-grid">
@@ -655,8 +680,70 @@ function renderAdmin() {
         <div><span class="integration-mark sheets">S</span><div><strong>Google Sheets</strong><small>All Workings and Cash Flow</small></div>${statusBadge(sheetsLabel)}<button onclick="connectGoogleSheets()">${googleStatus?.reconnectRequired ? 'Reconnect Google Sheets' : 'Connect Google Sheets'}</button><button onclick="activateGoogleSheets()">Activate Google Sheets</button></div>
       </div></section>
     </div>
-    <section class="section-head"><div><h2>All cases</h2><p>Complete operational register.</p></div><span class="count-label">${number(cases.length)} total</span></section>
+    <section class="section-head"><div><h2>All cases</h2><p>Payment-confirmed operational register.</p></div><span class="count-label">${number(cases.length)} total</span></section>
     <div class="table-shell">${caseTable(cases)}</div>`;
+}
+
+async function loadPerformance(role) {
+  if(me?.role!=='admin') return;
+  const state=performanceSettings(role),request=++state.request;
+  state.loading=true;state.error='';
+  try {
+    const data=await api('/api/admin/performance?'+new URLSearchParams({role,employee:state.employee,period:state.period,from:state.from,to:state.to}));
+    if(request!==state.request || me?.role!=='admin') return;
+    state.data=data;state.employees=data.employees;state.employee=data.report?.employee.id || '';
+  } catch(error) {if(request===state.request) {state.error=error.message;state.data=null;}}
+  finally {if(request===state.request) state.loading=false;}
+}
+async function selectPerformanceEmployee(role,employee) {
+  const state=performanceSettings(role);state.employee=employee;state.data=null;
+  const promise=loadPerformance(role);render();await promise;
+  if(view===(role==='sales'?'salesPerformance':'backofficePerformance')) render();
+}
+function togglePerformanceDates(value) {
+  document.querySelectorAll('.performance-date').forEach(label=>{label.hidden=value!=='custom';label.querySelector('input').required=value==='custom';});
+}
+async function applyPerformancePeriod(event,role) {
+  event.preventDefault();
+  const form=event.target,state=performanceSettings(role),values=Object.fromEntries(new FormData(form));
+  state.employee=values.employee || '';state.period=values.period;state.from=values.from || '';state.to=values.to || '';state.data=null;
+  const promise=loadPerformance(role);render();await promise;
+  if(view===(role==='sales'?'salesPerformance':'backofficePerformance')) render();
+}
+function renderPerformance(role) {
+  if(me.role!=='admin') return empty('Admin access required.');
+  const state=performanceSettings(role),data=state.data,report=data?.report,sales=role==='sales';
+  const title=sales?'Sales Performance':'Backoffice Performance';
+  const employees=data?.employees || state.employees || [];
+  const selector=`<form class="employee-filters performance-filters" onsubmit="applyPerformancePeriod(event,'${role}')">
+    <label>${sales?'Salesperson':'Backoffice employee'}<select name="employee" aria-label="${sales?'Salesperson':'Backoffice employee'}" onchange="selectPerformanceEmployee('${role}',this.value)" ${state.loading?'disabled':''}>${employees.length?employees.map(e=>`<option value="${h(e.id)}" ${state.employee===e.id?'selected':''}>${h(e.name)} (${h(e.username)})${e.active?'':' — Inactive'}</option>`).join(''):'<option value="">Choose employee</option>'}</select></label>
+    <label>Review period<select name="period" onchange="togglePerformanceDates(this.value)">${[['week','Last 7 days'],['month','This month'],['quarter','This quarter'],['year','This year'],['all','All time'],['custom','Custom dates']].map(([key,label])=>`<option value="${key}" ${state.period===key?'selected':''}>${label}</option>`).join('')}</select></label>
+    <label class="performance-date" ${state.period==='custom'?'':'hidden'}>From<input name="from" type="date" value="${h(state.from)}" ${state.period==='custom'?'required':''}></label>
+    <label class="performance-date" ${state.period==='custom'?'':'hidden'}>Through<input name="to" type="date" value="${h(state.to)}" ${state.period==='custom'?'required':''}></label><button class="primary" ${state.loading?'disabled':''}>Review performance</button></form>`;
+  const head=pageHead(title,'Select an employee to review payment-confirmed cases, results, and workload.');
+  if(state.loading || !data && !state.error) return head+selector+'<p role="status">Loading performance…</p>';
+  if(state.error) return head+selector+`<p class="form-error" role="alert">${h(state.error)}</p>`;
+  if(!report) return head+selector+empty('No employees in this role. Create one in Employees to begin.');
+  const m=report.metrics,percent=value=>value===null?'—':`${number(value)}%`,days=value=>value===null?'—':`${number(value)} days`;
+  const cards=sales?[
+    ['Collections',money(m.collected),'Verified receipts in this period','green'],['Service revenue',money(m.serviceRevenue),'Service charges, excluding tax and official fees','blue'],
+    ['Cases brought in',number(m.cases),'Paid cases opened in this period',''],['Average sale value',m.averageSale===null?'—':money(m.averageSale),'Collections per distinct paying case',''],
+    ['Customers served',number(m.customers),'Distinct customers in the case cohort',''],['Cases completed',number(m.completed),'Completions in this period','green']
+  ]:[
+    ['Cases undertaken',number(m.cases),'Assigned in this period','blue'],['Cases completed',number(m.completed),'Completions in this period','green'],
+    ['Completion rate',percent(m.completionRate),'Completed from cases undertaken in this period','green'],['Average turnaround',days(m.turnaround),'Assignment to completion, for period completions',''],
+    ['On-time completion',percent(m.onTimeRate),`${number(m.onTimeEligible)} period completions with a due date`,''],['Cases needing correction',number(m.correctionCases),'Distinct cases returned for correction in this period','amber']
+  ];
+  const serviceTable=report.services.length?`<div class="table-shell"><table class="table"><thead><tr><th>Service / application type</th><th>Cases</th><th>Completed</th><th>Active</th><th>Rejected</th><th>Cancelled</th><th>Collections</th></tr></thead><tbody>${report.services.map(s=>`<tr><td><strong>${h(s.service)}</strong><small>${h(s.variant)}</small></td><td>${number(s.cases)}</td><td>${number(s.completed)}</td><td>${number(s.active)}</td><td>${number(s.rejected)}</td><td>${number(s.cancelled)}</td><td>${money(s.collected)}</td></tr>`).join('')}</tbody></table></div>`:empty('No cases or collections for this employee in this period.');
+  return head+selector+`<section class="performance-heading"><div><h2>${h(report.employee.name)}</h2><p>${h(report.employee.username)} · ${report.employee.active?'Active employee':'Inactive employee'}</p></div><span class="badge">${dateTime(report.period.start)} – ${dateTime(new Date(Date.parse(report.period.end)-1).toISOString())}</span></section>
+    <section class="metric-grid performance-metrics">${cards.map(c=>metricCard(...c)).join('')}</section>
+    <section class="analytics-panel performance-workload"><div class="panel-title"><div><h2>Current workload</h2><p>All payment-confirmed cases belonging to this employee, across all dates.</p></div></div><div class="operations-strip"><div><strong>${number(m.active)}</strong><span>Active cases</span></div><div><strong>${number(m.overdue)}</strong><span>Overdue</span></div><div><strong>${number(m.followUps)}</strong><span>Follow-ups due</span></div><div><strong>${days(m.oldestActiveDays)}</strong><span>Oldest active case</span></div></div></section>
+    <div class="analytics-grid performance-detail"><section class="analytics-panel"><div class="panel-title"><div><h2>Case outcomes</h2><p>Current status of ${sales?'cases opened':'cases undertaken'} in this period.</p></div></div>${horizontalBars(report.statuses,'count')}<p class="muted">${number(m.cohortCompleted)} of ${number(m.cases)} completed (${percent(m.completionRate)}); ${number(m.rejected)} rejected; ${number(m.cancelled)} cancelled.</p></section>
+    <section class="analytics-panel"><div class="panel-title"><div><h2>${sales?'Collection breakdown':'Quality and delivery'}</h2></div></div>${sales?`<dl class="performance-facts"><div><dt>Service revenue</dt><dd>${money(m.serviceRevenue)}</dd></div><div><dt>Tax collected</dt><dd>${money(m.tax)}</dd></div><div><dt>Official fees collected</dt><dd>${money(m.officialFees)}</dd></div><div><dt>Cases needing correction in period</dt><dd>${number(m.correctionCases)}</dd></div><div><dt>Average intake-to-completion time</dt><dd>${days(m.turnaround)}</dd></div></dl>`:`<p>${number(m.correctionCases)} cases returned for correction during this period. Corrections can reflect customer documents and should be reviewed alongside case history.</p><p>${number(m.onTimeEligible)} completed cases had a due date; on-time rate: ${percent(m.onTimeRate)}.</p>`}</section></div>
+    <section class="section-head"><div><h2>Service and application breakdown</h2><p>Case counts use ${sales?'opening':'assignment'} dates; collections use payment confirmation dates.</p></div></section>${serviceTable}
+    <section class="section-head"><div><h2>Monthly activity</h2><p>Cases ${sales?'opened':'undertaken'}, completions, and verified collections in the selected period.</p></div></section>${report.trend.length?`<div class="table-shell"><table class="table"><thead><tr><th>Month</th><th>Cases ${sales?'opened':'undertaken'}</th><th>Completed</th><th>Collections</th></tr></thead><tbody>${report.trend.map(row=>`<tr><td>${h(row.bucket)}</td><td>${number(row.cases)}</td><td>${number(row.completed)}</td><td>${money(row.collected)}</td></tr>`).join('')}</tbody></table></div>`:empty('No activity in this period.')}
+    <section class="section-head"><div><h2>Individual cases</h2><p>Payment-confirmed cases ${sales?'opened':'undertaken'} in this period.</p></div><span class="count-label">${number(report.cases.length)} cases</span></section>${report.cases.length?`<div class="table-shell"><table class="table"><thead><tr><th>Case / customer</th><th>Service / type</th><th>Status</th><th>${sales?'Opened':'Undertaken'}</th><th>Completed</th><th>Due date</th><th>Action</th></tr></thead><tbody>${report.cases.map(c=>`<tr><td><strong>${h(c.ref)}</strong><small>${h(c.customer)}</small></td><td>${h(c.service)}<small>${h(c.variant)}</small></td><td>${statusBadge(c.status)}</td><td>${dateTime(c.startedAt)}</td><td>${c.completedAt?dateTime(c.completedAt):'—'}</td><td>${h(c.dueDate || '—')}${c.overdue?' · Overdue':''}</td><td><button class="quiet" onclick="openCase('${encodeURIComponent(c.id)}')">View case</button></td></tr>`).join('')}</tbody></table></div>`:empty('No cases in this period.')}
+    <p class="performance-note">Only currently payment-confirmed cases are included. Refunded cases are excluded. ${sales?'Collections include verified receipts for older cases; official fees and tax are shown separately from service revenue.':`Historical assignment dates are unavailable for ${number(m.legacyAssignments)} cases. Those cases use the opening date as an estimate for undertaking and turnaround. Completion rate uses the selected assignment cohort; completed count uses completion dates. On-time completion uses India dates.`}</p>`;
 }
 
 function renderEmployees() {
@@ -765,14 +852,26 @@ async function startCase() {
 function drawWizard() {
   const service = services.find(item => item.id === draft.serviceId);
   const variant = service?.variants.find(item => item.id === draft.variantId);
-  document.body.insertAdjacentHTML('beforeend', `<div class="drawer" id="drawer" data-intake><div class="panel"><div class="drawer-head"><div><p class="eyebrow">Case intake</p><h2>New customer case</h2></div><div class="intake-header-actions"><div class="intake-language-toggle" role="group" aria-label="Form language"><button type="button" lang="en" data-intake-language="en" aria-pressed="${intakeLanguage === 'en'}" onclick="setIntakeLanguage('en')">English</button><button type="button" lang="mr" data-intake-language="mr" aria-pressed="${intakeLanguage === 'mr'}" onclick="setIntakeLanguage('mr')">मराठी</button></div><button class="quiet" onclick="closeDrawer()">Close</button></div></div><div class="steps">${['Customer','Service','Documents','Review'].map((label,index) => `<div class="step ${draft.step === index + 1 ? 'on' : ''}"><span>${index + 1}</span>${label}</div>`).join('')}</div><div id="wizard">${wizardBody(service, variant)}</div></div></div>`);
+  document.body.insertAdjacentHTML('beforeend', `<div class="drawer" id="drawer" data-intake><div class="panel"><div class="drawer-head"><div><p class="eyebrow">Case intake</p><h2>New customer case</h2></div><div class="intake-header-actions"><div class="intake-language-toggle" role="group" aria-label="Form language"><button type="button" lang="en" data-intake-language="en" aria-pressed="${intakeLanguage === 'en'}" onclick="setIntakeLanguage('en')">English</button><button type="button" lang="mr" data-intake-language="mr" aria-pressed="${intakeLanguage === 'mr'}" onclick="setIntakeLanguage('mr')">मराठी</button></div><button class="quiet" onclick="closeDrawer()">Close</button></div></div><div class="steps">${['Customer','Services','Documents','Review'].map((label,index) => `<div class="step ${draft.step === index + 1 ? 'on' : ''}"><span>${index + 1}</span>${label}</div>`).join('')}</div><div id="wizard">${wizardBody(service, variant)}</div></div></div>`);
   bindWizard();
   applyIntakeLanguage();
 }
 
+function cashReviewOptions(amount) {
+    if(!me?.cashPaymentsAllowed) return '';
+  const cash=draft.paymentMethod==='cash',paid=Math.round(Number(draft.cashAmount || 0)*100);
+  return `<section class="cash-review-panel"><h3>Payment method</h3><p>Mahalaxmi Online Services can pay online or record cash payments.</p><label>Choose payment method<select onchange="setCashReviewMethod(this.value)"><option value="online" ${cash?'':'selected'}>Pay online</option><option value="cash" ${cash?'selected':''}>Pay in cash</option></select></label>${cash?`<label>Cash amount paid (₹)<input id="reviewCashAmount" type="number" min="0.01" step="0.01" max="${(amount.total/100).toFixed(2)}" value="${h(draft.cashAmount || '')}" oninput="updateReviewCash(this.value,${amount.total})" placeholder="Enter cash received"></label><dl class="cash-payment-totals"><div><dt>Amount paid in cash</dt><dd id="reviewCashPaid">${money(paid)}</dd></div><div><dt>Pending amount</dt><dd id="reviewCashPending">${money(Math.max(0,amount.total-paid))}</dd></div><div><dt>Total</dt><dd>${money(amount.total)}</dd></div></dl><p>A positive cash payment allows processing after documents finish uploading. Admin must confirm the full payment before the completed document can be received.</p>`:''}</section>`;
+}
+function setCashReviewMethod(method) {draft.paymentMethod=method;rerenderWizard();}
+function updateReviewCash(value,total) {
+  draft.cashAmount=value;
+  const paid=Math.round(Number(value || 0)*100);
+  document.querySelector('#reviewCashPaid').textContent=money(paid);
+  document.querySelector('#reviewCashPending').textContent=money(Math.max(0,total-paid));
+}
 function wizardBody(service, variant) {
   if (draft.step === 1) return `<div class="formgrid"><label>Full name<input id="name" oninput="removeNameNumbers(this)" autocomplete="name" value="${h(draft.customer.name || '')}"></label><label>Mobile number<input id="mobile" type="tel" inputmode="numeric" maxlength="10" pattern="[0-9]{10}" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" autocomplete="tel-national" placeholder="10-digit mobile number" value="${h(draft.customer.mobile || '')}"></label><label>Address<input id="address" autocomplete="street-address" value="${h(draft.customer.address || '')}"></label></div><div class="form-actions"><button class="primary" onclick="saveStep1()">Continue</button></div>`;
-  if (draft.step === 2) return `<div class="formgrid"><label>Service<select id="service"><option value="" disabled hidden ${!draft.serviceId ? 'selected' : ''}>Choose...</option>${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label></div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="quiet" onclick="wizardBack(1)">Back</button><button class="primary" onclick="saveStep2()">Continue</button></div>`;
+  if (draft.step === 2) return `<div class="formgrid"><label>Services<select id="service"><option value="" disabled hidden ${!draft.serviceId ? 'selected' : ''}>Choose...</option>${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label></div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="quiet" onclick="wizardBack(1)">Back</button><button class="primary" onclick="saveStep2()">Continue</button></div>`;
   if (draft.step === 3) {
     const docs = applicableDocuments(variant?.documents || [], draft.details);
     const missing = docs.filter(item => item.required && !draft.docs[item.label]);
@@ -781,7 +880,7 @@ function wizardBody(service, variant) {
   const baseAmount = variant?.amounts || { serviceCharge:0, officialFee:0, tax:0, total:0 };
   const amount = ['income-certificate','domicile-certificate'].includes(service?.slug) ? IntakeRules.withSurcharge(baseAmount, draft.details) : baseAmount;
   const pages = Object.values(draft.docs).reduce((count,doc) => count + (doc.pages?.length || 1), 0);
-  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your case.</p></div></header><div class="intake-review-card"><div class="intake-review-service"><span>Selected service</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(variant?.fields?.find(field => field.label === label)?.sensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge${amount.surcharge ? ` (includes \u20B9200 ${service.slug === 'domicile-certificate' ? 'affidavit fee' : 'Talathi surcharge'})` : ''}</span><strong>${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div><div class="intake-review-total"><span>Total payable</span><strong>${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div><label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button><button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button></div>`;
+  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your case.</p></div></header><div class="intake-review-card"><div class="intake-review-service"><span>Selected services</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(variant?.fields?.find(field => field.label === label)?.sensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge${amount.surcharge ? ` (includes \u20B9200 ${service.slug === 'domicile-certificate' ? 'affidavit fee' : 'Talathi surcharge'})` : ''}</span><strong>${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div><div class="intake-review-total"><span>Total payable</span><strong>${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div>${cashReviewOptions(amount)}<label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button><button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button></div>`;
 }
 
 function documentTemplateLink(item) {
@@ -1121,14 +1220,16 @@ async function runUploadJob(id) {
   const chains=new Map();
   try {
     const worker=async()=>{
-      while(cursor<job.files.length && me?.id===job.ownerId) {
+      while(cursor<job.files.length && me?.id===job.ownerId && !job.cancelled) {
         const file=job.files[cursor++];
         if(file.documentId)continue;
         const transfer=(chains.get(file.docType)||Promise.resolve()).catch(()=>{}).then(async()=>{
           for(let attempt=0;attempt<3;attempt++) {
+            if(job.cancelled) return;
             if(me?.id!==job.ownerId)throw new Error('Sign in to the original account to resume these uploads.');
             try {
               const result=await uploadDocument(job.id,file.docType,file.document,{deferMirrors:true,uploadKey:file.key,cloud:job.cloud});
+              if(job.cancelled) return;
               if(!result?.documentId)throw new Error('The server has not confirmed this document. Retry the upload.');
               file.documentId=result.documentId;
               await saveUploadJob(job);
@@ -1146,6 +1247,7 @@ async function runUploadJob(id) {
       }
     };
     await Promise.all(Array.from({length:Math.min(3,job.files.length)},worker));
+    if(job.cancelled) return;
     if(me?.id!==job.ownerId)throw new Error('Sign in to the original account to resume these uploads.');
     if(failure)throw failure;
     const result=await api(`/api/cases/${job.id}/finish-uploads`,{method:'POST',body:{}});
@@ -1155,6 +1257,7 @@ async function runUploadJob(id) {
     toast(`All documents uploaded for ${job.ref}. The case reaches operations after payment is verified.`);
     void refreshCaseUpdates();
   } catch(error) {
+    if(job.cancelled) return;
     job.state='error';job.error=error.message;
     try{await saveUploadJob(job);}catch{}
   } finally {
@@ -1172,6 +1275,7 @@ async function submitCase(nextAction='pay') {
   if (drawerBusy || draft.submitting) return;
   if (!document.querySelector('#consent').checked) return toast('Please confirm customer consent');
   if (draftMissing().length) return toast('Upload all required documents to continue');
+  if(me.cashPaymentsAllowed && draft.paymentMethod==='cash' && (!Number.isFinite(Number(draft.cashAmount)) || Number(draft.cashAmount)<=0)) return toast('Enter the cash amount received to continue.');
   const intake = draft;
   intake.submitting = true;
   setDrawerBusy('Saving case...');
@@ -1182,7 +1286,7 @@ async function submitCase(nextAction='pay') {
     const uploadManifest = files.map(({key,docType,document})=>({key,docType,fileName:document.fileName,mimeType:document.mimeType,size:document.size}));
     // Confirm durable browser storage before creating a case or closing its form.
     await openUploadQueueDB();
-    const created = intake.createdCase || (await api('/api/cases',{method:'POST',body:{customer:intake.customer,variantId:intake.variantId,details:intake.details,consent:true,clientRequestId:intake.clientRequestId,uploadManifest}})).case;
+    const created = intake.createdCase || (await api('/api/cases',{method:'POST',body:{customer:intake.customer,variantId:intake.variantId,details:intake.details,consent:true,clientRequestId:intake.clientRequestId,uploadManifest,...(me.cashPaymentsAllowed && intake.paymentMethod==='cash'?{cashPayment:{amount:Math.round(Number(intake.cashAmount)*100)}}:{})}})).case;
     intake.createdCase = created;
     const job = {id:created.id,ref:created.ref,ownerId:me.id,files,cloud:cloudUploads,state:'queued'};
     await saveUploadJob(job);
@@ -1193,6 +1297,7 @@ async function submitCase(nextAction='pay') {
     void refreshCaseUpdates();
     if (nextAction==='another') startCase();
     else if (nextAction==='later') await setView('payments');
+    else if(created.cashPayment) await openCase(created.id);
     else await pay(created.id);
   } catch (error) {
     toast(error.message + (intake.createdCase ? ` Case ${intake.createdCase.ref} is saved. Retry to start its document uploads.` : ''));
@@ -1417,7 +1522,30 @@ function receivedDocumentPanel(item, documents) {
     ${canUpload ? `<span class="file-action">${document ? 'Replace received document' : 'Upload received document'}${uploadControls(encodeURIComponent('Received Document'), item.id)}${document ? `<button class="primary complete-case" onclick="submitReceivedDocument('${item.id}',this)">Submit</button>` : ''}</span>` : ''}</div></section>`;
 }
 
+function cashCasePanel(item) {
+  const state=item.cashPayment,canRecord=me.cashPaymentsAllowed && me.id===item.sales?.id;
+  const completed=isCompletedCase(item);
+  return `<section class="detail-section cash-case-panel"><h3>Cash and balance payments</h3><dl class="cash-payment-totals"><div><dt>Total payable</dt><dd>${money(state.total)}</dd></div><div><dt>Amount paid / recorded</dt><dd>${money(state.recordedPaid)}</dd></div><div><dt>Admin-confirmed amount</dt><dd>${money(state.confirmedPaid)}</dd></div><div><dt>Awaiting admin confirmation</dt><dd>${money(state.awaitingVerification)}</dd></div><div><dt>Pending amount to confirm</dt><dd>${money(state.pendingAmount)}</dd></div><div><dt>Remaining amount to pay</dt><dd>${money(state.amountToPay)}</dd></div></dl>
+    ${!state.releaseAllowed?`<div class="cash-document-lock" role="status"><strong>${completed?'Pay the pending amount to receive the document':'Completed document remains locked until full payment'}</strong><p>${state.amountToPay?`Pay ${money(state.amountToPay)} by cash or UPI. `:''}${state.awaitingVerification?`${money(state.awaitingVerification)} is awaiting admin confirmation. `:''}The document becomes available after admin confirms the full payment.</p></div>`:'<p class="cash-payment-success">Full payment confirmed by admin. Completed documents are available once submitted by backoffice.</p>'}
+    ${canRecord && state.amountToPay>0 && item.status!=='Cancelled'?`<form class="cash-balance-form" data-request-id="${crypto.randomUUID()}" onsubmit="recordCashBalance(event,'${item.id}')"><label>Cash amount paid (₹)<input name="amount" type="number" required min="0.01" step="0.01" max="${(state.amountToPay/100).toFixed(2)}" value="${(state.amountToPay/100).toFixed(2)}"></label><button class="primary">Record cash payment</button></form><button class="cash-upi-button" onclick="pay('${item.id}')">Pay ${money(state.amountToPay)} online with UPI</button>`:''}
+    <h4>Payment history</h4><div class="cash-receipts">${(item.cashReceipts || []).map(p=>`<div><span><strong>${h(p.method)} · ${money(p.amount)}</strong><small>${dateTime(p.created_at)} · ${h(p.status==='PAID'?'Confirmed by admin':p.status==='AWAITING_VERIFICATION'?'Awaiting admin confirmation':p.status)}</small></span>${['admin','sales'].includes(me.role)?`<button class="quiet" onclick="showPayment('${p.id}')">${me.role==='admin' && p.status==='AWAITING_VERIFICATION'?'Review / confirm':'View'}</button>`:''}</div>`).join('') || '<p>No payments recorded.</p>'}</div></section>`;
+}
+async function recordCashBalance(event,caseId) {
+  event.preventDefault();if(drawerBusy) return;
+  const form=event.target,amount=Math.round(Number(form.elements.amount.value)*100),requestId=form.dataset.requestId;
+  setDrawerBusy('Recording cash payment…');
+  try {
+    await api(`/api/cases/${caseId}/cash-payment`,{method:'POST',body:{amount,requestId}});
+    setDrawerBusy();closeDrawer();await openCase(caseId);void refreshCaseUpdates();
+    toast('Cash payment recorded. Admin confirmation is required to release the final document.');
+  } catch(error) {toast(error.message);} finally {setDrawerBusy();}
+}
+function cashReceiptHTML(p) {
+  return `<div class="cash-receipt-layout"><div class="drawer-head"><div><p class="eyebrow">Cash payment</p><h2>${money(p.amount)}</h2><p>${h(p.customer_name)} · ${h(p.case_ref)}</p></div><button class="quiet" onclick="closeDrawer()">Close</button></div><section class="detail-section"><h3>${p.status==='PAID'?'Cash receipt confirmed':p.status==='AWAITING_VERIFICATION'?'Awaiting admin confirmation':h(p.status)}</h3><p>Cash recorded for ${h(p.service_name)}. Confirm only money actually received. The completed document is released after the entire balance is confirmed.</p><p>Recorded: ${dateTime(p.created_at)}</p>${p.verified_at?`<p>Confirmed: ${dateTime(p.verified_at)}</p>`:''}${me.role==='admin' && p.status==='AWAITING_VERIFICATION'?`<button class="primary" onclick="paymentAction('verify',{})">Confirm cash received</button><form class="cash-balance-form" onsubmit="rejectCashReceipt(event)"><label>Reason to reject<input name="notes" required maxlength="1000"></label><button>Reject cash entry</button></form>`:''}${p.status==='PAID'?'<button onclick="downloadReceipt()">Download receipt</button>':''}<button class="quiet" onclick="closeDrawer();openCase('${p.case_id}')">Return to case / balance</button></section></div>`;
+}
+function rejectCashReceipt(event) {event.preventDefault();return paymentAction('reject',{notes:event.target.elements.notes.value});}
 function casePaymentCard(item) {
+  if(item.cashPayment) return cashCasePanel(item);
   const payment=item.payment, raw=payment?.status || item.payment_state;
   const paid=['PAID','paid','verified','offline_approved'].includes(raw) && payment?.gateway!=='demo';
   const review=raw==='AWAITING_VERIFICATION';
@@ -1426,6 +1554,24 @@ function casePaymentCard(item) {
   return `<section class="detail-section case-payment"><header class="case-payment-heading"><span class="case-payment-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/></svg></span><div><h3>Payment</h3><p>${paid ? 'Payment received and verified' : review ? 'Our team is checking the bank record' : 'Pay securely with your UPI app'}</p></div><span class="case-payment-badge ${paid ? 'is-paid' : review ? 'is-review' : ''}"><i></i>${h(label)}</span></header><div class="case-payment-content"><div class="case-payment-total"><span>${paid ? 'Amount paid' : 'Amount payable'}</span><strong>${money(payment?.amount ?? item.amounts.total)}</strong></div>${['sales','admin'].includes(me.role) ? `<button class="case-payment-button" onclick="pay('${item.id}')">${paid ? 'View receipt' : review ? 'Review payment' : 'Open UPI checkout'}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>` : ''}</div>${payment ? `<details class="case-payment-details"><summary>Payment details</summary><dl><dt>Order reference</dt><dd>${h(payment.gateway_order_id)}</dd>${payment.transaction_id ? `<dt>UTR</dt><dd>${h(payment.transaction_id)}</dd>` : ''}${payment.verified_at ? `<dt>Verified on</dt><dd>${dateTime(payment.verified_at)}</dd>` : ''}</dl></details>` : ''}</section>`;
 }
 
+function canRequestReupload(item) {return ['admin','backoffice'].includes(me?.role) && !['Closed','Delivered','Cancelled','Deleted'].includes(item.status);}
+function caseReuploadForm(item) {
+  if(!canRequestReupload(item)) return '';
+  const requirements=applicableDocuments(item.variant.documents || [],item.details || {});
+  return `<form id="caseReuploadForm" class="case-reupload-form" hidden onsubmit="requestCaseReupload(event,'${item.id}')"><h4>Request corrected documents from sales</h4><label>Document<select name="documentType" required>${requirements.map(d=>`<option value="${h(d.label)}">${h(d.displayLabel || d.label)}</option>`).join('')}</select></label><label>What needs to be corrected?<textarea name="reason" required maxlength="1000" placeholder="Explain what the salesperson should reupload"></textarea></label><div class="form-actions"><button type="button" onclick="document.querySelector('#caseReuploadForm').hidden=true">Cancel</button><button class="primary">Send reupload request</button></div></form>`;
+}
+function showCaseReuploadRequest() {
+  if(!selectedCase || !canRequestReupload(selectedCase.case)) return;
+  const form=document.querySelector('#caseReuploadForm');if(form) {form.hidden=false;form.scrollIntoView({block:'center',behavior:'smooth'});form.querySelector('select')?.focus();}
+}
+async function requestCaseReupload(event,caseId) {
+  event.preventDefault();if(drawerBusy || !['admin','backoffice'].includes(me?.role)) return;
+  const form=event.target,documentType=form.elements.documentType.value,reason=form.elements.reason.value.trim();
+  if(!reason) return form.elements.reason.focus();
+  setDrawerBusy('Sending reupload request…');
+  try {const result=await api(`/api/cases/${caseId}/request-reupload`,{method:'POST',body:{documentTypes:[documentType],reason}});setDrawerBusy();renderSavedCase(result);toast('Reupload request sent to sales.');}
+  catch(error) {toast(error.message);} finally {setDrawerBusy();}
+}
 function caseDetail(item, documents, notes) {
   const intakeDetails = Object.entries(item.details || {}).filter(([, value]) => value).map(([label, value]) => `<div><span>${h(label)}</span><strong${label === 'Password' ? ' class="pf-password-value"' : ''}>${h(value)}</strong>${label === 'Password' && (me.role === 'admin' || (me.role === 'backoffice' && item.backoffice?.id === me.id)) ? `<button type="button" class="quiet" onclick="togglePFPassword('${item.id}',this)">Show password</button>` : ''}</div>`).join('');
   const priced = item.amounts.total > 0;
@@ -1434,7 +1580,7 @@ function caseDetail(item, documents, notes) {
     ${intakeDetails ? `<section class="detail-section"><div class="panel-title"><div><h3>Application details</h3><p>Information collected for this service request.</p></div></div><div class="review">${intakeDetails}</div></section>` : ''}
     ${item.status === 'Correction Required' ? `<section class="correction-notice"><strong>Returned to sales for correction</strong><p>${h(notes.filter(note => note.new_status === 'Correction Required').at(-1)?.note || 'Review the case timeline and update the requested documents.')}</p></section>` : ''}
     ${casePaymentCard(item)}
-    <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div>${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div><div class="upload-list">${documentChecklist(item, documents)}</div>${reuploadSubmissionPanel(item)}</section>
+    <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div><div class="document-section-actions">${canRequestReupload(item)?'<button type="button" class="request-reupload-button" onclick="showCaseReuploadRequest()">Request reupload</button>':''}${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div></div>${caseReuploadForm(item)}<div class="upload-list">${documentChecklist(item, documents)}</div>${reuploadSubmissionPanel(item)}</section>
     ${receivedDocumentPanel(item, documents)}
     <section class="detail-section"><div class="panel-title"><div><h3>Timeline</h3><p>Recorded status changes and internal notes.</p></div></div><div class="timeline">${notes.length ? notes.map(note => `<div><i></i><span><strong>${h(statusLabel(note.new_status))}</strong><p>${h(note.note || 'Status updated')}</p><small>${h(note.actor)} · ${dateTime(note.created_at)}</small></span></div>`).join('') : empty('No updates yet.')}</div></section>
     ${me.role === 'backoffice' && isPaymentConfirmed(item) && item.status === 'Ready for Assignment' ? `<div class="sticky-actions"><button class="primary" onclick="claim('${item.id}')">Claim case</button></div>` : ''}
@@ -1511,16 +1657,30 @@ async function uploadDocument(caseId, docType, document, {deferMirrors=false,upl
   if (!cloud) return api(`/api/cases/${caseId}/documents`, {method:'POST',body:{docType,...document,...(uploadKey?{uploadKey}:{}),...(deferMirrors?{deferMirrors:true}:{})}});
   const metadata = {docType,fileName:document.fileName,mimeType:document.mimeType,size:document.size};
   document.cloudAuthorization ||= await api(`/api/cases/${caseId}/upload-url`, {method:'POST',body:metadata});
+  const confirmUpload=()=>api(`/api/cases/${caseId}/documents`, {method:'POST',body:{uploadId:document.cloudAuthorization.uploadId,...(uploadKey?{uploadKey}:{}),...(deferMirrors?{deferMirrors:true}:{})}});
   if (!document.cloudTransferred) {
-    const response = await fetch(document.cloudAuthorization.uploadUrl, {method:'PUT',headers:{'content-type':document.mimeType},body:document.file});
+    let response;
+    try {response=await fetch(document.cloudAuthorization.uploadUrl, {method:'PUT',headers:{'content-type':document.mimeType},body:document.file});}
+    catch {}
+    if(!response?.ok) {
+      // A lost response or a duplicate PUT can follow a successful storage
+      // write. The API verifies the stored bytes before confirming any file.
+      try {const saved=await confirmUpload();document.cloudTransferred=true;return saved;}
+      catch(error) {if(error.status===400) throw error;}
+    }
+    if(!response) throw new Error('The upload connection was interrupted. Retry uploads to resume the remaining file.');
     if ([401,403].includes(response.status)) {
       delete document.cloudAuthorization;delete document.cloudTransferred;
       throw new Error('Upload authorization expired. Retrying with a new authorization.');
     }
-    if (!response.ok && response.status !== 409) throw new Error('Document upload failed. Retry the pending upload.');
+    if(!response.ok) {
+      const error=await response.json().catch(()=>({}));
+      const duplicate=response.status===409 || String(error.statusCode)==='409' || /duplicate|already exists/i.test(String(error.error || '')+' '+String(error.message || ''));
+      if(!duplicate) throw new Error(`Document transfer failed (HTTP ${response.status})${error.message?': '+String(error.message).slice(0,160):'. Retry the remaining file.'}`);
+    }
     document.cloudTransferred = true;
   }
-  return api(`/api/cases/${caseId}/documents`, {method:'POST',body:{uploadId:document.cloudAuthorization.uploadId,...(uploadKey?{uploadKey}:{}),...(deferMirrors?{deferMirrors:true}:{})}});
+  return confirmUpload();
 }
 async function uploadCaseDocument(caseId, encodedType, input) {
   const files = Array.from(input.files || []);
@@ -1584,13 +1744,13 @@ function closeDrawer() {
 async function connectGoogleSheets() { try { location.href = (await api('/api/google/oauth/start')).authorizationUrl; } catch (error) { toast(error.message); } }
 async function activateGoogleSheets() { try { toast('Verifying workbook and syncing cases'); const result = await api('/api/google/sheets/activate', { method:'POST' }); await load(); toast(`Google Sheets live: ${result.syncedCases} cases synced`); } catch (error) { toast(error.message); } }
 async function setAnalyticsPeriod(period) { analyticsPeriod = period; adminAnalytics = await api(`/api/admin/dashboard?period=${period}`); render(); }
-async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/logout', { method:'POST' });clearTimeout(updatesTimer);caseNotifications=[];recentUpdatesOpen=false;announcements=[];announcementsUnavailable=false;announcementPosting=false;if(announcementPreviewUrl) URL.revokeObjectURL(announcementPreviewUrl);announcementPreviewUrl=''; me = null;restoredUploadOwner=null;renderBackgroundUploads();view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';pricingData=null;pricingSalesId='';pricingError='';pricingRequest++;renderLogin(); }
+async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/logout', { method:'POST' });clearTimeout(updatesTimer);caseNotifications=[];recentUpdatesOpen=false;announcements=[];announcementsUnavailable=false;announcementPosting=false;if(announcementPreviewUrl) URL.revokeObjectURL(announcementPreviewUrl);announcementPreviewUrl=''; me = null;for(const key of Object.keys(performanceState)) {performanceState[key].request++;delete performanceState[key];}restoredUploadOwner=null;renderBackgroundUploads();view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';pricingData=null;pricingSalesId='';pricingError='';pricingRequest++;renderLogin(); }
 async function setView(next) {
   if(drawerBusy) return;
   closeDrawer();view=next;render();
   if(next==='payments') {await refreshPayments();return;}
   void refreshCaseUpdates();
-  if(me.role==='admin' && ['admin','employees','pricing'].includes(next)) {
+  if(me.role==='admin' && ['admin','employees','pricing','salesPerformance','backofficePerformance'].includes(next)) {
     try {await loadViewData();if(view===next) render();} catch(error) {toast(error.message);}
   }
 }
@@ -1599,6 +1759,8 @@ Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3,
 Object.assign(window, { downloadCaseFiles, wizardBack, removeNameNumbers, rememberNoticeState, rememberRecentUpdates, setIntakeLanguage });
 Object.assign(window,{previewAnnouncementPicture,clearAnnouncementPicture,publishAnnouncement,removeAnnouncement});
 Object.assign(window, { toggleEmployeeDates, applyEmployeePeriod, createEmployee });
+Object.assign(window,{deleteSalesCase});
+Object.assign(window,{selectPerformanceEmployee,togglePerformanceDates,applyPerformancePeriod});
 Object.assign(window,{focusSignIn,switchAccount});
 document.addEventListener('click',event=>{document.querySelectorAll('.profile[open],.mobile-more[open]').forEach(menu=>{if(!menu.contains(event.target)) menu.open=false;});});
 document.addEventListener('keydown',event=>{if(event.key==='Escape') document.querySelectorAll('.profile[open],.mobile-more[open]').forEach(menu=>{menu.open=false;menu.querySelector('summary')?.focus();});});
@@ -1663,13 +1825,14 @@ Object.assign(window,{loadPricing,selectPricingSalesperson,saveSalespersonPrice}
 let paymentData = null, paymentSettings = null, checkout = null;
 let paymentFilters = '';
 const selectedPaymentCases=new Set();
+const confirmingPayments=new Set();
 const paymentSearchFields={all:'All fields',customer:'Customer',utr:'UTR',mobile:'Mobile',service:'Service',employee:'Employee',order:'Order / case',status:'Status',from:'From date',to:'To date'};
 async function loadPayments() {
   [paymentData,paymentSettings] = await Promise.all([api('/api/payments'+paymentFilters),me.role==='admin' ? api('/api/payment-settings') : null]);
 }
 function paymentCaseRows() {
   const cases=new Map();
-  const priority=p=>p.status==='PAID'?2:p.status==='AWAITING_VERIFICATION'?1:0;
+  const priority=p=>p.cash_account && p.status==='AWAITING_VERIFICATION'?3:p.status==='PAID'?2:p.status==='AWAITING_VERIFICATION'?1:0;
   // The API keeps checkout attempts for reconciliation. Display each case once,
   // preferring its verified or submitted transfer over an unused checkout.
   for(const payment of paymentData?.payments || []) {
@@ -1691,8 +1854,30 @@ function paymentTableRow(p) {
     <td class="payment-method-cell"><span>${h(p.payment_method || 'Not recorded')}</span>${p.transaction_id ? `<small title="UPI transaction reference">${h(p.transaction_id)}</small>` : ''}</td>
     <td class="payment-status-cell"><span class="badge ${tone}">${h(status)}</span></td>
     <td class="payment-owner-cell"><span>${h(p.employee_name)}</span><small>${dateTime(p.created_at)}</small></td>
-    <td class="payment-actions-cell"><div class="payment-row-actions"><button type="button" class="quiet payment-view-button" onclick="showPayment('${p.id}')">${review ? 'Review' : 'View'}</button>${payable ? `<button type="button" class="primary payment-pay-button" onclick="pay('${p.case_id}')">Pay <span aria-hidden="true">&rarr;</span></button>` : ''}</div></td>
+    <td class="payment-actions-cell"><div class="payment-row-actions ${review?'has-confirm':''}"><button type="button" class="quiet payment-view-button" onclick="${p.cash_account && !review?`openCase('${p.case_id}')`:`showPayment('${p.id}')`}">${review?'Review':p.cash_account?'Payments / balance':'View'}</button>${review?`<button type="button" class="primary payment-confirm-button" onclick="confirmPaymentFromList('${p.id}',this)" ${confirmingPayments.has(p.id)?'disabled':''}>${confirmingPayments.has(p.id)?'Confirming…':p.gateway==='cash'?'Confirm cash received':'Confirm received'}</button>`:''}${payable ? `<button type="button" class="primary payment-pay-button" onclick="pay('${p.case_id}')">Pay <span aria-hidden="true">&rarr;</span></button>` : ''}</div></td>
   </tr>`;
+}
+function applyConfirmedPayment(payment) {
+  if(!paymentData) return;
+  if(payment.batch) {
+    paymentData.payments=paymentData.payments.map(row=>{
+      const updated=payment.items?.find(item=>item.id===row.id);
+      return updated?{...row,...updated,status:payment.status,verified_at:payment.verified_at}:row;
+    });
+  } else paymentData.payments=paymentData.payments.map(row=>row.id===payment.id?{...row,...payment}:row);
+}
+async function confirmPaymentFromList(paymentId,button) {
+  const row=paymentData?.payments.find(p=>p.id===paymentId);
+  if(me?.role!=='admin' || row?.status!=='AWAITING_VERIFICATION' || confirmingPayments.has(paymentId)) return;
+  confirmingPayments.add(paymentId);
+  if(button) {button.disabled=true;button.textContent='Confirming…';}
+  try {
+    const result=await api(`/api/payments/${paymentId}/verify`,{method:'POST',body:{}});
+    applyConfirmedPayment(result.payment);
+    render();toast('Payment received and confirmed.');
+    void refreshCaseUpdates();void refreshPayments();
+  } catch(error) {toast(error.message);if(button?.isConnected) {button.disabled=false;button.textContent=row.gateway==='cash'?'Confirm cash received':'Confirm received';}}
+  finally {confirmingPayments.delete(paymentId);}
 }
 function renderPayments() {
   if (!paymentData) return empty('Loading payments...');
@@ -1701,7 +1886,7 @@ function renderPayments() {
   const unpaid = latest.filter(p => ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) && !['Cancelled','Closed','Delivered'].includes(p.case_status) && !paymentData.payments.some(row => row.case_id === p.case_id && ['PAID','AWAITING_VERIFICATION'].includes(row.status))).length;
   const selected = selectablePaymentCases().filter(p => selectedPaymentCases.has(p.case_id)).length;
   return `<section class="payments-workspace">${pageHead('Payments', 'A clear view of your collections, checkouts, and payment activity.')}
-    ${me.role==='admin' ? `<section class="metric-grid compact payment-metrics">${metricCard('Verified collections',money(m.collected),'Confirmed in the receiving account','green')}${metricCard('Collected today',money(m.today),'Verified today','green')}${metricCard('Unpaid cases',number(unpaid),'Ready for payment','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting verification','amber')}${metricCard('Failed / cancelled',number(m.failed),'Checkout history')}${metricCard('Verified transfers',number(m.verified),'Individual and combined transfers','green')}</section>${paymentSettingsPanel()}` : `<section class="metric-grid payment-metrics">${metricCard('Unpaid cases',number(unpaid),'Individual or combined checkout','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting payment verification','amber')}${metricCard('Verified collections',money(m.collected),'Confirmed payments','green')}</section>`}
+    ${me.role==='admin' ? `<section class="metric-grid compact payment-metrics">${metricCard('Verified collections',money(m.collected),'Confirmed in the receiving account','green')}${metricCard('Collected today',money(m.today),'Verified today','green')}${metricCard('Under review',number(m.awaiting),'Awaiting verification','amber')}${metricCard('Failed / cancelled',number(m.failed),'Checkout history')}${metricCard('Verified transfers',number(m.verified),'Individual and combined transfers','green')}</section>${paymentSettingsPanel()}` : `<section class="metric-grid payment-metrics">${metricCard('Unpaid cases',number(unpaid),'Individual or combined checkout','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting payment verification','amber')}${metricCard('Verified collections',money(m.collected),'Confirmed payments','green')}</section>`}
     ${['sales','admin'].includes(me.role) ? `<section class="payment-selection-panel"><div class="payment-selection-intro"><span class="payment-selection-icon">${icon('payments')}</span><div><h2>One payment. Multiple cases.</h2><p>Select one case to pay individually, or choose several to pay together.</p></div></div><div class="payment-selection-checkout"><p id="combinedPaymentTotal" aria-live="polite">${combinedPaymentSummary()}</p><button id="paySelectedButton" type="button" class="primary" onclick="paySelectedCases(this)" ${!selected?'disabled':''}>Pay selected cases <span aria-hidden="true">&rarr;</span></button></div></section>` : ''}
     <section class="payment-activity" aria-labelledby="paymentActivityTitle"><div class="payment-activity-heading"><div><h2 id="paymentActivityTitle">Payment activity</h2><p>Search a payment, review its details, or open a checkout.</p></div><span class="payment-record-count">${number(latest.length)} ${latest.length===1?'case':'cases'}</span></div>
     <div class="payment-list-tools"><form id="paymentFilters" class="payment-search" role="search" aria-label="Search payments" onsubmit="filterPayments(event)">
@@ -1709,7 +1894,7 @@ function renderPayments() {
       <input id="paymentSearchInput" name="q" type="${['from','to'].includes(new URLSearchParams(paymentFilters).get('searchBy'))?'date':'search'}" aria-label="Search value" placeholder="Search payments" value="${h(new URLSearchParams(paymentFilters).get('q') || '')}">
       <button class="primary payment-search-submit" aria-label="Search payments" title="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
     </form><div class="payment-search-actions">${paymentFilters?'<button type="button" class="quiet" onclick="resetPaymentFilters()">Clear search</button>':''}${me.role !== 'sales' ? `<button type="button" class="quiet payment-export-button" onclick="exportPayments()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>Export report</button>` : ''}</div></div>
-    <div class="table-shell payment-table-shell">${latest.length ? `<table class="table payment-table"><thead><tr><th><span class="visually-hidden">Select</span></th><th>Customer / case</th><th>Service</th><th>Amount</th><th>Method / UTR</th><th>Status</th><th>Employee / date</th><th>Actions</th></tr></thead><tbody>${latest.map(paymentTableRow).join('')}</tbody></table>` : '<div class="payment-empty"><span>'+icon('payments')+'</span><h3>No payments found</h3><p>Try another search or create a customer case to get started.</p></div>'}</div></section></section>`;
+    <div class="table-shell payment-table-shell">${latest.length ? `<table class="table payment-table"><thead><tr><th><span class="visually-hidden">Select</span></th><th>Customer / case</th><th>Services</th><th>Amount</th><th>Method / UTR</th><th>Status</th><th>Employee / date</th><th>Actions</th></tr></thead><tbody>${latest.map(paymentTableRow).join('')}</tbody></table>` : '<div class="payment-empty"><span>'+icon('payments')+'</span><h3>No payments found</h3><p>Try another search or create a customer case to get started.</p></div>'}</div></section></section>`;
 }
 function paymentSettingsPanel() {
   const c=paymentSettings;
@@ -1760,7 +1945,7 @@ async function showPayment(pid,payment=null) {
   if(drawerBusy) return;
   try {
     checkout=payment || await api(`/api/payments/${pid}`);closeDrawer();
-    document.body.insertAdjacentHTML('beforeend',`<div class="drawer payment-overlay" id="drawer"><div class="panel case-panel payment-checkout" role="dialog" aria-modal="true" aria-label="UPI payment checkout">${checkoutHTML(checkout)}</div></div>`);
+    document.body.insertAdjacentHTML('beforeend',`<div class="drawer payment-overlay" id="drawer"><div class="panel case-panel payment-checkout" role="dialog" aria-modal="true" aria-label="Payment checkout">${checkoutHTML(checkout)}</div></div>`);
     document.body.classList.add('payment-open');
     const dialog=document.querySelector('.payment-checkout');
     dialog.querySelector('.checkout-close')?.focus({preventScroll:true});
@@ -1774,7 +1959,24 @@ async function showPayment(pid,payment=null) {
     });
   } catch(e) {toast(e.message);}
 }
+function cashCheckoutOptions(p) {
+  if(!p.cashPaymentAllowed || !me?.cashPaymentsAllowed || p.batch) return '';
+  return `<section class="checkout-cash-choice"><h3>Choose payment method</h3><div class="checkout-cash-buttons"><button type="button" class="checkout-secondary" onclick="document.querySelector('#checkoutCashForm').hidden=true;document.querySelector('.upi-layout')?.scrollIntoView({block:'center',behavior:'smooth'})">Pay online</button><button type="button" class="checkout-primary" onclick="document.querySelector('#checkoutCashForm').hidden=false;document.querySelector('#checkoutCashForm input').focus()">Pay in cash</button></div><form id="checkoutCashForm" class="checkout-cash-form" hidden data-request-id="${crypto.randomUUID()}" onsubmit="recordCheckoutCash(event)"><label>Cash amount paid (₹)<input name="amount" type="number" required min="0.01" max="${(p.amount/100).toFixed(2)}" step="0.01" value="${(p.amount/100).toFixed(2)}" oninput="updateCheckoutCash(this.value,${p.amount})"></label><dl class="cash-payment-totals"><div><dt>Pending amount after this cash entry</dt><dd id="checkoutCashPending">${money(0)}</dd></div><div><dt>${p.cash_account?'Remaining balance':'Total payable'}</dt><dd>${money(p.amount)}</dd></div></dl><p>Admin must confirm cash received. Partial cash permits case processing; the completed document stays locked until the full payment is confirmed.</p><button class="checkout-primary">Record cash payment</button></form></section>`;
+}
+function updateCheckoutCash(value,total) {document.querySelector('#checkoutCashPending').textContent=money(Math.max(0,total-Math.round(Number(value)*100)));}
+async function recordCheckoutCash(event) {
+  event.preventDefault();if(drawerBusy || !checkout?.cashPaymentAllowed) return;
+  const form=event.target,caseId=checkout.case_id;
+  const body={amount:Math.round(Number(form.elements.amount.value)*100),requestId:form.dataset.requestId,enroll:!checkout.cash_account};
+  setDrawerBusy('Recording cash payment…');
+  try {
+    await api(`/api/cases/${caseId}/cash-payment`,{method:'POST',body});
+    setDrawerBusy();closeDrawer();await openCase(caseId);void refreshCaseUpdates();
+    toast('Cash payment recorded. The case shows the remaining balance and admin confirmation status.');
+  } catch(error) {toast(error.message);} finally {setDrawerBusy();}
+}
 function checkoutHTML(p) {
+  if(p.gateway==='cash') return cashReceiptHTML(p);
   const active=!!p.upiIntent, editable=['sales','admin'].includes(me.role), verified=p.status==='PAID';
   const compact=(window.innerWidth || 1280)<701;
   const labels={PENDING:'Unpaid Payment',INITIATED:'Unpaid Payment',AWAITING_VERIFICATION:'Under review',PAID:'Verified',FAILED:'Claim rejected',CANCELLED:'Cancelled',EXPIRED:'Expired',REFUNDED:'Refunded'};
@@ -1783,8 +1985,8 @@ function checkoutHTML(p) {
   const glyph=(name)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{close:'<path d="m6 6 12 12M18 6 6 18"/>',arrow:'<path d="m9 5 7 7-7 7"/>',download:'<path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/>',check:'<path d="m5 12 4 4L19 6"/>',qr:'<path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h3v3h-3zM21 15v6h-6"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'}[name]}</svg>`;
   const primary=editable && !['PAID','REFUNDED'].includes(p.status);
   return `<header class="checkout-header"><div class="checkout-brand"><span class="checkout-brand-mark">SO</span><div><h2>${h(p.payee_name)}</h2><p>UPI checkout</p></div></div><button class="checkout-close" onclick="closeDrawer()" aria-label="Close">${glyph('close')}</button></header>
-    <div class="checkout-body"><aside class="checkout-summary"><span class="checkout-kicker">TOTAL PAYABLE</span><div class="checkout-amount">${money(p.amount)}</div><span class="checkout-status checkout-status-${p.status.toLowerCase()}"><i></i>${h(labels[p.status] || p.status)}</span><div class="checkout-service"><span>Service</span><strong>${h(p.service_name)}</strong></div><div class="checkout-customer"><span>Customer</span><strong>${h(p.customer_name)}</strong></div>${p.batch ? `<section class="summary-box checkout-batch-items"><strong>Included work orders</strong>${p.items.map(item=>`<p>${h(item.customer_name)} - ${h(item.service_name)} - ${h(item.ref)} <strong>${money(item.amount)}</strong></p>`).join('')}</section>` : ''}<details class="checkout-order"><summary>Order details</summary><dl><dt class="checkout-mobile-customer">Customer</dt><dd class="checkout-mobile-customer">${h(p.customer_name)}</dd><dt>Order ID</dt><dd class="selectable">${h(p.gateway_order_id)}</dd><dt>UPI ID</dt><dd class="selectable">${h(p.upi_id)}</dd><dt>Checkout expiry</dt><dd>${dateTime(p.expires_at)}</dd></dl>${active ? '<button class="checkout-text-button" onclick="copyPayment(\'link\')">Copy payment link</button>' : ''}</details></aside>
-    <main class="checkout-main">
+    <div class="checkout-body"><aside class="checkout-summary"><span class="checkout-kicker">TOTAL PAYABLE</span><div class="checkout-amount">${money(p.amount)}</div><span class="checkout-status checkout-status-${p.status.toLowerCase()}"><i></i>${h(labels[p.status] || p.status)}</span><div class="checkout-service"><span>Services</span><strong>${h(p.service_name)}</strong></div><div class="checkout-customer"><span>Customer</span><strong>${h(p.customer_name)}</strong></div>${p.batch ? `<section class="summary-box checkout-batch-items"><strong>Included work orders</strong>${p.items.map(item=>`<p>${h(item.customer_name)} - ${h(item.service_name)} - ${h(item.ref)} <strong>${money(item.amount)}</strong></p>`).join('')}</section>` : ''}<details class="checkout-order"><summary>Order details</summary><dl><dt class="checkout-mobile-customer">Customer</dt><dd class="checkout-mobile-customer">${h(p.customer_name)}</dd><dt>Order ID</dt><dd class="selectable">${h(p.gateway_order_id)}</dd><dt>UPI ID</dt><dd class="selectable">${h(p.upi_id)}</dd><dt>Checkout expiry</dt><dd>${dateTime(p.expires_at)}</dd></dl>${active ? '<button class="checkout-text-button" onclick="copyPayment(\'link\')">Copy payment link</button>' : ''}</details></aside>
+    <main class="checkout-main">${cashCheckoutOptions(p)}
       ${!p.receiverReady ? '<div class="checkout-notice" role="alert"><strong>Checkout is not enabled yet</strong><p>An administrator can enable the receiving account in Payments settings.</p></div>' : ''}
       ${p.otherClaimPending ? '<div class="checkout-notice" role="alert"><strong>A payment claim is already under review</strong><p>Wait for verification before making another payment for this service.</p></div>' : ''}
       ${inactive ? `<div class="checkout-notice" role="alert"><strong>${receiverChanged ? 'Receiving account updated' : h(labels[p.status])+' checkout'}</strong><p>Reopen checkout to start a new payment request. If you already sent money, submit its UTR instead. An inactive checkout does not cancel a bank transfer.</p></div>` : ''}
@@ -1835,16 +2037,19 @@ async function paymentAction(action,body) {
     await showPayment(checkout.id,checkout);
     if(action==='verify') toast('Payment received and verified.');
     if(action==='submit') toast('Payment details submitted successfully. Your payment is awaiting verification.');
-    try {await load();} catch {toast('Payment details saved. The dashboard could not refresh; reload it to see the latest status.');}
+    if(action==='verify' && checkout.gateway==='cash') {
+      applyConfirmedPayment(checkout);void refreshCaseUpdates();if(view==='payments')void refreshPayments();
+    } else try {await load();} catch {toast('Payment details saved. The dashboard could not refresh; reload it to see the latest status.');}
   } catch(e) {toast(e.message);} finally {setDrawerBusy();}
 }
 async function submitUTR(event) {event.preventDefault();await paymentAction('submit',{utr:event.target.utr.value});}
 async function verifyUPIPayment() {await paymentAction('verify',{});}
-async function downloadReceipt() {try {const p=await api(`/api/payments/${checkout.id}/receipt`);const text=`SUCCESS ONLINE SERVICES\nVerified direct UPI receipt\nOrder: ${p.gateway_order_id}\nCustomer: ${p.customer_name}\nService: ${p.service_name}\n${p.batch ? p.items.map(item=>`Work order: ${item.ref} | ${item.customer_name} | ${item.service_name} | INR ${(item.amount/100).toFixed(2)}`).join('\n')+'\n' : ''}Amount: INR ${(p.amount/100).toFixed(2)}\nUTR: ${p.transaction_id}\nVerified at: ${p.verified_at}\nVerified by: ${p.verified_by}\n`;downloadPaymentAsset(URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),'payment-receipt.txt',true);} catch(e) {toast(e.message);}}
-Object.assign(window,{showPayment,pay,launchUPI,startManualUPI,revealPaymentUTR,paymentAction,submitUTR,verifyUPIPayment,filterPayments,resetPaymentFilters,updatePaymentSearch,exportPayments,confirmReceiver,setTestPricing,saveServicePrice,retryPaymentSync,downloadPaymentAsset,copyPayment,downloadReceipt,selectPaymentCase,paySelectedCases,reopenPayment});
+async function downloadReceipt() {try {const p=await api(`/api/payments/${checkout.id}/receipt`);const text=`SUCCESS ONLINE SERVICES\nVerified payment receipt (${p.gateway==='cash'?'Cash':'UPI'})\nOrder: ${p.gateway_order_id}\nCustomer: ${p.customer_name}\nService: ${p.service_name}\n${p.batch ? p.items.map(item=>`Work order: ${item.ref} | ${item.customer_name} | ${item.service_name} | INR ${(item.amount/100).toFixed(2)}`).join('\n')+'\n' : ''}Amount: INR ${(p.amount/100).toFixed(2)}\nUTR: ${p.transaction_id}\nVerified at: ${p.verified_at}\nVerified by: ${p.verified_by}\n`;downloadPaymentAsset(URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),'payment-receipt.txt',true);} catch(e) {toast(e.message);}}
+Object.assign(window,{showCaseReuploadRequest,requestCaseReupload,confirmPaymentFromList,updateCheckoutCash,recordCheckoutCash,setCashReviewMethod,updateReviewCash,recordCashBalance,rejectCashReceipt,showPayment,pay,launchUPI,startManualUPI,revealPaymentUTR,paymentAction,submitUTR,verifyUPIPayment,filterPayments,resetPaymentFilters,updatePaymentSearch,exportPayments,confirmReceiver,setTestPricing,saveServicePrice,retryPaymentSync,downloadPaymentAsset,copyPayment,downloadReceipt,selectPaymentCase,paySelectedCases,reopenPayment});
 
 
 function batchEligible(p) {
+  if(p.cash_account || ['cash','balance_upi'].includes(p.gateway)) return false;
   const rows=paymentData?.payments || [];
   return ['sales','admin'].includes(me.role) && !p.case_payment_locked && !['Cancelled','Closed','Delivered'].includes(p.case_status) &&
     ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) &&

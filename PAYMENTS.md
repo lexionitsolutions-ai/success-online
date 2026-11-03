@@ -1,8 +1,20 @@
-# Direct UPI payments
+# Payments
 
 The existing Node HTTP API and plain JavaScript staff interface collect direct UPI payments, without a gateway. SQLite is supported locally; Supabase PostgreSQL remains the Vercel primary database. Existing customers, cases, uploads, employee roles and Google integrations are retained.
 
+## Mahalaxmi cash instalments
+
+Administrators can Review and Confirm received payments directly from the Payments table. Cash verification commits the receipt, balance checks, case state and audit entry before responding; operations mirrors and Google reporting then run in the background. The interface updates the confirmed row without waiting for a full workspace reload. Backoffice staff can request corrected documents from the case Documents header as well as each document's actions.
+
+Only the existing sales user `7028405101` with ID `usr_45ca9fa8-2cd5-4b12-9509-8c8b6c3eeded` can choose cash at intake or from an existing unpaid individual checkout. Other accounts retain full online payment. The review page records a positive cash amount against a frozen total; remaining amounts can be paid in cash or through an individual balance UPI checkout.
+
+Cash entries await administrator confirmation and do not count as collected revenue until confirmed. A positive recorded cash amount permits operations after the document upload requirements are satisfied. Final received-document downloads, previews and URLs remain unavailable to sales until the full amount is administrator-confirmed. Rejected entries and refunds recalculate the balance and restore the lock where necessary. Instalment cases cannot enter combined checkout; request identifiers prevent duplicate cash entries.
+
+For an existing Supabase database, run `node scripts/setup-cash-payments.js` before starting the updated server. This adds only the cash account table and its private access rules. Local SQLite migration runs automatically. Restart the local Node server after updating the backend.
+
 ## Receiver and release requirements
+
+Salespeople can remove their own unpaid cases through the final Delete column. The server checks all payment history, including partial cash entries, pending verification, refunds and past verification dates; such cases cannot be deleted. An unpaid deletion revokes case/document access, cancels its unused checkouts (including provisional combined checkouts), and stops browser uploads. Case and payment records are retained with a deletion audit entry for reconciliation. Reusing an old intake request cannot restore the deleted case.
 
 `payments.js:paymentConfig()` centralizes the receiver: SUCCESS ONLINE SERVICES, `0791934A0195602.bqr@kotak`, mobile `+91 7558548187`, INR. The displayed payee name does not establish bank ownership. Checkout is disabled until an administrator attests to the actual receiving account.
 

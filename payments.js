@@ -2,6 +2,7 @@ import './public/intake-rules.js';
 import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 import {batchSchema,createBatchPayments} from './payment-batches.js';
+import {cashSchema,createCashPayments,cashAccount} from './cash-payments.js';
 
 export function paymentConfig() {
   return { upiId: '0791934A0195602.bqr@kotak', payeeName: 'SUCCESS ONLINE SERVICES', mobile: '+91 7558548187', currency: 'INR', accountType:'merchant', testPricingMode: process.env.TEST_PRICING_MODE !== 'false' };
@@ -42,15 +43,16 @@ CREATE TABLE IF NOT EXISTS verified_upi_refs (utr TEXT PRIMARY KEY, payment_id T
 CREATE TABLE IF NOT EXISTS payment_exceptions (case_id TEXT PRIMARY KEY REFERENCES cases(id), approved_by TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS one_paid_upi_per_case ON payments(case_id) WHERE gateway='direct_upi' AND status='PAID';
 CREATE INDEX IF NOT EXISTS upi_status_idx ON payments(gateway,status,created_at);
-` + batchSchema;
+` + batchSchema + cashSchema;
 const fail = (status,message) => { throw Object.assign(new Error(message),{status}); };
 const normalizeUTR = value => {
   const utr = String(value || '').trim();
   if (!/^\d{12}$/.test(utr)) fail(400,'Enter the 12-digit UPI transaction reference from the receiving or paying app.');
   return utr;
 };
-export function createPayments({db, recomputeCase, send, body}) {
+export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}) {
   const {one,all,run} = db;
+  const cash=createCashPayments({db,config:paymentConfig});
   const at = () => new Date().toISOString();
   async function audit(user, action, entity, notes) {
     await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:randomUUID(),$actor:user.id,$action:`payment.${action}`,$type:'payment',$entity:entity,$reason:notes || '',$at:at()});
@@ -62,14 +64,15 @@ export function createPayments({db, recomputeCase, send, body}) {
   }
   async function receiverReady() {return (await receiverStatus()).ready;}
   async function list(caseId, user, paymentId=null) {
-    const params={}, filters=[];
+    const params={}, filters=["c.status!='Deleted'"];
     if(caseId) {params.$case=caseId;filters.push('p.case_id=$case');}
     if(user.role==='sales') {params.$user=user.id;filters.push('c.sales_user_id=$user');}
     if(paymentId) {params.$payment=paymentId;filters.push('p.id=$payment');}
-    return all(`SELECT p.*,o.*,bi.batch_id,pb.status batch_status,EXISTS (SELECT 1 FROM payments locked WHERE locked.case_id=p.case_id AND locked.gateway='direct_upi' AND locked.status IN ('PAID','AWAITING_VERIFICATION')) case_payment_locked,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id LEFT JOIN payment_batch_items bi ON bi.payment_id=p.id LEFT JOIN payment_batches pb ON pb.id=bi.batch_id JOIN cases c ON c.id=p.case_id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${filters.length ? 'WHERE '+filters.join(' AND ') : ''} ORDER BY p.created_at DESC,p.id`,params);
+    return all(`SELECT p.*,o.*,ca.case_id cash_account,bi.batch_id,pb.status batch_status,EXISTS (SELECT 1 FROM payments locked WHERE locked.case_id=p.case_id AND locked.gateway='direct_upi' AND locked.status IN ('PAID','AWAITING_VERIFICATION')) case_payment_locked,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id LEFT JOIN payment_batch_items bi ON bi.payment_id=p.id LEFT JOIN payment_batches pb ON pb.id=bi.batch_id JOIN cases c ON c.id=p.case_id LEFT JOIN cash_accounts ca ON ca.case_id=c.id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${filters.length ? 'WHERE '+filters.join(' AND ') : ''} ORDER BY p.created_at DESC,p.id`,params);
   }
   async function createOrder(c,user,{individual=false}={}) {
     if (c.status === 'Cancelled') fail(409,'The service request is cancelled');
+    if(await cash.account(c.id)) return cash.createBalanceOrder(c,user);
     const receiver=paymentConfig();
     // Most cases already have an order. Reuse it with one read, without
     // issuing expiry/receiver updates when nothing has changed.
@@ -106,10 +109,10 @@ export function createPayments({db, recomputeCase, send, body}) {
     return one('SELECT * FROM payments WHERE id=$id',{$id:pid});
   }
   async function detail(pid,user) {
-    const member=await batches.membership(pid);
-    if(member) return batches.detail(member.batch_id,user);
     const p = (await list(null,user,pid))[0];
     if (!p) fail(404,'Payment not found');
+    if(p.batch_id) return batches.detail(p.batch_id,user);
+    if(p.gateway==='cash') return {...p,orderId:p.gateway_order_id,receiverReady:true,receiverChanged:false,upiIntent:null,qrDataUrl:null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
     if (['PENDING','INITIATED'].includes(p.status) && p.expires_at < at()) {
       await run("UPDATE payments SET status='EXPIRED' WHERE id=$id AND status IN ('PENDING','INITIATED')",{$id:pid}); p.status='EXPIRED';
       await run('UPDATE upi_orders SET updated_at=$at WHERE payment_id=$id',{$at:at(),$id:pid});
@@ -120,12 +123,14 @@ export function createPayments({db, recomputeCase, send, body}) {
     const otherPaid=await one("SELECT id FROM payments WHERE case_id=$case AND id!=$id AND status='PAID' AND gateway='direct_upi'",{$case:p.case_id,$id:p.id});
     const otherClaim=await one("SELECT id FROM payments WHERE case_id=$case AND id!=$id AND status='AWAITING_VERIFICATION' AND gateway='direct_upi'",{$case:p.case_id,$id:p.id});
     const config=paymentConfig(),receiverChanged=p.upi_id!==config.upiId || p.payee_name!==config.payeeName;
-    const active = ready && !receiverChanged && !otherPaid && !otherClaim && p.case_status!=='Cancelled' && ['PENDING','INITIATED'].includes(p.status);
+    const balance=p.gateway==='balance_upi'?await cash.summary(p.case_id):null;
+    const cashPaymentAllowed=!p.cash_account && cashAccount(user) && p.sales_user_id===user.id && !otherPaid && !otherClaim && p.gateway!=='cash' && ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) && !['Deleted','Cancelled','Closed','Delivered'].includes(p.case_status);
+    const active = p.gateway!=='cash' && ready && !receiverChanged && !otherPaid && !otherClaim && (!balance || p.amount===balance.amountToPay) && p.case_status!=='Cancelled' && ['PENDING','INITIATED'].includes(p.status);
     const upiIntent = active ? generateUPIPaymentURL({upiId:p.upi_id,payeeName:p.payee_name,amount:p.amount,orderId:p.gateway_order_id,serviceName:p.service_name,customerName:p.customer_name}) : null;
-    return {...p,orderId:p.gateway_order_id,receiverReady:ready,receiverChanged,otherClaimPending:!!otherClaim,otherPaymentVerified:!!otherPaid,receiverAccountType:receiverChanged ? 'previous_receiver' : config.accountType,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
+    return {...p,cashPaymentAllowed:cashPaymentAllowed || cashAccount(user) && p.sales_user_id===user.id && p.gateway==='balance_upi' && !!balance?.amountToPay && !['Deleted','Cancelled'].includes(p.case_status) && ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status),orderId:p.gateway_order_id,receiverReady:ready,receiverChanged,otherClaimPending:!!otherClaim,otherPaymentVerified:!!otherPaid,receiverAccountType:receiverChanged ? 'previous_receiver' : config.accountType,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
   }
-  async function event(p,user,action,b) {
-    await run('UPDATE upi_orders SET updated_at=$at WHERE payment_id=$id',{$at:at(),$id:p.id});
+  async function event(p,user,action,b,{touch=true}={}) {
+    if(touch) await run('UPDATE upi_orders SET updated_at=$at WHERE payment_id=$id',{$at:at(),$id:p.id});
     await run('INSERT INTO payment_attempts VALUES ($id,$payment,$action,$method,$utr,$actor,$notes,$at)',{$id:randomUUID(),$payment:p.id,$action:action,$method:b.method || null,$utr:b.utr || null,$actor:user.id,$notes:b.notes || '',$at:at()});
     await audit(user,action,p.id,b.notes);
   }
@@ -185,6 +190,9 @@ export function createPayments({db, recomputeCase, send, body}) {
     }
     if (url.pathname === '/api/payments' && req.method === 'GET') {
       let rows=await list(null,user);
+      // Unsubmitted checkouts stay with sales. Admin still needs submitted UTRs
+      // to verify transfers and the payment history for reconciliation.
+      if(user.role==='admin') rows=rows.filter(p=>p.status==='PAID' || p.transaction_id || p.gateway==='cash' && p.status==='AWAITING_VERIFICATION');
       const today=new Date(Date.now()+330*60000).toISOString().slice(0,10), verified=rows.filter(p=>p.status==='PAID');
       const metrics={collected:verified.reduce((n,p)=>n+p.amount,0),today:verified.filter(p=>new Date(Date.parse(p.verified_at)+330*60000).toISOString().startsWith(today)).reduce((n,p)=>n+p.amount,0),verified:new Set(verified.map(p=>p.batch_id || p.id)).size,pending:rows.filter(p=>['PENDING','INITIATED','EXPIRED'].includes(p.status)).length,awaiting:rows.filter(p=>p.status==='AWAITING_VERIFICATION').length,failed:rows.filter(p=>['FAILED','CANCELLED'].includes(p.status)).length};
       for (const [key,column] of Object.entries({utr:'transaction_id',mobile:'customer_mobile',employee:'created_by',service:'service_id',status:'status'})) { const value=url.searchParams.get(key);if(value) rows=rows.filter(p=>String(p[column]||'').includes(value)); }
@@ -228,23 +236,26 @@ export function createPayments({db, recomputeCase, send, body}) {
       await run("UPDATE payments SET status='INITIATED' WHERE id=$id",{$id:p.id});
       await run('UPDATE upi_orders SET payment_method=$method,initiated_at=$at,updated_at=$at WHERE payment_id=$id',{$id:p.id,$method:b.method,$at:at()});
     } else if(action==='submit') {
+      if(p.gateway==='cash') fail(409,'Cash receipts are confirmed by admin without a UPI reference.');
       if(['PAID','REFUNDED'].includes(p.status)) fail(409,'This payment is already verified');
       if(p.otherClaimPending || p.otherPaymentVerified) fail(409,'This case is already paid or awaiting payment verification');
       b.utr=normalizeUTR(b.utr);
+      if(p.gateway==='balance_upi' || await cash.account(p.case_id)) await cash.assertFits(p);
       const used=await one('SELECT payment_id FROM verified_upi_refs WHERE utr=$utr',{$utr:b.utr});
       if(used && used.payment_id!==p.id) fail(409,'This UTR is already assigned to a verified payment');
       await run("UPDATE payments SET status='AWAITING_VERIFICATION',transaction_id=$utr WHERE id=$id",{$utr:b.utr,$id:p.id});
       await run('UPDATE upi_orders SET submitted_at=$at,updated_at=$at WHERE payment_id=$id',{$id:p.id,$at:at()});
     } else if(action==='verify') {
       if(p.status==='PAID') {send(res,200,{ok:true,payment:p});return true;}
-      if(p.status!=='AWAITING_VERIFICATION') fail(409,'A submitted UTR is required');
+      if(p.status!=='AWAITING_VERIFICATION') fail(409,'A submitted payment is required');
       b.notes ||= 'Received payment verified by administrator.';
-      if(!(await receiverReady())) fail(409,'Confirm the receiving account first');
-      const assigned=await one('SELECT payment_id FROM verified_upi_refs WHERE utr=$utr',{$utr:p.transaction_id});
+      if(['cash','balance_upi'].includes(p.gateway) || await cash.account(p.case_id)) await cash.assertFits(p);
+      if(p.gateway!=='cash' && !(await receiverReady())) fail(409,'Confirm the receiving account first');
+      const assigned=p.gateway==='cash'?null:await one('SELECT payment_id FROM verified_upi_refs WHERE utr=$utr',{$utr:p.transaction_id});
       if(assigned && assigned.payment_id!==p.id) fail(409,'This UTR is already assigned to a verified payment');
-      const paid=await one("SELECT id FROM payments WHERE case_id=$case AND gateway='direct_upi' AND status='PAID'",{$case:p.case_id});
+      const paid=p.gateway==='direct_upi'?await one("SELECT id FROM payments WHERE case_id=$case AND gateway='direct_upi' AND status='PAID'",{$case:p.case_id}):null;
       if(paid && paid.id!==p.id) fail(409,'Another payment is already verified for this service request');
-      await run('INSERT INTO verified_upi_refs VALUES ($utr,$id)',{$utr:normalizeUTR(p.transaction_id),$id:p.id});
+      if(p.gateway!=='cash') await run('INSERT INTO verified_upi_refs VALUES ($utr,$id)',{$utr:normalizeUTR(p.transaction_id),$id:p.id});
       await run("UPDATE payments SET status='PAID',verified_at=$at WHERE id=$id",{$at:at(),$id:p.id});
       await run('UPDATE upi_orders SET verified_by=$user,verification_notes=$notes,updated_at=$at WHERE payment_id=$id',{$user:user.id,$notes:b.notes,$at:at(),$id:p.id});
     } else if(action==='reject') {
@@ -257,9 +268,12 @@ export function createPayments({db, recomputeCase, send, body}) {
       if(p.status!=='PAID' || b.refundReceived!==true || !b.notes) fail(409,'Confirm an actual completed refund and record its reference in notes');
       await run("UPDATE payments SET status='REFUNDED' WHERE id=$id",{$id:p.id});
     }
-    await event(p,user,action,b);
-    await recomputeCase(p.case_id);
+    await event(p,user,action,b,{touch:action!=='verify'});
+    if(p.gateway==='cash' && action==='verify' && scheduleCaseSync) {
+      await recomputeCase(p.case_id,{sync:false});
+      await scheduleCaseSync(p.case_id);
+    } else await recomputeCase(p.case_id);
     send(res,200,{ok:true,payment:await detail(p.id,user)}); return true;
   }
-  return {handle,createOrder,detail,list,receiverReady,audit};
+  return {handle,createOrder,detail,list,receiverReady,audit,cash};
 }
