@@ -1169,7 +1169,7 @@ export async function handler(req, res) {
     const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|submit-received-document|request-reupload|submit-reupload)$/.test(url.pathname);
     const paymentRequest = /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/(payment-order|cash-payment)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname);
     const readOnly = (req.method === 'GET' && (
-      ['/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments'].includes(url.pathname) ||
+      ['/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments','/api/payments/cash-pending'].includes(url.pathname) ||
       /^\/api\/cases\/[^/]+$/.test(url.pathname) || /^\/api\/documents\/[^/]+\/(download|preview|view)$/.test(url.pathname) || /^\/api\/announcements(?:\/[^/]+\/image)?$/.test(url.pathname)
     )) || (req.method === 'POST' && ['/api/login','/api/logout'].includes(url.pathname));
     const route = async () => {
@@ -1183,7 +1183,7 @@ export async function handler(req, res) {
         for (const setting of settings) process.env[setting.name] = setting.value;
         servicePrices=new Map(prices.map(p=>[p.variant_id,{price:p.price,original:JSON.parse(p.original_config)}]));
       }
-      if (db.cloud && (/^\/api\/payments\//.test(url.pathname) || /\/payment-order$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname))) await one('SELECT pg_advisory_xact_lock(73194204)');
+      if (db.cloud && url.pathname!=='/api/payments/cash-pending' && (/^\/api\/payments\//.test(url.pathname) || /\/payment-order$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname))) await one('SELECT pg_advisory_xact_lock(73194204)');
       await routeApi(req, buffered, url);
     };
     await deferredCaseMirrors.run(caseMirrorJobs,()=>deferredSheets.run(sheetsJobs, () => readOnly && db.cloud ? route() : db.transaction(route)));

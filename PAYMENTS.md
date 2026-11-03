@@ -4,6 +4,8 @@ The existing Node HTTP API and plain JavaScript staff interface collect direct U
 
 ## Mahalaxmi cash instalments
 
+The Payments page has a Cash pending payments tab for sales and administrators. It lists each case's total, confirmed receipts, amount awaiting confirmation and remaining balance. Mahalaxmi can record additional cash or open an exact-balance UPI checkout at any time, including after a case is completed. Fully confirmed cases leave this pending list; recording a payment without confirmation keeps it visible as awaiting admin confirmation. The Receiver & service pricing section is no longer shown or fetched on the Payments page.
+
 Administrators can Review and Confirm received payments directly from the Payments table. Cash verification commits the receipt, balance checks, case state and audit entry before responding; operations mirrors and Google reporting then run in the background. The interface updates the confirmed row without waiting for a full workspace reload. Backoffice staff can request corrected documents from the case Documents header as well as each document's actions.
 
 Only the existing sales user `7028405101` with ID `usr_45ca9fa8-2cd5-4b12-9509-8c8b6c3eeded` can choose cash at intake or from an existing unpaid individual checkout. Other accounts retain full online payment. The review page records a positive cash amount against a frozen total; remaining amounts can be paid in cash or through an individual balance UPI checkout.

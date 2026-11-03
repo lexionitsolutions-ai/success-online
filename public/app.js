@@ -1744,7 +1744,7 @@ function closeDrawer() {
 async function connectGoogleSheets() { try { location.href = (await api('/api/google/oauth/start')).authorizationUrl; } catch (error) { toast(error.message); } }
 async function activateGoogleSheets() { try { toast('Verifying workbook and syncing cases'); const result = await api('/api/google/sheets/activate', { method:'POST' }); await load(); toast(`Google Sheets live: ${result.syncedCases} cases synced`); } catch (error) { toast(error.message); } }
 async function setAnalyticsPeriod(period) { analyticsPeriod = period; adminAnalytics = await api(`/api/admin/dashboard?period=${period}`); render(); }
-async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/logout', { method:'POST' });clearTimeout(updatesTimer);caseNotifications=[];recentUpdatesOpen=false;announcements=[];announcementsUnavailable=false;announcementPosting=false;if(announcementPreviewUrl) URL.revokeObjectURL(announcementPreviewUrl);announcementPreviewUrl=''; me = null;for(const key of Object.keys(performanceState)) {performanceState[key].request++;delete performanceState[key];}restoredUploadOwner=null;renderBackgroundUploads();view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';pricingData=null;pricingSalesId='';pricingError='';pricingRequest++;renderLogin(); }
+async function logout() { if (drawerBusy) return;closeDrawer(); await api('/api/logout', { method:'POST' });clearTimeout(updatesTimer);caseNotifications=[];recentUpdatesOpen=false;announcements=[];announcementsUnavailable=false;announcementPosting=false;if(announcementPreviewUrl) URL.revokeObjectURL(announcementPreviewUrl);announcementPreviewUrl=''; me = null;for(const key of Object.keys(performanceState)) {performanceState[key].request++;delete performanceState[key];}restoredUploadOwner=null;renderBackgroundUploads();view='dashboard';googleStatus=sheetsStatus=adminAnalytics=employeeData=null;selectedPaymentCases.clear();paymentData=paymentSettings=checkout=null;paymentFilters='';paymentTab='activity';cashPendingData=null;cashPendingError='';cashPendingSearch='';pricingData=null;pricingSalesId='';pricingError='';pricingRequest++;renderLogin(); }
 async function setView(next) {
   if(drawerBusy) return;
   closeDrawer();view=next;render();
@@ -1824,11 +1824,52 @@ Object.assign(window,{loadPricing,selectPricingSalesperson,saveSalespersonPrice}
 
 let paymentData = null, paymentSettings = null, checkout = null;
 let paymentFilters = '';
+let paymentTab='activity',cashPendingData=null,cashPendingLoading=false,cashPendingError='',cashPendingSearch='';
 const selectedPaymentCases=new Set();
 const confirmingPayments=new Set();
 const paymentSearchFields={all:'All fields',customer:'Customer',utr:'UTR',mobile:'Mobile',service:'Service',employee:'Employee',order:'Order / case',status:'Status',from:'From date',to:'To date'};
 async function loadPayments() {
-  [paymentData,paymentSettings] = await Promise.all([api('/api/payments'+paymentFilters),me.role==='admin' ? api('/api/payment-settings') : null]);
+  paymentData=await api('/api/payments'+paymentFilters);
+  paymentSettings=null;
+  if(paymentTab==='cashPending') await loadCashPending();
+}
+async function loadCashPending() {
+  cashPendingLoading=true;cashPendingError='';
+  try {cashPendingData=await api('/api/payments/cash-pending');}
+  catch(error) {cashPendingError=error.message;}
+  finally {cashPendingLoading=false;}
+}
+async function setPaymentTab(tab) {
+  if(!['activity','cashPending'].includes(tab) || !['admin','sales'].includes(me?.role)) return;
+  paymentTab=tab;
+  if(tab==='cashPending') {const request=loadCashPending();render();await request;}
+  if(view==='payments') render();
+}
+function paymentTabs() {
+  if(!['admin','sales'].includes(me?.role)) return '';
+  return `<div class="payment-tabs" role="tablist" aria-label="Payment sections"><button type="button" role="tab" aria-selected="${paymentTab==='activity'}" class="${paymentTab==='activity'?'active':''}" onclick="setPaymentTab('activity')">Payment activity</button><button type="button" role="tab" aria-selected="${paymentTab==='cashPending'}" class="${paymentTab==='cashPending'?'active':''}" onclick="setPaymentTab('cashPending')">Cash pending payments</button></div>`;
+}
+function cashPendingTable() {
+  const query=cashPendingSearch.trim().toLowerCase();
+  const rows=(cashPendingData?.cases || []).filter(c=>[c.ref,c.customer_name,c.customer_mobile,c.service_name,c.employee_name].join(' ').toLowerCase().includes(query));
+  if(!rows.length) return empty(query?'No cash balances match this search.':'No pending cash-plan balances.');
+  return `<table class="table cash-pending-table"><thead><tr><th>Customer / case</th><th>Services</th><th>Total</th><th>Confirmed paid</th><th>Pending amount</th><th>Awaiting confirmation</th><th>Actions</th></tr></thead><tbody>${rows.map(c=>`<tr><td><strong>${h(c.customer_name)}</strong><small>${h(c.ref)}</small><small>${h(c.employee_name)}</small></td><td>${h(c.service_name)}<small>${h(c.case_status)}</small></td><td>${money(c.total)}</td><td>${money(c.confirmed_paid)}</td><td><strong>${money(c.pending_amount)}</strong><small>${money(c.amount_to_pay)} remaining to pay</small></td><td>${money(c.awaiting_verification)}</td><td><div class="cash-pending-actions"><button class="quiet" onclick="openCase('${c.case_id}')">View case / balance</button>${me.role==='admin' && c.review_payment_id?`<button class="primary" onclick="showPayment('${c.review_payment_id}')">Review payment</button>`:''}${me.cashPaymentsAllowed && me.id===c.sales_user_id && c.amount_to_pay>0?`<button onclick="document.querySelector('#pendingCash-${c.case_id}').hidden=false">Pay in cash</button><button class="primary" onclick="pay('${c.case_id}')">Pay ${money(c.amount_to_pay)} with UPI</button><form id="pendingCash-${c.case_id}" class="pending-cash-form" hidden data-request-id="${crypto.randomUUID()}" onsubmit="recordCashFromPending(event,'${c.case_id}')"><label>Cash amount paid (₹)<input name="amount" type="number" required min="0.01" step="0.01" max="${(c.amount_to_pay/100).toFixed(2)}" value="${(c.amount_to_pay/100).toFixed(2)}"></label><button class="primary">Record cash payment</button></form>`:c.amount_to_pay===0?'<small>Waiting for admin confirmation</small>':''}</div></td></tr>`).join('')}</tbody></table>`;
+}
+function filterCashPending(value) {cashPendingSearch=value;document.querySelector('#cashPendingList').innerHTML=cashPendingTable();labelTables();}
+function renderCashPending() {
+  if(cashPendingLoading) return '<p role="status">Loading pending balances…</p>';
+  if(cashPendingError) return `<p role="alert">${h(cashPendingError)}</p><button onclick="setPaymentTab('cashPending')">Retry</button>`;
+  const rows=cashPendingData?.cases || [],pending=rows.reduce((sum,c)=>sum+c.pending_amount,0);
+  return `<section class="cash-pending-panel"><div class="section-head"><div><h2>Cash pending payments</h2><p>Pay remaining balances whenever you are ready, including after work is completed. Final documents unlock after admin confirms full payment.</p></div><strong>${money(pending)} pending</strong></div><label class="cash-pending-search">Search cases<input type="search" value="${h(cashPendingSearch)}" placeholder="Customer, case number or services" oninput="filterCashPending(this.value)"></label><div id="cashPendingList" class="table-shell">${cashPendingTable()}</div></section>`;
+}
+async function recordCashFromPending(event,caseId) {
+  event.preventDefault();if(drawerBusy) return;
+  const form=event.target,button=form.querySelector('button');button.disabled=true;
+  try {
+    await api(`/api/cases/${caseId}/cash-payment`,{method:'POST',body:{amount:Math.round(Number(form.elements.amount.value)*100),requestId:form.dataset.requestId}});
+    await loadCashPending();if(view==='payments')render();
+    toast('Cash payment recorded. Awaiting admin confirmation.');
+  } catch(error) {toast(error.message);button.disabled=false;}
 }
 function paymentCaseRows() {
   const cases=new Map();
@@ -1885,8 +1926,11 @@ function renderPayments() {
   const latest = paymentCaseRows();
   const unpaid = latest.filter(p => ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) && !['Cancelled','Closed','Delivered'].includes(p.case_status) && !paymentData.payments.some(row => row.case_id === p.case_id && ['PAID','AWAITING_VERIFICATION'].includes(row.status))).length;
   const selected = selectablePaymentCases().filter(p => selectedPaymentCases.has(p.case_id)).length;
-  return `<section class="payments-workspace">${pageHead('Payments', 'A clear view of your collections, checkouts, and payment activity.')}
-    ${me.role==='admin' ? `<section class="metric-grid compact payment-metrics">${metricCard('Verified collections',money(m.collected),'Confirmed in the receiving account','green')}${metricCard('Collected today',money(m.today),'Verified today','green')}${metricCard('Under review',number(m.awaiting),'Awaiting verification','amber')}${metricCard('Failed / cancelled',number(m.failed),'Checkout history')}${metricCard('Verified transfers',number(m.verified),'Individual and combined transfers','green')}</section>${paymentSettingsPanel()}` : `<section class="metric-grid payment-metrics">${metricCard('Unpaid cases',number(unpaid),'Individual or combined checkout','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting payment verification','amber')}${metricCard('Verified collections',money(m.collected),'Confirmed payments','green')}</section>`}
+  const heading=`<section class="payments-workspace">${pageHead('Payments', 'A clear view of your collections, checkouts, and payment activity.')}
+    ${me.role==='admin' ? `<section class="metric-grid compact payment-metrics">${metricCard('Verified collections',money(m.collected),'Confirmed in the receiving account','green')}${metricCard('Collected today',money(m.today),'Verified today','green')}${metricCard('Under review',number(m.awaiting),'Awaiting verification','amber')}${metricCard('Failed / cancelled',number(m.failed),'Checkout history')}${metricCard('Verified transfers',number(m.verified),'Individual and combined transfers','green')}</section>` : `<section class="metric-grid payment-metrics">${metricCard('Unpaid cases',number(unpaid),'Individual or combined checkout','blue')}${metricCard('Under review',number(m.awaiting),'Awaiting payment verification','amber')}${metricCard('Verified collections',money(m.collected),'Confirmed payments','green')}</section>`}
+    ${paymentTabs()}`;
+  if(paymentTab==='cashPending') return heading+renderCashPending()+'</section>';
+  return heading+`
     ${['sales','admin'].includes(me.role) ? `<section class="payment-selection-panel"><div class="payment-selection-intro"><span class="payment-selection-icon">${icon('payments')}</span><div><h2>One payment. Multiple cases.</h2><p>Select one case to pay individually, or choose several to pay together.</p></div></div><div class="payment-selection-checkout"><p id="combinedPaymentTotal" aria-live="polite">${combinedPaymentSummary()}</p><button id="paySelectedButton" type="button" class="primary" onclick="paySelectedCases(this)" ${!selected?'disabled':''}>Pay selected cases <span aria-hidden="true">&rarr;</span></button></div></section>` : ''}
     <section class="payment-activity" aria-labelledby="paymentActivityTitle"><div class="payment-activity-heading"><div><h2 id="paymentActivityTitle">Payment activity</h2><p>Search a payment, review its details, or open a checkout.</p></div><span class="payment-record-count">${number(latest.length)} ${latest.length===1?'case':'cases'}</span></div>
     <div class="payment-list-tools"><form id="paymentFilters" class="payment-search" role="search" aria-label="Search payments" onsubmit="filterPayments(event)">
@@ -1895,15 +1939,6 @@ function renderPayments() {
       <button class="primary payment-search-submit" aria-label="Search payments" title="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
     </form><div class="payment-search-actions">${paymentFilters?'<button type="button" class="quiet" onclick="resetPaymentFilters()">Clear search</button>':''}${me.role !== 'sales' ? `<button type="button" class="quiet payment-export-button" onclick="exportPayments()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>Export report</button>` : ''}</div></div>
     <div class="table-shell payment-table-shell">${latest.length ? `<table class="table payment-table"><thead><tr><th><span class="visually-hidden">Select</span></th><th>Customer / case</th><th>Services</th><th>Amount</th><th>Method / UTR</th><th>Status</th><th>Employee / date</th><th>Actions</th></tr></thead><tbody>${latest.map(paymentTableRow).join('')}</tbody></table>` : '<div class="payment-empty"><span>'+icon('payments')+'</span><h3>No payments found</h3><p>Try another search or create a customer case to get started.</p></div>'}</div></section></section>`;
-}
-function paymentSettingsPanel() {
-  const c=paymentSettings;
-  return `<details class="summary-box" ${!c.receiverReady ? 'open' : ''}><summary><strong>Receiver & service pricing</strong> · ${c.receiverReady ? 'Checkout enabled' : 'Checkout activation required'} · ${c.testPricingMode ? 'TEST_PRICING_MODE: ₹1' : 'Standard pricing'}</summary>
-    <p>${h(c.payeeName)} · ${h(c.upiId)} · ${h(c.mobile)}</p><p>₹1 pricing transfers real money. You can enable checkout by confirming this is the business receiving account. A setup test UTR is not required.</p>
-    ${!c.receiverReady ? `<form class="formgrid" onsubmit="confirmReceiver(event)"><label class="check"><input name="ownerConfirmed" type="checkbox" required>I confirm this UPI account belongs to SUCCESS ONLINE SERVICES and want checkout enabled</label><button class="primary">Enable UPI checkout</button></form>` : `<p>Enabled by ${c.receiverActivationBasis==='owner_confirmation' ? 'business account confirmation' : 'received test transfer confirmation'}. Customer payments still require individual verification.</p>`}
-    <p>Saved standard prices remain available when test pricing is disabled. Existing orders keep their original amount.</p><button onclick="setTestPricing(${!c.testPricingMode})">${c.testPricingMode ? 'Disable' : 'Enable'} ₹1 test pricing</button>
-    <div class="formgrid">${c.prices.map(p=>`<form onsubmit="saveServicePrice(event,'${p.variant_id}')"><label>${h(p.service_name)} — standard ₹ price<input name="price" type="number" min="0.01" max="1000000" step="0.01" value="${(p.price/100).toFixed(2)}" required></label><small>Original: ${money(p.original_price)}</small><button>Save price</button></form>`).join('')}</div>
-    <button onclick="retryPaymentSync()">Retry pending Google Sheets sync</button></details>`;
 }
 async function filterPayments(event) {
   event.preventDefault();
@@ -2045,7 +2080,7 @@ async function paymentAction(action,body) {
 async function submitUTR(event) {event.preventDefault();await paymentAction('submit',{utr:event.target.utr.value});}
 async function verifyUPIPayment() {await paymentAction('verify',{});}
 async function downloadReceipt() {try {const p=await api(`/api/payments/${checkout.id}/receipt`);const text=`SUCCESS ONLINE SERVICES\nVerified payment receipt (${p.gateway==='cash'?'Cash':'UPI'})\nOrder: ${p.gateway_order_id}\nCustomer: ${p.customer_name}\nService: ${p.service_name}\n${p.batch ? p.items.map(item=>`Work order: ${item.ref} | ${item.customer_name} | ${item.service_name} | INR ${(item.amount/100).toFixed(2)}`).join('\n')+'\n' : ''}Amount: INR ${(p.amount/100).toFixed(2)}\nUTR: ${p.transaction_id}\nVerified at: ${p.verified_at}\nVerified by: ${p.verified_by}\n`;downloadPaymentAsset(URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),'payment-receipt.txt',true);} catch(e) {toast(e.message);}}
-Object.assign(window,{showCaseReuploadRequest,requestCaseReupload,confirmPaymentFromList,updateCheckoutCash,recordCheckoutCash,setCashReviewMethod,updateReviewCash,recordCashBalance,rejectCashReceipt,showPayment,pay,launchUPI,startManualUPI,revealPaymentUTR,paymentAction,submitUTR,verifyUPIPayment,filterPayments,resetPaymentFilters,updatePaymentSearch,exportPayments,confirmReceiver,setTestPricing,saveServicePrice,retryPaymentSync,downloadPaymentAsset,copyPayment,downloadReceipt,selectPaymentCase,paySelectedCases,reopenPayment});
+Object.assign(window,{setPaymentTab,filterCashPending,recordCashFromPending,showCaseReuploadRequest,requestCaseReupload,confirmPaymentFromList,updateCheckoutCash,recordCheckoutCash,setCashReviewMethod,updateReviewCash,recordCashBalance,rejectCashReceipt,showPayment,pay,launchUPI,startManualUPI,revealPaymentUTR,paymentAction,submitUTR,verifyUPIPayment,filterPayments,resetPaymentFilters,updatePaymentSearch,exportPayments,confirmReceiver,setTestPricing,saveServicePrice,retryPaymentSync,downloadPaymentAsset,copyPayment,downloadReceipt,selectPaymentCase,paySelectedCases,reopenPayment});
 
 
 function batchEligible(p) {

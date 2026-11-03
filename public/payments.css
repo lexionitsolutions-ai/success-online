@@ -86,4 +86,14 @@ body.payment-open{overflow:hidden}
 .cash-receipt-layout { padding:24px; }
 .payment-row-actions.has-confirm { flex-direction:column; align-items:stretch; }
 .payment-row-actions.has-confirm button { width:100%; min-width:0; height:auto; min-height:36px; white-space:normal; line-height:1.35; }
+.payment-tabs { display:flex; gap:10px; margin:22px 0; flex-wrap:wrap; }
+.payment-tabs button { padding:12px 18px; background:#fff; border:1px solid #dce5ec; color:#476078; }
+.payment-tabs button.active { background:#087f60; border-color:#087f60; color:#fff; }
+.cash-pending-panel { padding:22px; background:#fff; border:1px solid #e0e7ed; border-radius:14px; }
+.cash-pending-search { max-width:460px; margin:18px 0; }
+.cash-pending-actions { display:flex; flex-direction:column; gap:8px; min-width:160px; }
+.pending-cash-form { margin-top:10px; display:grid; gap:10px; }
+.pending-cash-form[hidden] { display:none; }
+.cash-pending-table td { vertical-align:top; }
+@media(max-width:700px) { .cash-pending-panel { padding:14px; } .payment-tabs button { flex:1; } }
 @media(max-width:700px) { .cash-receipt-layout { padding:18px; } }

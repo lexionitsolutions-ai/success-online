@@ -35,9 +35,9 @@ test('Mahalaxmi cash instalments forward partial cases but only admin-confirmed 
     for(const amount of [0,-1,60001,1.5,'10000']) assert.equal((await request('/api/cases',{cookie:sales,body:{...payload,cashPayment:{amount}}})).status,400);
     const pdf=Buffer.from('%PDF-1.4\ncash fixture\n%%EOF');
     const upload=(id,docType,cookie=sales)=>request(`/api/cases/${id}/documents`,{cookie,body:{docType,fileName:'fixture.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')}});
-    async function create() {
-      const response=await request('/api/cases',{cookie:sales,body:{...payload,cashPayment:{amount:10000}}});assert.equal(response.status,201,JSON.stringify(response.data));
-      const c=response.data.case;assert.equal(c.amounts.total,60000);assert.equal(c.cashPayment.amountToPay,50000);assert.equal(c.cashPayment.releaseAllowed,false);
+    async function create(initial=10000) {
+      const response=await request('/api/cases',{cookie:sales,body:{...payload,cashPayment:{amount:initial}}});assert.equal(response.status,201,JSON.stringify(response.data));
+      const c=response.data.case;assert.equal(c.amounts.total,60000);assert.equal(c.cashPayment.amountToPay,60000-initial);assert.equal(c.cashPayment.releaseAllowed,false);
       for(const doc of variant.documents.filter(d=>d.required)) assert.equal((await upload(c.id,doc.label)).status,201);
       for(const cookie of [admin,office]) assert.ok((await request('/api/cases',{cookie})).data.cases.some(row=>row.id===c.id),'Partial cash is forwarded');
       assert.equal((await request('/api/payments/batch',{cookie:sales,body:{caseIds:[c.id,c.id]}})).status,400);
@@ -111,5 +111,23 @@ test('Mahalaxmi cash instalments forward partial cases but only admin-confirmed 
     assert.equal(converted.data.case.cashPayment.amountToPay,50000);
     assert.equal((await request(`/api/cases/${online.id}/cash-payment`,{cookie:sales,body:cashEntry})).data.receipt.id,converted.data.receipt.id,'Retrying cash conversion cannot duplicate the initial cash entry');
     assert.equal((await request(`/api/payments/${onlineOrder.id}/submit`,{cookie:sales,body:{utr:'555555555555'}})).status,409);
+    // A completed case remains payable later: INR 600 total, INR 400 confirmed,
+    // and INR 200 clearly listed until the final receipt is confirmed.
+    const later=await create(40000);
+    assert.equal((await request(`/api/payments/${later.cashReceipts[0].id}/verify`,{cookie:admin,body:{}})).status,200);
+    const laterDoc=await complete(later);
+    const pending=()=>request('/api/payments/cash-pending',{cookie:sales});
+    const pendingRow=(await pending()).data.cases.find(row=>row.case_id===later.id);
+    assert.equal(pendingRow.case_status,'Closed');assert.equal(pendingRow.pending_amount,20000);assert.equal(pendingRow.amount_to_pay,20000);
+    assert.ok(!(await request('/api/payments/cash-pending',{cookie:other})).data.cases.some(row=>row.case_id===later.id));
+    assert.equal((await request('/api/payments/cash-pending',{cookie:office})).status,403);
+    const upi200=(await request(`/api/cases/${later.id}/payment-order`,{cookie:sales,body:{individual:true}})).data;
+    assert.equal(upi200.amount,20000);assert.equal(new URL(upi200.upiIntent).searchParams.get('am'),'200.00');
+    const lastCash=(await request(`/api/cases/${later.id}/cash-payment`,{cookie:sales,body:{amount:20000,requestId:randomUUID()}})).data.receipt;
+    const awaitingRow=(await pending()).data.cases.find(row=>row.case_id===later.id);
+    assert.equal(awaitingRow.amount_to_pay,0);assert.equal(awaitingRow.awaiting_verification,20000);await locked(later,laterDoc);
+    assert.equal((await request(`/api/payments/${lastCash.id}/verify`,{cookie:admin,body:{}})).status,200);
+    assert.ok(!(await pending()).data.cases.some(row=>row.case_id===later.id));
+    assert.equal((await request(laterDoc.download_url,{cookie:sales})).status,200);
   } finally {child.kill();}
 });

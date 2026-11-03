@@ -188,6 +188,16 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
       } else fail(400,'Unknown settings action');
       send(res,200,{ok:true});return true;
     }
+    if(url.pathname==='/api/payments/cash-pending' && req.method==='GET') {
+      if(!['admin','sales'].includes(user.role)) fail(403,'Only sales or admin can view cash balances');
+      const rows=await all(`SELECT ca.case_id,ca.total,c.ref,c.status case_status,c.sales_user_id,cu.name customer_name,cu.mobile customer_mobile,s.name service_name,u.name employee_name,
+        COALESCE(t.paid,0) confirmed_paid,COALESCE(t.awaiting,0) awaiting_verification,
+        (SELECT p.id FROM payments p WHERE p.case_id=c.id AND p.status='AWAITING_VERIFICATION' AND p.gateway!='demo' ORDER BY p.created_at DESC LIMIT 1) review_payment_id
+        FROM cash_accounts ca JOIN cases c ON c.id=ca.case_id JOIN customers cu ON cu.id=c.customer_id JOIN services s ON s.id=c.service_id JOIN users u ON u.id=c.sales_user_id
+        LEFT JOIN (SELECT case_id,SUM(CASE WHEN status IN ('PAID','verified','offline_approved') THEN amount ELSE 0 END) paid,SUM(CASE WHEN status='AWAITING_VERIFICATION' THEN amount ELSE 0 END) awaiting FROM payments WHERE gateway!='demo' GROUP BY case_id) t ON t.case_id=c.id
+        WHERE c.status NOT IN ('Deleted','Cancelled') AND ($admin=1 OR c.sales_user_id=$user) AND COALESCE(t.paid,0)<ca.total ORDER BY c.updated_at DESC`,{$admin:user.role==='admin'?1:0,$user:user.id});
+      send(res,200,{cases:rows.map(row=>({...row,pending_amount:Math.max(0,row.total-row.confirmed_paid),amount_to_pay:Math.max(0,row.total-row.confirmed_paid-row.awaiting_verification)}))});return true;
+    }
     if (url.pathname === '/api/payments' && req.method === 'GET') {
       let rows=await list(null,user);
       // Unsubmitted checkouts stay with sales. Admin still needs submitted UTRs

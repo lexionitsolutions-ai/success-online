@@ -683,6 +683,18 @@ test('backoffice has an explicit case reupload form for open cases and sales can
   run("me.role='backoffice';reuploadCase.status='Closed'");assert.equal(run('caseReuploadForm(reuploadCase)'),'');
 });
 
+test('Cash pending payments shows the remaining balance and payment options without receiver settings',async()=>{
+  const {run}=client();
+  run(`me={id:'sales',role:'sales',cashPaymentsAllowed:true};paymentData={payments:[],metrics:{}};cashPendingData={cases:[{case_id:'case1',ref:'SO-1',sales_user_id:'sales',customer_name:'Client',employee_name:'Mahalaxmi',service_name:'Income Certificate',case_status:'Closed',total:50000,confirmed_paid:30000,pending_amount:20000,amount_to_pay:20000,awaiting_verification:0}]};paymentTab='cashPending';`);
+  const html=run('renderPayments()');
+  assert.match(html,/Cash pending payments/);assert.match(html,/₹200\.00/);assert.match(html,/Pay in cash/);assert.match(html,/with UPI/);
+  assert.doesNotMatch(html,/Receiver &amp; service pricing|Receiver & service pricing/);
+  run("me={role:'admin'}");
+  assert.doesNotMatch(run('renderPayments()'),/Record cash payment/);
+  run("paymentTab='activity';const calls=[];api=async path=>{calls.push(path);return {payments:[],metrics:{}}}");await run('loadPayments()');
+  assert.equal(run("calls.includes('/api/payment-settings')"),false);
+});
+
 test('admin overview skips unrelated analytics requests and loads them on the requested tab', async () => {
   const {run}=client();
   run("me={role:'admin'}; const requested=[];api=async path=>{requested.push(path);return {};};view='dashboard';");
