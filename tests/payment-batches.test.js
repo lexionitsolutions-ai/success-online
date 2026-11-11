@@ -17,7 +17,7 @@ test('combined checkout allocates one verified transfer across cases and protect
     const login=async username=>(await request('/api/login',null,{username,password:'Demo@12345'})).response.headers.get('set-cookie').split(';')[0];
     const admin=await login('admin01'),sales=await login('sales01'),other=await login('sales02'),office=await login('backoffice01');
     await request('/api/payment-settings',admin,{action:'enable-receiver',ownerConfirmed:true});
-    const services=(await request('/api/services',sales)).data.services,variant=services.find(s=>s.slug==='pf-assistance').variants[0];
+    const services=(await request('/api/services',sales)).data.services,variant=services.find(s=>s.slug==='pan').variants[0];
     const create=async(cookie=sales)=>(await request('/api/cases',cookie,{variantId:variant.id,details:pfDetails,customer:{name:'Batch Client',mobile:'9876543210'},consent:true})).data.case;
     const [a,b,c,foreign]=await Promise.all([create(),create(),create(),create(other)]);
     assert.equal((await request('/api/payments/batch',sales,{caseIds:[a.id,foreign.id]})).status,403);
@@ -58,7 +58,7 @@ test('combined checkout allocates one verified transfer across cases and protect
     assert.equal((await search('order',p.id)).data.payments.length,2);
     assert.equal((await search('status','paid')).data.payments.length,2);
     assert.ok((await search('customer','bAtCh cLiEnT')).data.payments.length>=2);
-    assert.ok((await search('service','PF')).data.payments.length>=2);
+    assert.ok((await search('service','PAN')).data.payments.length>=2);
     assert.equal((await search('from','2099-01-01')).data.payments.length,0);
     assert.equal((await search('to','2000-01-01')).data.payments.length,0);
     assert.equal((await search('from','invalid')).status,400);

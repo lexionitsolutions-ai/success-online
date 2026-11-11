@@ -25,7 +25,14 @@ test('a paid case remains hidden until every selected file and optional page is 
     const payload={clientRequestId:randomUUID(),variantId:variant.id,customer:{name:'Background Trial',mobile:'9876543210'},details:pfDetails,consent:true,uploadManifest:manifest};
     const created=await request('/api/cases',{cookie:sales,body:payload});
     assert.equal(created.status,201,JSON.stringify(created.data));
-    const c=created.data.case;
+    let c=created.data.case;
+    // This regression covers paid legacy PF cases created before quote intake.
+    const legacyDb=new DatabaseSync(join(root,'test.sqlite'));
+    const legacy=JSON.parse(legacyDb.prepare('SELECT details_json FROM cases WHERE id=?').get(c.id).details_json);
+    delete legacy._intakeQuote;
+    legacyDb.prepare('UPDATE cases SET details_json=? WHERE id=?').run(JSON.stringify(legacy),c.id);legacyDb.close();
+    await request(`/api/cases/${c.id}/payment-order`,{cookie:sales,method:'POST'});
+    c=(await request(`/api/cases/${c.id}`,{cookie:sales})).data.case;
     assert.equal((await request('/api/cases',{cookie:sales,body:payload})).data.case.id,c.id);
     const db=new DatabaseSync(path);assert.equal(db.prepare('SELECT COUNT(*) n FROM cases').get().n,1);db.close();
     const assertHiddenUnpaid = async () => {

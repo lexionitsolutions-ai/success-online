@@ -7,7 +7,7 @@ const day = value => new Date(Date.parse(value) + 330 * 60000).toISOString().sli
 
 export function staffPerformance({employee, cases, payments, notes, period, now = new Date().toISOString()}) {
   const within = value => !!value && value >= period.start && value < period.end;
-  const paid = payments.filter(p=>paidStatuses.has(p.status) && p.gateway !== 'demo');
+  const paid = payments.filter(p=>paidStatuses.has(p.status) && !['demo','acceptance_test'].includes(p.gateway));
   const paidIds = new Set(paid.map(p=>p.case_id));
   const role = employee.role;
   const owned = cases.filter(c=>paidIds.has(c.id) && c[role === 'sales' ? 'sales_user_id' : 'backoffice_user_id'] === employee.id);

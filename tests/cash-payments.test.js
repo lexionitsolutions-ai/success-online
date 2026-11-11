@@ -28,7 +28,7 @@ test('Mahalaxmi cash instalments forward partial cases but only admin-confirmed 
     assert.equal((await request('/api/me',{cookie:sales})).data.user.cashPaymentsAllowed,true);
     assert.equal((await request('/api/me',{cookie:other})).data.user.cashPaymentsAllowed,false);
     assert.equal(cashAccount({id:'different',username:'7028405101',role:'sales'}),false);
-    const variant=(await request('/api/services',{cookie:sales})).data.services.find(s=>s.slug==='pf-assistance').variants[0];
+    const variant=(await request('/api/services',{cookie:sales})).data.services.find(s=>s.slug==='pan').variants[0];
     assert.equal((await request('/api/admin/pricing',{cookie:admin,body:{salesUserId:CASH_SALES_ID,variantId:variant.id,price:60000}})).status,200);
     const payload={variantId:variant.id,details:pfDetails,customer:{name:'Cash Trial',mobile:'9876543210'},consent:true};
     for(const cookie of [other,admin]) assert.equal((await request('/api/cases',{cookie,body:{...payload,cashPayment:{amount:10000}}})).status,403);

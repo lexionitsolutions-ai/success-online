@@ -283,11 +283,19 @@ function toast(message) {
   setTimeout(() => item.remove(), 3600);
 }
 
+async function openLinkedPayment() {
+  const caseId=new URLSearchParams(location.search).get('pay');
+  if(!caseId) return;
+  history.replaceState({},'',location.pathname);
+  await pay(caseId);
+}
+
 async function boot() {
   try {
     me = (await api('/api/me')).user;
     await load();
     startCaseUpdatePolling();
+    await openLinkedPayment();
     const googleResult = new URLSearchParams(location.search).get('google');
     if (googleResult) {
       history.replaceState({}, '', location.pathname);
@@ -360,15 +368,16 @@ function renderLogin() {
       me = (await api('/api/login', { method: 'POST', body: Object.fromEntries(new FormData(event.target)) })).user;
       await load();
       startCaseUpdatePolling();
+      await openLinkedPayment();
     } catch (error) { errorMessage.textContent=error.message;errorMessage.hidden=false; }
     finally {button.disabled=false;button.textContent='Sign in';}
   };
 }
 
-const navLabels = { dashboard: 'Overview', cases: 'Active Cases', pending: 'Pending Cases', completed: 'Completed Cases', payments: 'Payments', queue: 'Operations', admin: 'Business analytics', employees: 'Employees', pricing: 'Pricing',salesPerformance:'Sales Performance',backofficePerformance:'Backoffice Performance' };
+const navLabels = { dashboard: 'Overview', cases: 'Active Cases', pending: 'Pending Cases', completed: 'Completed Cases', payments: 'Payments', queue: 'Operations', admin: 'Business analytics', employees: 'Employees', pricing: 'Pricing',quotes: 'Case Review & Quotes',salesPerformance:'Sales Performance',backofficePerformance:'Backoffice Performance' };
 
 function shell(content) {
-  const links = ['dashboard','cases','pending','completed','payments','queue','admin','salesPerformance','backofficePerformance','employees','pricing']
+  const links = ['dashboard','cases','pending','completed','quotes','payments','queue','admin','salesPerformance','backofficePerformance','employees','pricing']
     .filter(item => item !== 'queue' || me.role !== 'sales')
 
     .filter(item => !['admin','employees','pricing','salesPerformance','backofficePerformance'].includes(item) || me.role === 'admin');
@@ -397,7 +406,7 @@ function shell(content) {
 function render() {
   if (!me) return renderLogin();
   caseListNeedsRender = false;
-  const content = view === 'salesPerformance' ? renderPerformance('sales') : view === 'backofficePerformance' ? renderPerformance('backoffice') : view === 'pending' ? renderPendingCases() : view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : view === 'pricing' ? renderPricing() : renderDashboard();
+  const content = view === 'quotes' ? renderQuotes() : view === 'salesPerformance' ? renderPerformance('sales') : view === 'backofficePerformance' ? renderPerformance('backoffice') : view === 'pending' ? renderPendingCases() : view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : view === 'pricing' ? renderPricing() : renderDashboard();
   app.innerHTML = shell(content);
   labelTables();
   renderBackgroundUploads();
@@ -425,11 +434,11 @@ function counts() { return cases.reduce((result, item) => { result[item.status] 
 const isCompletedCase = item => ['Closed','Delivered'].includes(item.status);
 
 const isPaymentConfirmed = item => item.cashPayment ? item.cashPayment.processingAllowed : item.payment?.gateway !== 'demo' && ['paid','PAID','verified','offline_approved'].includes(item.payment?.status || item.payment_state);
-const isPendingCase = item => !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && (!isPaymentConfirmed(item) || item.document_state !== 'complete');
+const isPendingCase = item => !(item.quote?.submittedAt && !isPaymentConfirmed(item)) && !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && (!isPaymentConfirmed(item) || item.document_state !== 'complete');
 const isActiveCase = item => !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && isPaymentConfirmed(item) && item.document_state === 'complete';
 function notificationSection(notice) {
   const item = cases.find(item => item.id === notice.caseId) || {status:notice.status};
-  return isCompletedCase(item) ? 'completed' : isPendingCase(item) ? 'pending' : 'cases';
+  return item.quote && !isPaymentConfirmed(item) ? 'quotes' : isCompletedCase(item) ? 'completed' : isPendingCase(item) ? 'pending' : 'cases';
 }
 function hasSectionUpdates(section) { return caseNotifications.some(notice => notificationSection(notice) === section); }
 function updateCaseIndicators() {
@@ -599,10 +608,10 @@ function caseToolbar(rows, completed) {
 
 function caseTable(rows, completed = false) {
   return `<table class="table case-table"><thead><tr><th>Case</th><th>Customer</th><th>Services</th><th>Status</th><th>Payment</th><th>Owner</th><th>Updated</th>${completed ? '<th>Download file</th>' : ''}${me?.role==='sales'?'<th>Delete case</th>':''}</tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
-    <td><strong><button class="case-link" onclick="event.stopPropagation();openCase('${item.id}')" aria-label="Open case ${h(item.ref)}"><i class="case-update-dot" data-case-update="${item.id}" ${caseNotifications.some(notice => notice.caseId === item.id) ? '' : 'hidden'} title="Unread case update" aria-hidden="true"></i>${h(item.ref)}</button></strong><small>${h(item.priority)}</small></td>
+    <td><strong><button class="case-link" onclick="event.stopPropagation();openCase('${item.id}')" aria-label="Open case ${h(item.ref)}"><i class="case-update-dot" data-case-update="${item.id}" ${caseNotifications.some(notice => notice.caseId === item.id) ? '' : 'hidden'} title="Unread case update" aria-hidden="true"></i>${h(item.ref)}</button></strong><small>${item.syntheticTest ? 'SYNTHETIC TEST ? No payment required' : h(item.priority)}</small></td>
     <td><strong>${h(item.customer.name)}</strong><small>${h(item.customer.mobile.replace(/\d(?=\d{4})/g, 'x'))}</small></td>
     <td>${h(item.service.name)}<small>${h(item.variant.name)}</small></td>
-    <td>${statusBadge(item.status)}</td><td>${statusBadge(item.payment?.status || item.payment_state)}<small>${money(item.amounts.total)}</small><small>${h(item.payment?.gateway_order_id || '')}</small></td>
+    <td>${statusBadge(item.status)}${item.quote && !item.quote.submittedAt && item.uploads ? `<small>${item.uploads.completed} / ${item.uploads.total} files saved${item.pendingUploads?.length ? ' ? Uploads need attention' : ''}</small>` : ''}</td><td>${statusBadge(item.payment?.status || item.payment_state)}<small>${item.quote && !item.quote.amount ? 'Price after review' : money(item.amounts.total)}</small>${item.quote?.amount && !isPaymentConfirmed(item) && ['sales','admin'].includes(me.role) ? `<a href="/?pay=${encodeURIComponent(item.id)}" onclick="event.stopPropagation();event.preventDefault();pay('${item.id}')">Pay ${money(item.quote.amount)}</a>` : ''}<small>${h(item.payment?.gateway_order_id || '')}</small></td>
     <td>${h(item.backoffice?.name || 'Unassigned')}</td><td>${dateTime(item.updated_at)}</td>
     ${completed ? `<td class="completed-download-cell">${item.received_document ? `<a class="completed-download" href="${h(item.received_document.download_url)}" download onclick="event.stopPropagation()" aria-label="Download completed document for ${h(item.ref)}">${icon('download')}<span>Download</span></a>` : item.cashPayment && !item.cashPayment.releaseAllowed ? `<button class="quiet" onclick="event.stopPropagation();openCase('${item.id}')">Pay pending amount</button>` : '<span class="muted">Not available</span>'}</td>` : ''}
     ${me?.role==='sales'?`<td class="case-delete-cell" onclick="event.stopPropagation()"><button class="case-delete-button" onclick="deleteSalesCase('${item.id}',this)" ${item.deletionAllowed===true && item.sales?.id===me.id?'':'disabled title="Cases with recorded payments cannot be deleted"'} aria-label="Delete case ${h(item.ref)}">Delete</button></td>`:''}
@@ -752,9 +761,9 @@ function renderEmployees() {
   const rows = employeeData?.employees || [];
   const table = role => {
     const staff = rows.filter(item => item.role === role);
-    return staff.length ? `<div class="table-shell"><table class="table"><thead><tr><th>Employee</th>${role === 'sales' ? '<th>New cases</th><th>Collections</th>' : '<th>Cases handled</th>'}<th>Completed</th><th>Avg. turnaround</th><th>Current active</th><th>Current overdue</th></tr></thead><tbody>${staff.map(item => `<tr><td><strong>${h(item.name)}</strong><small>${h(item.username)} · ${item.active ? 'Active' : 'Inactive'}</small></td>${role === 'sales' ? `<td>${number(item.cases)}</td><td>${money(item.collected)}</td>` : `<td>${number(item.handled)}</td>`}<td>${number(item.completed)}</td><td>${item.turnaround === null ? '—' : `${number(item.turnaround)} days`}</td><td>${number(item.activeCases)}</td><td>${number(item.overdue)}</td></tr>`).join('')}</tbody></table></div>` : empty('No employees in this role.');
+    return staff.length ? `<div class="table-shell"><table class="table"><thead><tr><th>Employee</th>${role === 'sales' ? '<th>New cases</th><th>Collections</th>' : '<th>Cases handled</th>'}<th>Completed</th><th>Avg. turnaround</th><th>Current active</th><th>Current overdue</th><th>Manage account</th></tr></thead><tbody>${staff.map(item => `<tr><td><strong>${h(item.name)}</strong><small>${h(item.username)} · ${item.active ? 'Active' : 'Inactive'}</small></td>${role === 'sales' ? `<td>${number(item.cases)}</td><td>${money(item.collected)}</td>` : `<td>${number(item.handled)}</td>`}<td>${number(item.completed)}</td><td>${item.turnaround === null ? '—' : `${number(item.turnaround)} days`}</td><td>${number(item.activeCases)}</td><td>${number(item.overdue)}</td><td><button type="button" onclick="editEmployee('${item.id}')">Edit / reset password</button><button type="button" class="quiet" onclick="deleteEmployee('${item.id}',this)">Delete</button></td></tr>`).join('')}</tbody></table></div>` : empty('No employees in this role.');
   };
-  return `${pageHead('Employees', 'Review sales and back-office performance and create staff accounts.')}
+  return `${pageHead('Employees', 'Manage sales and back-office accounts, credentials and performance.')}
     <form class="employee-filters" onsubmit="applyEmployeePeriod(event)"><label>Review period<select id="employeePeriod" onchange="toggleEmployeeDates(this.value)">${[['week','Last 7 days'],['month','This month'],['quarter','This quarter'],['year','This year'],['all','All time'],['custom','Custom dates']].map(([key,label]) => `<option value="${key}" ${key === employeePeriod ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="employee-date" ${employeePeriod !== 'custom' ? 'hidden' : ''}>From<input id="employeeFrom" type="date" value="${h(employeeFrom)}" ${employeePeriod === 'custom' ? 'required' : ''}></label><label class="employee-date" ${employeePeriod !== 'custom' ? 'hidden' : ''}>Through<input id="employeeTo" type="date" value="${h(employeeTo)}" ${employeePeriod === 'custom' ? 'required' : ''}></label><button class="primary">Review performance</button></form>
     <details class="metric-help"><summary>How performance is measured</summary><p class="muted">New cases, collections, handled cases and completions use the selected period. Active and overdue counts show current workload. Turnaround is measured from case creation to completion. Custom dates include the whole end date in India time.</p></details>
     <section class="section-head"><h2>Sales employees</h2></section>${table('sales')}
@@ -797,6 +806,31 @@ async function createEmployee(event) {
   finally { button.disabled = false; button.textContent = 'Create employee'; }
 }
 
+function editEmployee(employeeId) {
+  if(me?.role!=='admin' || drawerBusy) return;
+  const employee=employeeData?.employees.find(item=>item.id===employeeId);if(!employee) return;
+  document.body.insertAdjacentHTML('beforeend',`<div class="drawer" id="drawer"><div class="panel"><div class="drawer-head"><div><p class="eyebrow">${h(roleName(employee.role))}</p><h2>Edit staff account</h2></div><button class="quiet" onclick="closeDrawer()">Close</button></div><form onsubmit="saveEmployee(event,'${employee.id}')"><div class="formgrid"><label>Full name<input name="name" value="${h(employee.name)}" oninput="removeNameNumbers(this)" required maxlength="100"></label><label>Login / mobile number<input name="username" value="${h(employee.username)}" required pattern="[A-Za-z0-9._-]{3,50}" minlength="3" maxlength="50" autocomplete="off"></label><label>New password<input name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password"><small>Leave blank to keep the existing password.</small></label><label>Account status<select name="active"><option value="1" ${employee.active?'selected':''}>Active</option><option value="0" ${employee.active?'':'selected'}>Inactive</option></select></label></div><p>Saving account changes signs this employee out of existing sessions.</p><p role="alert" id="staffEditError"></p><div class="form-actions"><button type="button" onclick="closeDrawer()">Cancel</button><button class="primary">Save account changes</button></div></form></div></div>`);
+}
+async function saveEmployee(event,employeeId) {
+  event.preventDefault();if(me?.role!=='admin' || drawerBusy) return;
+  const form=event.target,body=Object.fromEntries(new FormData(form));body.active=Number(body.active);
+  setDrawerBusy('Updating staff account…');
+  try {
+    const result=await api(`/api/admin/employees/${employeeId}`,{method:'PATCH',body});
+    setDrawerBusy();closeDrawer();
+    if(employeeData) employeeData.employees=employeeData.employees.map(item=>item.id===employeeId?{...item,...result.employee}:item);
+    pricingData=null;render();toast('Staff account updated. Existing sessions have been signed out.');
+  } catch(error) {const message=document.querySelector('#staffEditError');if(message)message.textContent=error.message;else toast(error.message);} finally {setDrawerBusy();}
+}
+async function deleteEmployee(employeeId,button) {
+  if(me?.role!=='admin' || drawerBusy) return;
+  const employee=employeeData?.employees.find(item=>item.id===employeeId);if(!employee) return;
+  if(!window.confirm(`Delete ${employee.name}'s staff account? Sign-in will stop immediately. Existing cases and payment history will be retained for admin.`)) return;
+  button.disabled=true;
+  try {await api(`/api/admin/employees/${employeeId}`,{method:'DELETE'});employeeData.employees=employeeData.employees.filter(item=>item.id!==employeeId);pricingData=null;render();toast('Staff account deleted. Case and payment history retained.');}
+  catch(error) {toast(error.message);button.disabled=false;}
+}
+Object.assign(window,{editEmployee,saveEmployee,deleteEmployee});
 function servicePerformance(rows) {
   const max = Math.max(1, ...rows.map(item => Number(item.cases || 0)));
   return `<div class="service-list">${rows.map(item => `<div><div class="service-line"><span>${h(item.name)}</span><strong>${number(item.cases)} cases</strong></div><div class="bar-track"><i style="width:${Math.max(3, item.cases / max * 100)}%"></i></div><small>${money(item.collected)} collected</small></div>`).join('')}</div>`;
@@ -860,7 +894,7 @@ function drawWizard() {
 function cashReviewOptions(amount) {
     if(!me?.cashPaymentsAllowed) return '';
   const cash=draft.paymentMethod==='cash',paid=Math.round(Number(draft.cashAmount || 0)*100);
-  return `<section class="cash-review-panel"><h3>Payment method</h3><p>Mahalaxmi Online Services can pay online or record cash payments.</p><label>Choose payment method<select onchange="setCashReviewMethod(this.value)"><option value="online" ${cash?'':'selected'}>Pay online</option><option value="cash" ${cash?'selected':''}>Pay in cash</option></select></label>${cash?`<label>Cash amount paid (₹)<input id="reviewCashAmount" type="number" min="0.01" step="0.01" max="${(amount.total/100).toFixed(2)}" value="${h(draft.cashAmount || '')}" oninput="updateReviewCash(this.value,${amount.total})" placeholder="Enter cash received"></label><dl class="cash-payment-totals"><div><dt>Amount paid in cash</dt><dd id="reviewCashPaid">${money(paid)}</dd></div><div><dt>Pending amount</dt><dd id="reviewCashPending">${money(Math.max(0,amount.total-paid))}</dd></div><div><dt>Total</dt><dd>${money(amount.total)}</dd></div></dl><p>A positive cash payment allows processing after documents finish uploading. Admin must confirm the full payment before the completed document can be received.</p>`:''}</section>`;
+  return `<section class="cash-review-panel"><h3>Payment method</h3><p>Success Online Main Branch can pay online or record cash payments.</p><label>Choose payment method<select onchange="setCashReviewMethod(this.value)"><option value="online" ${cash?'':'selected'}>Pay online</option><option value="cash" ${cash?'selected':''}>Pay in cash</option></select></label>${cash?`<label>Cash amount paid (₹)<input id="reviewCashAmount" type="number" min="0.01" step="0.01" max="${(amount.total/100).toFixed(2)}" value="${h(draft.cashAmount || '')}" oninput="updateReviewCash(this.value,${amount.total})" placeholder="Enter cash received"></label><dl class="cash-payment-totals"><div><dt>Amount paid in cash</dt><dd id="reviewCashPaid">${money(paid)}</dd></div><div><dt>Pending amount</dt><dd id="reviewCashPending">${money(Math.max(0,amount.total-paid))}</dd></div><div><dt>Total</dt><dd>${money(amount.total)}</dd></div></dl><p>A positive cash payment allows processing after documents finish uploading. Admin must confirm the full payment before the completed document can be received.</p>`:''}</section>`;
 }
 function setCashReviewMethod(method) {draft.paymentMethod=method;rerenderWizard();}
 function updateReviewCash(value,total) {
@@ -877,10 +911,11 @@ function wizardBody(service, variant) {
     const missing = docs.filter(item => item.required && !draft.docs[item.label]);
     return `<p class="muted">${docs.filter(item => item.required).length - missing.length} of ${docs.filter(item => item.required).length} required documents selected. Upload every required document to continue.</p><div class="upload-list">${wizardDocumentUploads(service, docs)}</div><div class="form-actions"><button class="quiet" onclick="wizardBack(2)">Back</button><button class="primary" onclick="saveStep3()" ${missing.length ? 'disabled' : ''}>Continue</button></div>`;
   }
+  const needsQuote=['passport','pf-assistance','ration-card'].includes(service?.slug);
   const baseAmount = variant?.amounts || { serviceCharge:0, officialFee:0, tax:0, total:0 };
-  const amount = ['income-certificate','domicile-certificate'].includes(service?.slug) ? IntakeRules.withSurcharge(baseAmount, draft.details) : baseAmount;
+  const amount = needsQuote ? {serviceCharge:0,officialFee:0,tax:0,total:0} : ['income-certificate','domicile-certificate'].includes(service?.slug) ? IntakeRules.withSurcharge(baseAmount, draft.details) : baseAmount;
   const pages = Object.values(draft.docs).reduce((count,doc) => count + (doc.pages?.length || 1), 0);
-  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your case.</p></div></header><div class="intake-review-card"><div class="intake-review-service"><span>Selected services</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(variant?.fields?.find(field => field.label === label)?.sensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge${amount.surcharge ? ` (includes \u20B9200 ${service.slug === 'domicile-certificate' ? 'affidavit fee' : 'Talathi surcharge'})` : ''}</span><strong>${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div><div class="intake-review-total"><span>Total payable</span><strong>${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div>${cashReviewOptions(amount)}<label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button><button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button></div>`;
+  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your case.</p></div></header><div class="intake-review-card"><div class="intake-review-service"><span>Selected services</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(variant?.fields?.find(field => field.label === label)?.sensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge${amount.surcharge ? ` (includes \u20B9200 ${service.slug === 'domicile-certificate' ? 'affidavit fee' : 'Talathi surcharge'})` : ''}</span><strong>${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div><div class="intake-review-total"><span>Total payable</span><strong>${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div>${needsQuote ? '<p>Back office will review your documents and send a payment request with the final case price.</p>' : cashReviewOptions(amount)}<label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button>${needsQuote ? `<button class="primary" onclick="submitCase('review')">Submit to back office</button>` : `<button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button>`}</div>`;
 }
 
 function documentTemplateLink(item) {
@@ -918,6 +953,7 @@ function bindWizard() {
   const update = () => {
     const service = services.find(item => item.id === serviceSelect.value);
     if (!service) {
+      document.querySelector('#requestVariant')?.remove();
       draft.serviceId = '';
       draft.variantId = '';
       document.querySelector('#serviceFields').innerHTML = '';
@@ -925,6 +961,13 @@ function bindWizard() {
       return;
     }
     const variant = service.variants.find(item => item.id === draft.variantId) || service.variants[0];
+    const selector=document.querySelector('#requestVariant');
+    if(selector) selector.remove();
+    if(service.variants.length>1) {
+      serviceSelect.closest('label').insertAdjacentHTML('afterend',`<label id="requestVariant">Request type<select>${service.variants.map(v=>`<option value="${h(v.id)}" ${v.id===variant.id?'selected':''}>${h(v.name)}</option>`).join('')}</select></label>`);
+      document.querySelector('#requestVariant select').onchange=event=>{collectFields();draft.variantId=event.target.value;const selected=service.variants.find(v=>v.id===draft.variantId);for(const f of selected.fields.filter(f=>f.options?.length===1))draft.details[f.label]=f.options[0];update();};
+    }
+    for(const f of variant.fields.filter(f=>f.options?.length===1)) draft.details[f.label]=f.options[0];
     draft.serviceId = service.id;
     draft.variantId = variant.id;
     for (const field of variant.fields || []) {
@@ -1252,9 +1295,10 @@ async function runUploadJob(id) {
     if(failure)throw failure;
     const result=await api(`/api/cases/${job.id}/finish-uploads`,{method:'POST',body:{}});
     if(!result.case?.uploads?.complete)throw new Error('Uploads have not been confirmed. Retry to finish this case.');
+    if(job.submitReview) await api(`/api/cases/${job.id}/submit-review`,{method:'POST',body:{}});
     await deleteUploadJob(job.id);
     uploadJobs.delete(job.id);
-    toast(`All documents uploaded for ${job.ref}. The case reaches operations after payment is verified.`);
+    toast(job.submitReview ? `Documents for ${job.ref} submitted to back office for pricing.` : `All documents uploaded for ${job.ref}. The case reaches operations after payment is verified.`);
     void refreshCaseUpdates();
   } catch(error) {
     if(job.cancelled) return;
@@ -1275,8 +1319,10 @@ async function submitCase(nextAction='pay') {
   if (drawerBusy || draft.submitting) return;
   if (!document.querySelector('#consent').checked) return toast('Please confirm customer consent');
   if (draftMissing().length) return toast('Upload all required documents to continue');
-  if(me.cashPaymentsAllowed && draft.paymentMethod==='cash' && (!Number.isFinite(Number(draft.cashAmount)) || Number(draft.cashAmount)<=0)) return toast('Enter the cash amount received to continue.');
+  if(!['passport','pf-assistance','ration-card'].includes(services.find(s=>s.id===draft.serviceId)?.slug) && me.cashPaymentsAllowed && draft.paymentMethod==='cash' && (!Number.isFinite(Number(draft.cashAmount)) || Number(draft.cashAmount)<=0)) return toast('Enter the cash amount received to continue.');
   const intake = draft;
+  const needsQuote=['passport','pf-assistance','ration-card'].includes(services.find(s=>s.id===intake.serviceId)?.slug);
+  if(needsQuote) {intake.paymentMethod='online';nextAction='review';}
   intake.submitting = true;
   setDrawerBusy('Saving case...');
   try {
@@ -1288,14 +1334,15 @@ async function submitCase(nextAction='pay') {
     await openUploadQueueDB();
     const created = intake.createdCase || (await api('/api/cases',{method:'POST',body:{customer:intake.customer,variantId:intake.variantId,details:intake.details,consent:true,clientRequestId:intake.clientRequestId,uploadManifest,...(me.cashPaymentsAllowed && intake.paymentMethod==='cash'?{cashPayment:{amount:Math.round(Number(intake.cashAmount)*100)}}:{})}})).case;
     intake.createdCase = created;
-    const job = {id:created.id,ref:created.ref,ownerId:me.id,files,cloud:cloudUploads,state:'queued'};
+    const job = {id:created.id,ref:created.ref,ownerId:me.id,files,submitReview:needsQuote,cloud:cloudUploads,state:'queued'};
     await saveUploadJob(job);
     uploadJobs.set(job.id,job);
     setDrawerBusy(); closeDrawer();
     toast(`Created ${created.ref}. Documents are uploading in the background.`);
     void runUploadJob(job.id);
     void refreshCaseUpdates();
-    if (nextAction==='another') startCase();
+    if(nextAction==='review') await setView('quotes');
+    else if (nextAction==='another') startCase();
     else if (nextAction==='later') await setView('payments');
     else if(created.cashPayment) await openCase(created.id);
     else await pay(created.id);
@@ -1544,7 +1591,68 @@ function cashReceiptHTML(p) {
   return `<div class="cash-receipt-layout"><div class="drawer-head"><div><p class="eyebrow">Cash payment</p><h2>${money(p.amount)}</h2><p>${h(p.customer_name)} · ${h(p.case_ref)}</p></div><button class="quiet" onclick="closeDrawer()">Close</button></div><section class="detail-section"><h3>${p.status==='PAID'?'Cash receipt confirmed':p.status==='AWAITING_VERIFICATION'?'Awaiting admin confirmation':h(p.status)}</h3><p>Cash recorded for ${h(p.service_name)}. Confirm only money actually received. The completed document is released after the entire balance is confirmed.</p><p>Recorded: ${dateTime(p.created_at)}</p>${p.verified_at?`<p>Confirmed: ${dateTime(p.verified_at)}</p>`:''}${me.role==='admin' && p.status==='AWAITING_VERIFICATION'?`<button class="primary" onclick="paymentAction('verify',{})">Confirm cash received</button><form class="cash-balance-form" onsubmit="rejectCashReceipt(event)"><label>Reason to reject<input name="notes" required maxlength="1000"></label><button>Reject cash entry</button></form>`:''}${p.status==='PAID'?'<button onclick="downloadReceipt()">Download receipt</button>':''}<button class="quiet" onclick="closeDrawer();openCase('${p.case_id}')">Return to case / balance</button></section></div>`;
 }
 function rejectCashReceipt(event) {event.preventDefault();return paymentAction('reject',{notes:event.target.elements.notes.value});}
+const isQuoteService=item=>['passport','pf-assistance','ration-card'].includes(item.service?.slug) || ['Passport','PF Working (Provident Fund)','Ration Card'].includes(item.service?.name);
+function renderQuotes() {
+  const rows=cases.filter(item=>isQuoteService(item) && item.quote && !isPaymentConfirmed(item) && !['Cancelled','Deleted'].includes(item.status));
+  return `${pageHead('Case Review & Quotes',me.role==='sales' ? 'Track document review and open the payment request after back office confirms the case price.' : 'Review Passport, PF Working and Ration Card documents, then send the final price to sales.')}<div class="table-shell">${rows.length ? caseTable(rows) : empty('No cases awaiting review or quoted payment.')}</div>`;
+}
+function intakeRecoveryPanel(item) {
+  if(!['sales','admin'].includes(me.role) || !item.uploads || item.uploads.complete) return '';
+  return `<aside class="intake-upload-recovery"><h4>Complete saved document uploads</h4><p>${item.uploads.completed} of ${item.uploads.total} selected files saved. This case stays visible to sales while uploads finish. Select any missing files below, or retry the background upload queue.</p>${(item.pendingUploads || []).map(file=>`<label>${h(file.docType)}<small>Previously selected: ${h(file.fileName)}</small><input type="file" accept="image/jpeg,image/png,application/pdf" onchange="resumeCaseUpload('${item.id}','${file.key}',this)"></label>`).join('')}${!item.pendingUploads?.length ? `<button onclick="finishSavedIntake('${item.id}')">Finish uploads & submit to back office</button>` : ''}</aside>`;
+}
+async function finishSavedIntake(caseId) {
+  if(drawerBusy) return;
+  setDrawerBusy('Finalizing saved uploads…');
+  try {await api(`/api/cases/${caseId}/finish-uploads`,{method:'POST',body:{}});const result=await api(`/api/cases/${caseId}/submit-review`,{method:'POST',body:{}});setDrawerBusy();renderSavedCase(result);void refreshCaseUpdates();toast('Documents submitted to back office.');} catch(error){toast(error.message);} finally {setDrawerBusy();}
+}
+async function resumeCaseUpload(caseId,key,input) {
+  const file=input.files?.[0];if(!file || drawerBusy) return;
+  try {validateFile(file);} catch(error){toast(error.message);return;}
+  setDrawerBusy('Resuming saved document upload…');
+  try {
+    const job=uploadJobs.get(caseId);if(job)job.cancelled=true;
+    uploadJobs.delete(caseId);await deleteUploadJob(caseId);renderBackgroundUploads();
+    const slot=await api(`/api/cases/${caseId}/resume-upload`,{method:'POST',body:{key,fileName:file.name,mimeType:file.type,size:file.size}});
+    await uploadDocument(caseId,slot.file.docType,{fileName:file.name,mimeType:file.type,size:file.size,...(cloudUploads?{file}:{content:await fileAsBase64(file)})},{uploadKey:slot.file.key});
+    let result=await api(`/api/cases/${caseId}`);
+    if(!result.case.pendingUploads.length) {
+      await api(`/api/cases/${caseId}/finish-uploads`,{method:'POST',body:{}});
+      result=await api(`/api/cases/${caseId}/submit-review`,{method:'POST',body:{}});
+    }
+    setDrawerBusy();renderSavedCase(result);void refreshCaseUpdates();toast(result.case.quote?.submittedAt?'Documents submitted to back office.':'File saved. Complete the remaining uploads.');
+  } catch(error) {toast(error.message);const result=await api(`/api/cases/${caseId}`).catch(()=>null);if(result){setDrawerBusy();renderSavedCase(result);}} finally {setDrawerBusy();}
+}
+function backofficeRemarks(item,notes) {
+  const remarks=notes.filter(note=>{try{return JSON.parse(note.next_action || '{}').type==='backoffice_remark';}catch{return false;}});
+  return `<section class="detail-section backoffice-remarks"><h3>Back-office remarks</h3><p>Case assessment, document feedback and reasons for the quoted charges. Visible to sales and back office.</p>${item.quote.reason ? `<p><strong>Pricing remarks</strong><br>${h(item.quote.reason)}</p>` : ''}${remarks.map(note=>`<article><p>${h(note.note)}</p><small>${h(note.actor)} · ${dateTime(note.created_at)}</small></article>`).join('') || '<p class="muted">No additional remarks yet.</p>'}${['admin','backoffice'].includes(me.role) && item.quote.submittedAt && !['Closed','Delivered','Cancelled','Rejected'].includes(item.status) ? `<form class="quote-review-form" onsubmit="saveBackofficeRemark(event,'${item.id}')"><label>Add remark<textarea name="remark" required maxlength="2000" rows="3" placeholder="Explain document requirements, urgency or charges"></textarea></label><button class="primary">Send remark to sales</button></form>` : ''}</section>`;
+}
+async function saveBackofficeRemark(event,caseId) {
+  event.preventDefault();if(drawerBusy) return;
+  const remark=event.target.elements.remark.value.trim();if(!remark)return;
+  setDrawerBusy('Saving remark…');
+  try{const result=await api(`/api/cases/${caseId}/remark`,{method:'POST',body:{remark}});setDrawerBusy();renderSavedCase(result);void refreshCaseUpdates();toast('Remark sent to sales.');}catch(error){toast(error.message);}finally{setDrawerBusy();}
+}
+Object.assign(window,{resumeCaseUpload,finishSavedIntake,saveBackofficeRemark});
+function quoteReviewPanel(item) {
+  const quote=item.quote;
+  const ready=item.document_state==='complete' && (!item.uploads || item.uploads.complete);
+  return `<section class="detail-section"><h3>Back-office review & pricing</h3>${intakeRecoveryPanel(item)}<p>${quote.submittedAt ? 'Documents submitted. Back office will confirm the final price after review.' : 'Upload all documents, then submit the case to back office. Payment follows review.'}</p>${!quote.submittedAt && ['sales','admin'].includes(me.role) ? `<button class="primary" onclick="submitQuoteReview('${item.id}')" ${ready?'':'disabled'}>Submit to back office</button>` : ''}${quote.submittedAt && ['backoffice','admin'].includes(me.role) && item.status==='Awaiting Back Office Review' ? `<form class="quote-review-form" onsubmit="sendCaseQuote(event,'${item.id}')"><label>Final total payable (₹)<input name="amount" type="number" min="0.01" max="1000000" step="0.01" required></label><label>Pricing remarks ? why this amount is chargeable<textarea name="reason" maxlength="1000" required placeholder="Explain the selected service, urgency or changes covered by this total"></textarea></label><button class="primary" ${ready?'':'disabled'}>Send quote & payment request</button></form>` : ''}</section>`;
+}
+async function submitQuoteReview(caseId) {
+  if(drawerBusy) return;
+  setDrawerBusy('Submitting for review…');
+  try {const result=await api(`/api/cases/${caseId}/submit-review`,{method:'POST',body:{}});setDrawerBusy();renderSavedCase(result);void refreshCaseUpdates();toast('Submitted to back office for review and pricing.');} catch(error) {toast(error.message);} finally {setDrawerBusy();}
+}
+async function sendCaseQuote(event,caseId) {
+  event.preventDefault();if(drawerBusy) return;
+  const form=event.target,amount=Math.round(Number(form.elements.amount.value)*100),reason=form.elements.reason.value.trim();
+  setDrawerBusy('Sending quote…');
+  try {const result=await api(`/api/cases/${caseId}/set-quote`,{method:'POST',body:{amount,reason}});setDrawerBusy();renderSavedCase(result);void refreshCaseUpdates();toast('Quote and payment request sent to sales.');} catch(error) {toast(error.message);} finally {setDrawerBusy();}
+}
+Object.assign(window,{submitQuoteReview,sendCaseQuote});
 function casePaymentCard(item) {
+  if(item.quote && !item.quote.amount) return quoteReviewPanel(item);
+
   if(item.cashPayment) return cashCasePanel(item);
   const payment=item.payment, raw=payment?.status || item.payment_state;
   const paid=['PAID','paid','verified','offline_approved'].includes(raw) && payment?.gateway!=='demo';
@@ -1576,14 +1684,17 @@ function caseDetail(item, documents, notes) {
   const intakeDetails = Object.entries(item.details || {}).filter(([, value]) => value).map(([label, value]) => `<div><span>${h(label)}</span><strong${label === 'Password' ? ' class="pf-password-value"' : ''}>${h(value)}</strong>${label === 'Password' && (me.role === 'admin' || (me.role === 'backoffice' && item.backoffice?.id === me.id)) ? `<button type="button" class="quiet" onclick="togglePFPassword('${item.id}',this)">Show password</button>` : ''}</div>`).join('');
   const priced = item.amounts.total > 0;
   return `<div class="drawer-head"><div><p class="eyebrow">${h(item.ref)}</p><h2>${h(item.customer.name)}</h2><p>${h(item.service.name)} · ${h(item.variant.name)}</p></div><button class="quiet" onclick="closeDrawer()">Close</button></div>
+    ${item.syntheticTest ? '<aside class="correction-notice"><strong>Synthetic acceptance test</strong><p>No real money has been received. Do not pay or submit this test case to a government portal.</p></aside>' : ''}
     <div class="case-summary"><div><span>Status</span>${statusBadge(item.status)}</div><div><span>Payment</span>${statusBadge(item.payment_state)}</div><div><span>${priced ? 'Total' : 'Price'}</span><strong>${priced ? money(item.amounts.total) : 'To be confirmed'}</strong></div><div><span>Owner</span><strong>${h(item.backoffice?.name || 'Unassigned')}</strong></div></div>
     ${intakeDetails ? `<section class="detail-section"><div class="panel-title"><div><h3>Application details</h3><p>Information collected for this service request.</p></div></div><div class="review">${intakeDetails}</div></section>` : ''}
     ${item.status === 'Correction Required' ? `<section class="correction-notice"><strong>Returned to sales for correction</strong><p>${h(notes.filter(note => note.new_status === 'Correction Required').at(-1)?.note || 'Review the case timeline and update the requested documents.')}</p></section>` : ''}
+    ${item.quote?.amount ? `<section class="detail-section"><h3>Back-office quote: ${money(item.quote.amount)}</h3><p>${h(item.quote.reason)}</p>${['sales','admin'].includes(me.role) ? `<a href="/?pay=${encodeURIComponent(item.id)}">Open payment link</a>` : ''}</section>` : ''}
     ${casePaymentCard(item)}
+    ${item.quote ? backofficeRemarks(item,notes) : ''}
     <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div><div class="document-section-actions">${canRequestReupload(item)?'<button type="button" class="request-reupload-button" onclick="showCaseReuploadRequest()">Request reupload</button>':''}${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div></div>${caseReuploadForm(item)}<div class="upload-list">${documentChecklist(item, documents)}</div>${reuploadSubmissionPanel(item)}</section>
     ${receivedDocumentPanel(item, documents)}
     <section class="detail-section"><div class="panel-title"><div><h3>Timeline</h3><p>Recorded status changes and internal notes.</p></div></div><div class="timeline">${notes.length ? notes.map(note => `<div><i></i><span><strong>${h(statusLabel(note.new_status))}</strong><p>${h(note.note || 'Status updated')}</p><small>${h(note.actor)} · ${dateTime(note.created_at)}</small></span></div>`).join('') : empty('No updates yet.')}</div></section>
-    ${me.role === 'backoffice' && isPaymentConfirmed(item) && item.status === 'Ready for Assignment' ? `<div class="sticky-actions"><button class="primary" onclick="claim('${item.id}')">Claim case</button></div>` : ''}
+    ${me.role === 'backoffice' && isActiveCase(item) && !item.backoffice && ['Ready for Assignment','Assigned','Document Review','Ready to Submit','Submitted to Official Portal','Under Government Review','Customer Action Required','Document Received','Correction Required','Approved'].includes(item.status) ? `<div class="sticky-actions"><button class="primary" onclick="claim('${item.id}')">Claim case</button></div>` : ''}
     ${['backoffice','admin'].includes(me.role) ? progressControls(item) : ''}`;
 }
 
@@ -1790,9 +1901,9 @@ function renderPricing() {
   if (pricingError) return `${head}<section class="analytics-panel"><p role="alert">Could not load pricing: ${h(pricingError)}</p><button class="primary" onclick="loadPricing()">Retry</button></section>`;
   if (!pricingData) return head + empty('Loading pricing...');
   const selected = pricingData.salespeople.find(person => person.id === pricingSalesId);
-  return `${head}<section class="analytics-panel pricing-panel"><label class="pricing-salesperson">Salesperson<select id="pricingSalesperson" onchange="selectPricingSalesperson(this.value)"><option value="">Choose a salesperson...</option>${pricingData.salespeople.map(person=>`<option value="${h(person.id)}" ${person.id===pricingSalesId?'selected':''}>${h(person.name)} (${h(person.username)})${person.active?'':' - Inactive'}</option>`).join('')}</select></label></section>${selected?`<section class="pricing-grid" aria-label="Service prices for ${h(selected.name)}">${pricingData.prices.map(price=>{
+  return `${head}<section class="analytics-panel pricing-panel"><label class="pricing-salesperson">Salesperson<select id="pricingSalesperson" onchange="selectPricingSalesperson(this.value)"><option value="">Choose a salesperson...</option>${pricingData.salespeople.map(person=>`<option value="${h(person.id)}" ${person.id===pricingSalesId?'selected':''}>${h(person.name)} (${h(person.username)})${person.active?'':' - Inactive'}</option>`).join('')}</select></label></section>${selected?`<section class="pricing-grid" aria-label="Service prices for ${h(selected.name)}">${pricingData.prices.filter(price=>!['Passport','PF Working (Provident Fund)','Ration Card'].includes(price.service_name)).map(price=>{
     const custom=pricingData.overrides.find(item=>item.sales_user_id===selected.id && item.variant_id===price.variant_id);
-    return `<form class="analytics-panel pricing-card" onsubmit="saveSalespersonPrice(event,'${h(price.variant_id)}')"><h2>${h(price.service_name)}</h2><small>${h(price.variant_name)}</small><label>Current price (Rs.)<input name="price" aria-label="${h(price.service_name)} price" type="number" min="0.01" max="1000000" step="0.01" value="${((custom?.price ?? price.price)/100).toFixed(2)}" required></label><div class="pricing-actions"><button class="primary" type="submit">Update price</button></div><small class="pricing-result" role="status"></small></form>`;
+    return `<form class="analytics-panel pricing-card" onsubmit="saveSalespersonPrice(event,'${h(price.variant_id)}')"><h2>${h(price.service_name)}</h2><small>${h(price.variant_name)}</small><label>Current price (Rs.)<input name="price" aria-label="${h(price.service_name)}${['Food License','Caste Validity Certificate'].includes(price.service_name) ? ' '+h(price.variant_name) : ''} price" type="number" min="0.01" max="1000000" step="0.01" value="${((custom?.price ?? price.price)/100).toFixed(2)}" required></label><div class="pricing-actions"><button class="primary" type="submit">Update price</button></div><small class="pricing-result" role="status"></small></form>`;
   }).join('')}</section>`:empty(pricingData.salespeople.length?'Choose a salesperson to edit their service prices.':'Create a sales employee in Employees to set their prices.')}`;
 }
 function selectPricingSalesperson(value) { pricingSalesId=value;render(); }

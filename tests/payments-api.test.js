@@ -17,7 +17,7 @@ test('direct UPI security, attempts, expiry, manual verification, prices, refund
     async function request(route,{cookie,body,method=body?'POST':'GET'}={}) {const r=await fetch(origin+route,{method,headers:{'content-type':'application/json',...(cookie?{cookie}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json(),response:r};}
     const login=async username=>(await request('/api/login',{body:{username,password:'Demo@12345'}})).response.headers.get('set-cookie').split(';')[0];
     const admin=await login('admin01'),sales=await login('sales01'),other=await login('sales02'),office=await login('backoffice01');
-    const services=(await request('/api/services',{cookie:sales})).data.services,variant=services.find(s=>s.slug==='pf-assistance').variants[0];
+    const services=(await request('/api/services',{cookie:sales})).data.services,variant=services.find(s=>s.slug==='pan').variants[0];
     const create=async()=>{const r=await request('/api/cases',{cookie:sales,body:{variantId:variant.id,details:pfDetails,customer:{name:'Test Customer',mobile:'9876543210'},consent:true,amount:1,upiId:'attacker@upi',payment_status:'PAID'}});assert.equal(r.status,201);return r.data.case;};
     const c=await create(),base='/api/payments/'+c.payment.id;
     assert.equal(c.payment.amount,100);assert.equal(c.payment.status,'PENDING');

@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 
 export const CASH_SALES_ID='usr_45ca9fa8-2cd5-4b12-9509-8c8b6c3eeded';
-export const cashAccount=user=>user?.role==='sales' && user.id===CASH_SALES_ID && user.username==='7028405101';
+export const cashAccount=user=>user?.role==='sales' && user.id===CASH_SALES_ID;
 export const cashSchema=`CREATE TABLE IF NOT EXISTS cash_accounts (case_id TEXT PRIMARY KEY REFERENCES cases(id),total INTEGER NOT NULL CHECK(total>0),service_charge INTEGER NOT NULL,official_fee INTEGER NOT NULL,tax INTEGER NOT NULL,created_at TEXT NOT NULL);`;
 const fail=(status,message)=>{throw Object.assign(new Error(message),{status});};
 const confirmed=p=>['PAID','verified','offline_approved'].includes(p.status) && p.gateway!=='demo';
@@ -19,11 +19,11 @@ export function createCashPayments({db,config}) {
   async function summary(caseId) {const a=await account(caseId);return cashSummary(a,a?await receipts(caseId):[]);}
   async function authorize(c,user) {
     const owner=await one('SELECT id,username,role FROM users WHERE id=$id',{$id:c.sales_user_id});
-    if(!cashAccount(owner) || !(user.role==='admin' || cashAccount(user) && c.sales_user_id===user.id)) fail(403,'Cash payments are available only for the Mahalaxmi Online Services sales account.');
+    if(!cashAccount(owner) || !(user.role==='admin' || cashAccount(user) && c.sales_user_id===user.id)) fail(403,'Cash payments are available only for the Success Online Main Branch sales account.');
   }
   async function enroll(c,order,user,amount,requestId=randomUUID()) {
     await authorize(c,user);
-    if(!cashAccount(user)) fail(403,'Only the Mahalaxmi sales account can select cash.');
+    if(!cashAccount(user)) fail(403,'Only the Success Online Main Branch sales account can select cash.');
     if(await account(c.id)) return record(c,user,{amount,requestId});
     if(['Deleted','Cancelled','Closed','Delivered'].includes(c.status)) fail(409,'Cash cannot be selected for this closed case.');
     if(!Number.isSafeInteger(amount) || amount<1 || amount>order.amount) fail(400,'Enter a positive cash amount no greater than the total payable.');
@@ -42,7 +42,7 @@ export function createCashPayments({db,config}) {
     const serviceRow=await one('SELECT name FROM services WHERE id=$id',{$id:c.service_id});
     await run('INSERT INTO payments VALUES ($id,$case,$gateway,$order,NULL,$amount,$service,$fee,$tax,$status,NULL,$at)',{$id:id,$case:c.id,$gateway:gateway,$order:'SO-INST-'+requestId,$amount:amount,$service:service,$fee:fee,$tax:tax,$status:status,$at:stamp});
     await run('INSERT INTO upi_orders(payment_id,upi_id,payee_name,service_name,created_by,payment_method,submitted_at,expires_at,updated_at) VALUES ($id,$upi,$name,$service,$user,$method,$submitted,$expires,$at)',{$id:id,$upi:receiver.upiId,$name:receiver.payeeName,$service:serviceRow.name,$user:user.id,$method:gateway==='cash'?'Cash':null,$submitted:gateway==='cash'?stamp:null,$expires:new Date(Date.now()+1800000).toISOString(),$at:stamp});
-    await run('INSERT INTO payment_attempts VALUES ($id,$payment,$action,$method,NULL,$actor,$notes,$at)',{$id:randomUUID(),$payment:id,$action:gateway==='cash'?'cash_recorded':'balance_order',$method:gateway==='cash'?'Cash':null,$actor:user.id,$notes:'Mahalaxmi instalment; final documents require full admin-confirmed payment.',$at:stamp});
+    await run('INSERT INTO payment_attempts VALUES ($id,$payment,$action,$method,NULL,$actor,$notes,$at)',{$id:randomUUID(),$payment:id,$action:gateway==='cash'?'cash_recorded':'balance_order',$method:gateway==='cash'?'Cash':null,$actor:user.id,$notes:'Main branch instalment; final documents require full admin-confirmed payment.',$at:stamp});
     await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:randomUUID(),$actor:user.id,$action:gateway==='cash'?'payment.cash_recorded':'payment.balance_order',$type:'payment',$entity:id,$reason:`${amount} paise for ${c.ref}`,$at:stamp});
     return one('SELECT * FROM payments WHERE id=$id',{$id:id});
   }

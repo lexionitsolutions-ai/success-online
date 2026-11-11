@@ -106,8 +106,10 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const recovered=await request(recoveryPath+'/documents',{cookie:admin,body:{uploadId:recoveryAuth.data.uploadId,deferMirrors:true}});
     assert.equal(recovered.status,201,JSON.stringify(recovered.data));
     assert.equal((await request(recoveryPath,{cookie:accounts.sales})).data.documents.length,1,'Admin can recover an existing stored upload with full validation');
-    const storedDocument=(await request(path,{cookie:accounts.backoffice})).data.documents[0];
-    const preview=await request(`/api/documents/${storedDocument.id}/preview`,{cookie:accounts.backoffice});
+    assert.equal((await request(path,{cookie:accounts.backoffice})).status,403,'Unpaid ordinary cases stay private to sales');
+    const storedDocument=(await request(path,{cookie:accounts.sales})).data.documents[0];
+    assert.equal((await request(`/api/documents/${storedDocument.id}/preview`,{cookie:accounts.backoffice})).status,403);
+    const preview=await request(`/api/documents/${storedDocument.id}/preview`,{cookie:accounts.sales});
     assert.equal(preview.status,200);
     assert.equal(preview.data.mimeType,'application/pdf');
     assert.equal(new URL(preview.data.url).searchParams.has('download'),false,'Preview uses an inline signed URL');
@@ -128,15 +130,16 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const detail = await request(path,{cookie:accounts.sales});
     assert.equal(detail.data.documents.length,4);
     const doc = detail.data.documents[0];
-    const download = await request(doc.download_url,{cookie:accounts.backoffice});
+    const download = await request(doc.download_url,{cookie:accounts.sales});
     assert.equal(download.status,302);
     assert.ok(download.response.headers.get('location').includes('token=download-token'));
-    const zip = await request(path+'/download-all',{cookie:accounts.backoffice});assert.equal(zip.status,302);
-    const zipped = await fetch(zip.response.headers.get('location'));assert.equal(Buffer.from(await zipped.arrayBuffer()).readUInt32LE(),0x04034b50);
     const order = await request(path+'/payment-order',{cookie:accounts.sales,method:'POST'});
     assert.equal(order.status,201,JSON.stringify(order.data));
     assert.equal((await request(path+'/verify-payment',{cookie:accounts.sales,body:{orderId:order.data.orderId}})).status,403);
     await verifyTestOrder(request,admin,accounts.sales,order.data.id);
+    const zip = await request(path+'/download-all',{cookie:accounts.backoffice});assert.equal(zip.status,302);
+    const zipped = await fetch(zip.response.headers.get('location'));assert.equal(Buffer.from(await zipped.arrayBuffer()).readUInt32LE(),0x04034b50);
+
     const repeated=await Promise.all(Array.from({length:2},()=>request('/api/payments/'+order.data.id+'/verify',{cookie:admin,body:confirmations})));
     assert.deepEqual(repeated.map(r=>r.status),[200,200]);
     const duplicates=concurrent.slice(1).map(r=>r.data.case.payment.id);
@@ -215,7 +218,7 @@ test('cloud payments commit before delayed Sheets work and preserve retryable jo
     }
     await api('/api/payment-settings',{action:'enable-receiver',ownerConfirmed:true});
     const services=(await api('/api/services')).services;
-    const variant=services.find(s=>s.slug==='pf-assistance').variants[0];
+    const variant=services.find(s=>s.slug==='pan').variants[0];
     const c=(await api('/api/cases',{variantId:variant.id,details:pfDetails,customer:{name:'Synthetic Cloud Payment',mobile:'9876543210'},consent:true})).case;
     const pdf=Buffer.from('%PDF-1.4\nmirror fixture\n%%EOF');
     for (const requirement of variant.documents.filter(doc=>doc.required)) {

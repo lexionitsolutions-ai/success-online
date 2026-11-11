@@ -1,3 +1,4 @@
+import {testPort} from './test-port.js';
 import {pfDetails} from './pf-fixture.js';
 import '../public/intake-rules.js';
 import {confirmTestReceiver,verifyTestOrder,confirmations} from './payment-fixture.js';
@@ -12,7 +13,7 @@ import { createZip } from '../archive.js';
 
 test('real API: access, document gates, uploads, bundle and completion', async () => {
   const root = mkdtempSync(join(tmpdir(), 'success-online-test-'));
-  const port = 32000 + Math.floor(Math.random() * 10000), origin = `http://localhost:${port}`;
+  const port = await testPort(), origin = `http://localhost:${port}`;
   const child = spawn(process.execPath, ['server.js'], { env: { ...process.env, NODE_ENV:'test', VERCEL:'', DATABASE_URL:'', SUPABASE_URL:'', SUPABASE_SECRET_KEY:'', PORT: String(port), DATABASE_PATH: join(root, 'test.sqlite'), STORAGE_PATH: join(root, 'docs'), DRIVE_MODE:'demo', SHEETS_MODE:'demo', PAYMENT_MODE:'demo', SESSION_SECRET:'integration-test-secret-with-32-characters', APP_ORIGIN:origin }, stdio: ['ignore','pipe','pipe'] });
   let output = '';
   child.stderr.on('data', d => output += d);
@@ -76,6 +77,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
       assert.equal(r.status, 201, service.name);
       const order=await request(`/api/cases/${r.data.case.id}/payment-order`,{cookie:sales,method:'POST'});
       const expected = service.slug==='police-clearance' ? 30000 : service.slug==='caste-certificate' ? 40000 : ['income-certificate','domicile-certificate'].includes(service.slug) ? 20000 : 100;
+      if(['passport','pf-assistance','ration-card'].includes(service.slug)) {assert.equal(order.status,409,service.name);assert.equal(r.data.case.payment,undefined);continue;}
       assert.equal(order.status,201,service.name);assert.equal(order.data.amount,expected);assert.equal(new URL(order.data.upiIntent).searchParams.get('am'),(expected/100).toFixed(2));
     }
     assert.ok(!services.some(service=>service.slug==='shop-act-udyam'));
@@ -341,28 +343,31 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const previewPath=firstDoc.download_url.replace('/download','/preview');
     assert.equal((await request(previewPath,{cookie:sales})).status,200);
     assert.equal((await request(previewPath,{cookie:otherSales})).status,403);
-    const preview=await request(previewPath,{cookie:office});
+    assert.equal((await request(previewPath,{cookie:office})).status,403,'Back office cannot preview unpaid cases');
+    assert.equal((await request(path+'/download-all',{cookie:office})).status,403);
+    const preview=await request(previewPath,{cookie:sales});
     assert.equal(preview.status,200);
     assert.equal(preview.data.mimeType,'application/pdf');
-    const inline=await fetch(origin+preview.data.url,{headers:{cookie:office}});
+    const inline=await fetch(origin+preview.data.url,{headers:{cookie:sales}});
     assert.equal(inline.status,200);
     assert.match(inline.headers.get('content-disposition'),/^inline;/);
     assert.deepEqual(Buffer.from(await inline.arrayBuffer()),pdf);
     assert.equal((await request(preview.data.url,{cookie:sales})).status,200);
     assert.equal((await request(previewPath,{cookie:admin})).status,403,'Admin cannot preview unpaid cases');
-    const download = await fetch(origin + firstDoc.download_url, { headers:{cookie:office} });
+    const download = await fetch(origin + firstDoc.download_url, { headers:{cookie:sales} });
     assert.equal(download.status, 200); assert.deepEqual(Buffer.from(await download.arrayBuffer()), pdf);
     assert.equal((await request(firstDoc.download_url, { cookie:otherSales })).status, 403);
     assert.equal((await request(path + '/download-all', { cookie:sales })).status, 403);
+    const order = (await request(path + '/payment-order', { cookie:sales, method:'POST' })).data;
+    assert.equal((await request(path + '/verify-payment', { cookie:sales, body:{orderId:order.orderId} })).status, 403);
+    await verifyTestOrder(request,admin,sales,order.id);
+    assert.equal((await request(previewPath,{cookie:admin})).status,200);
     const zip = await fetch(origin + path + '/download-all?folder=Trial%20Work', { headers:{cookie:office} });
     assert.equal(zip.status, 200);
     const bytes = Buffer.from(await zip.arrayBuffer());
     assert.equal(bytes.readUInt32LE(), 0x04034b50); assert.ok(bytes.includes(Buffer.from('Trial Work/Aadhaar Card/')));
     assert.equal(bytes.readUInt16LE(bytes.length - 12), 5);
-    const order = (await request(path + '/payment-order', { cookie:sales, method:'POST' })).data;
-    assert.equal((await request(path + '/verify-payment', { cookie:sales, body:{orderId:order.orderId} })).status, 403);
-    await verifyTestOrder(request,admin,sales,order.id);
-    assert.equal((await request(previewPath,{cookie:admin})).status,200);
+
     assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 200);
     assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 409);
     assert.equal((await request(path+'/progress',{cookie:office,body:{status:'Correction Required',note:'   '}})).status,400);
@@ -462,7 +467,7 @@ test('ZIP preserves Unicode names and valid central-directory count', () => {
 
 test('Sheets reporting and private local uploads remain independent of Google authorization', async () => {
   const root = mkdtempSync(join(tmpdir(), 'success-google-test-'));
-  const port = 42000 + Math.floor(Math.random() * 10000), origin = `http://localhost:${port}`;
+  const port = await testPort(), origin = `http://localhost:${port}`;
   const child = spawn(process.execPath, ['--import','./tests/google-mock.mjs','server.js'], { env:{ ...process.env, NODE_ENV:'test', VERCEL:'', DATABASE_URL:'', SUPABASE_URL:'', SUPABASE_SECRET_KEY:'', PORT:String(port), APP_ORIGIN:origin, DATABASE_PATH:join(root,'test.sqlite'), STORAGE_PATH:join(root,'files'), DRIVE_MODE:'live', SHEETS_MODE:'live', PAYMENT_MODE:'demo', SESSION_SECRET:'google-test-secret-with-at-least-32-characters', GOOGLE_OAUTH_CLIENT_ID:'mock', GOOGLE_OAUTH_CLIENT_SECRET:'mock', GOOGLE_OAUTH_REFRESH_TOKEN:'mock', GOOGLE_ROOT_FOLDER_ID:'root', GOOGLE_OPERATIONS_SPREADSHEET_ID:'workbook', GOOGLE_MOCK_FAILURE_FILE:join(root,'revoked'), GOOGLE_MOCK_SHEETS_FILE:join(root,'sheets.json') }, stdio:['ignore','pipe','pipe'] });
   try {
     await new Promise((resolve, reject) => {
@@ -480,12 +485,12 @@ test('Sheets reporting and private local uploads remain independent of Google au
     assert.equal(new URL(oauth.authorizationUrl).searchParams.get('scope'),'https://www.googleapis.com/auth/spreadsheets');
     for(const path of ['/api/google/root-folder','/api/google/normalize-folders']) assert.equal((await fetch(origin+path,{method:'POST',headers:{cookie,'content-type':'application/json'},body:'{}'})).status,404);
     const services = (await api('/api/services')).services;
-    const variant = services.find(s => s.slug === 'pf-assistance').variants[0];
+    const variant = services.find(s => s.slug === 'pan').variants[0];
     writeFileSync(join(root,'revoked'),'sheets-missing-tab');
     const c = (await api('/api/cases',{variantId:variant.id,details:pfDetails,customer:{name:'Storage Trial',mobile:'9876543210'},consent:true})).case;
     const countStoredCases=()=>{const db=new DatabaseSync(join(root,'test.sqlite'));try{return db.prepare('SELECT COUNT(*) n FROM cases').get().n;}finally{db.close();}};
     const pdf = Buffer.from('%PDF-1.4\nmock-storage-file\n%%EOF');
-    await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
+    await api(`/api/cases/${c.id}/documents`, {docType:'Aadhaar Card',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
     assert.equal((await fetch(origin + `/api/cases/${c.id}`,{headers:{cookie}})).status,403,'Admin waits for confirmed payment');
     const repairedWorkbook=JSON.parse(readFileSync(join(root,'sheets.json'),'utf8'));
     assert.ok(Object.values(repairedWorkbook['All Workings']||{}).some(row=>row[0]===c.ref),'Missing operations tab heals automatically before manual activation');
@@ -528,7 +533,7 @@ test('Sheets reporting and private local uploads remain independent of Google au
     assert.equal(countStoredCases(),2,'Expired reporting authorization must not block case intake');
     const state = await api('/api/google/status');
     assert.equal(state.reconnectRequired,true); assert.equal(state.connected,false);
-    await api(`/api/cases/${c.id}/documents`, {docType:'Bank Passbook',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
+    await api(`/api/cases/${c.id}/documents`, {docType:'Aadhaar Card',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
     const savedDocuments=(await api(`/api/cases/${c.id}`)).documents.filter(document=>document.state==='uploaded');
     assert.equal(savedDocuments.length,1);
     const savedDownload=await fetch(origin+savedDocuments[0].download_url,{headers:{cookie}});

@@ -1,3 +1,4 @@
+import {caseQuote,quoteAmounts} from './case-quotes.js';
 import './public/intake-rules.js';
 import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
@@ -64,13 +65,15 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
   }
   async function receiverReady() {return (await receiverStatus()).ready;}
   async function list(caseId, user, paymentId=null) {
-    const params={}, filters=["c.status!='Deleted'"];
+    const params={}, filters=["c.status!='Deleted'","p.gateway!='acceptance_test'"];
     if(caseId) {params.$case=caseId;filters.push('p.case_id=$case');}
     if(user.role==='sales') {params.$user=user.id;filters.push('c.sales_user_id=$user');}
     if(paymentId) {params.$payment=paymentId;filters.push('p.id=$payment');}
     return all(`SELECT p.*,o.*,ca.case_id cash_account,bi.batch_id,pb.status batch_status,EXISTS (SELECT 1 FROM payments locked WHERE locked.case_id=p.case_id AND locked.gateway='direct_upi' AND locked.status IN ('PAID','AWAITING_VERIFICATION')) case_payment_locked,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id LEFT JOIN payment_batch_items bi ON bi.payment_id=p.id LEFT JOIN payment_batches pb ON pb.id=bi.batch_id JOIN cases c ON c.id=p.case_id LEFT JOIN cash_accounts ca ON ca.case_id=c.id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${filters.length ? 'WHERE '+filters.join(' AND ') : ''} ORDER BY p.created_at DESC,p.id`,params);
   }
   async function createOrder(c,user,{individual=false}={}) {
+    const quote=caseQuote(c);
+    if(quote && (!quote.submittedAt || !quote.amount)) fail(409,'Back office must review the documents and set the price before payment.');
     if (c.status === 'Cancelled') fail(409,'The service request is cancelled');
     if(await cash.account(c.id)) return cash.createBalanceOrder(c,user);
     const receiver=paymentConfig();
@@ -99,7 +102,7 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
     const variant = await one('SELECT v.*,s.price configured_price,s.original_config FROM variants v LEFT JOIN service_prices s ON s.variant_id=v.id WHERE v.id=$id',{$id:c.variant_id});
     const custom = await one('SELECT price FROM salesperson_prices WHERE sales_user_id=$sales AND variant_id=$variant',{$sales:c.sales_user_id,$variant:c.variant_id});
     const base = priceAmounts(variant,variant.configured_price,variant.original_config ? JSON.parse(variant.original_config) : undefined,custom?.price);
-    const a = JSON.parse(variant.fields_json || '[]').some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base, JSON.parse(c.details_json || '{}')) : base;
+    const a = quote ? quoteAmounts(quote) : JSON.parse(variant.fields_json || '[]').some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base, JSON.parse(c.details_json || '{}')) : base;
     if (!Number.isSafeInteger(a.total) || a.total <= 0) fail(409,'Configure a positive service price first');
     const service = await one('SELECT name FROM services WHERE id=$id',{$id:c.service_id});
     const config = paymentConfig(), pid = `pay_${randomUUID()}`, order = `SO-P-${new Date().getUTCFullYear()}-${randomUUID()}`, stamp = at();
@@ -141,7 +144,7 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
       if (user.role !== 'admin') fail(403,'Admin access required');
       if (req.method === 'GET') {
         const [salespeople,prices,overrides] = await Promise.all([
-          all("SELECT id,name,username,active FROM users WHERE role='sales' ORDER BY name,username"),
+          all("SELECT id,name,username,active FROM users WHERE role='sales' AND NOT EXISTS (SELECT 1 FROM audit_logs a WHERE a.entity_id=users.id AND a.action='employee.delete') ORDER BY name,username"),
           all('SELECT p.variant_id,p.price,v.name variant_name,s.name service_name FROM service_prices p JOIN variants v ON v.id=p.variant_id JOIN services s ON s.id=v.service_id WHERE v.active=1 AND s.active=1 ORDER BY s.name,v.name'),
           all('SELECT sales_user_id,variant_id,price FROM salesperson_prices')
         ]);

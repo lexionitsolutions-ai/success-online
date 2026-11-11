@@ -9,7 +9,7 @@ const dateInIndia = value => {
   return value && !Number.isNaN(date.getTime()) ? new Date(date.getTime()+330*60000).toISOString().slice(0,10) : '';
 };
 export function operationsRows(c, payments, refunds = []) {
-  const confirmed=payments.filter(p=>p.gateway!=='demo' && ['PAID','verified','offline_approved','REFUNDED'].includes(p.status));
+  const confirmed=payments.filter(p=>!['demo','acceptance_test'].includes(p.gateway) && ['PAID','verified','offline_approved','REFUNDED'].includes(p.status));
   const paid=confirmed.filter(p=>p.status!=='REFUNDED').reduce((sum,p)=>sum+p.amount,0);
   const total=c.amounts?.total || 0;
   const modes=[...new Set(confirmed.map(p=>p.payment_method).filter(Boolean))].join(', ') || c.payment?.payment_method || '';

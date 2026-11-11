@@ -26,7 +26,7 @@ test('sales can delete only their own unpaid cases; checkouts and uploads cannot
     const request=async(route,{cookie,body,method=body?'POST':'GET'}={})=>{const response=await fetch(origin+route,{method,headers:{'content-type':'application/json',...(cookie?{cookie}:{})},body:body?JSON.stringify(body):undefined});return {status:response.status,response,data:await response.json()};};
     const login=async username=>(await request('/api/login',{body:{username,password:'Demo@12345'}})).response.headers.get('set-cookie').split(';')[0];
     const sales=await login('sales01'),other=await login('sales02'),admin=await login('admin01'),office=await login('backoffice01');
-    const variant=(await request('/api/services',{cookie:sales})).data.services.find(s=>s.slug==='pf-assistance').variants[0];
+    const variant=(await request('/api/services',{cookie:sales})).data.services.find(s=>s.slug==='pan').variants[0];
     const payload={variantId:variant.id,details:pfDetails,customer:{name:'Deletion Trial',mobile:'9876543210'},consent:true};
     const create=async extra=>(await request('/api/cases',{cookie:sales,body:{...payload,...extra}})).data.case;
     const clientRequestId=randomUUID(),c=await create({clientRequestId}),base='/api/cases/'+c.id;

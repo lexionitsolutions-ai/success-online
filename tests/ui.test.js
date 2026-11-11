@@ -21,6 +21,17 @@ function client() {
   return { context, run: source => vm.runInContext(source, context) };
 }
 
+test('quote intake replaces checkout with review and shows exact quoted payment links',()=>{
+  const {run}=client();
+  run("me={role:'sales'};draft={step:4,customer:{name:'Test Client',mobile:'9876543210'},details:{},docs:{}};");
+  const review=run("wizardBody({slug:'passport',name:'Passport'},{amounts:{serviceCharge:100,officialFee:0,tax:0,total:100}})");
+  assert.match(review,/Submit to back office/);assert.doesNotMatch(review,/Create & pay|Save & pay later/);
+  const pending=run("casePaymentCard({id:'test',status:'Awaiting Back Office Review',quote:{submittedAt:'2026-11-11'},document_state:'complete'})");
+  assert.match(pending,/Back-office review/);assert.doesNotMatch(pending,/Open UPI checkout/);
+  run("me={role:'backoffice'}");
+  assert.match(run("quoteReviewPanel({id:'test',status:'Awaiting Back Office Review',quote:{submittedAt:'2026-11-11'},document_state:'complete'})"),/Send quote &amp; payment request|Send quote & payment request/);
+});
+
 test('admin integrations show Sheets reporting without Drive controls',()=>{
   const {run}=client();
   run("me={role:'admin'};cases=[];googleStatus={connected:true};sheetsStatus={configured:true};adminAnalytics={metrics:{},operations:{},trend:[],statusBreakdown:[],servicePerformance:[],staffPerformance:{sales:[],backoffice:[]},recentPayments:[]}");
@@ -863,4 +874,16 @@ test('payment dashboard shows one row per case across checkout retries and keeps
   assert.equal(run("paymentCaseRows().find(p=>p.case_id==='c2').id"),'review');
   assert.equal(run("paymentCaseRows().find(p=>p.case_id==='c3').id"),'paid');
   assert.equal(run('selectablePaymentCases().length'),1);
+});
+
+
+test('staff management exposes admin account controls and quote recovery explains pending uploads',()=>{
+  const {run}=client();
+  run("me={role:'admin'};employeeData={employees:[{id:'staff',name:'Staff Member',username:'staff',role:'sales',active:1,turnaround:null}]};");
+  const staff=run('renderEmployees()');assert.match(staff,/Edit \/ reset password/);assert.match(staff,/deleteEmployee/);
+  run("me={role:'sales'}");assert.doesNotMatch(run('renderEmployees()'),/editEmployee/);
+  const recovery=run("intakeRecoveryPanel({id:'case',uploads:{completed:3,total:5,complete:false},pendingUploads:[{key:'key',docType:'Bank Passbook',fileName:'bank.pdf'}]})");
+  assert.match(recovery,/3 of 5/);assert.match(recovery,/Bank Passbook/);assert.match(recovery,/resumeCaseUpload/);
+  assert.equal(run("isQuoteService({service:{slug:'pan',name:'PAN Card'}})"),false);
+  assert.equal(run("isQuoteService({service:{slug:'pf-assistance'}})"),true);
 });

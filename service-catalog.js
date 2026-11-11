@@ -477,3 +477,16 @@ for (const service of serviceCatalog) {
   }
   if (serviceNotes[service.slug]) service.instructions = serviceNotes[service.slug].join('\n');
 }
+
+// Case context is reviewed by back office before these services are priced.
+for(const service of serviceCatalog) {
+  if(service.slug==='passport') service.fields.push(
+    {...field('Appointment urgency','select',['Normal','Urgent']),optional:true},
+    {...field('Requested changes','textarea'),optional:true});
+  if(service.slug==='pf-assistance') service.fields.push({...field('PF request details','textarea'),optional:true});
+  if(service.slug==='ration-card') {
+    service.fields.unshift({...field('Ration card request','select',['Changes to existing card','New ration card']),optional:true,answerGroup:'ration-card'});
+    const existing=service.documents.find(doc=>doc.label==='Ration Card');
+    existing.when={field:'Ration card request',equals:'Changes to existing card',defaultValue:'Changes to existing card'};
+  }
+}

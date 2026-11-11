@@ -93,3 +93,28 @@ In case review, **Save & create another** starts the next intake and **Save & pa
 Run the database migration before deploying this feature: `payment_batches` and `payment_batch_items` use the same private RLS policy as the other server-only tables.
 
 Cloud intake uploads at most three documents concurrently. Signed uploads are validated and retained in their original private object rather than copied again. Intake schedules Google Sheets reporting after all files finish; the response does not wait for Google. Pending/failed reporting jobs remain in `sync_jobs` and can be retried from Payments settings. Storage cleanup preserves objects referenced by document records, including completed signed uploads.
+
+
+### Back-office case pricing and service options
+
+Passport, PF Working and Ration Card now use **Case Review & Quotes**. Sales uploads documents and chooses **Submit to back office**. Back office reviews the files, requests corrections if necessary, and sends a final total with a pricing explanation. Sales receives an in-app notification and a payment link for that exact amount. Verified payment unlocks normal assignment and processing. Sent quotes are immutable, including when checkout expires; existing cases and payment orders keep their original flow and amounts.
+
+Pricing contains five Food License durations (1?5 years) and three Caste Validity purposes (Job, Education, Election), each with its own salesperson price. Select the corresponding request type at intake. Set the prices under **Pricing** before accepting these requests. The existing global test-pricing setting still applies unless a salesperson price is configured; approved case quotes always use the actual quoted total.
+
+Run `npm run migrate:case-pricing` once against an existing cloud database before deploying this version. This adds options without changing legacy case IDs, payments, or existing prices. Set `MAIN_BRANCH_PASSWORD` only when applying the one-time Mahalaxmi account rename to Success Online Main Branch and login 7447707277. The migration hashes the supplied password, checks login conflicts, and uses a completion marker so reruns do not reset credentials. Deploy/restart the application code to activate the new screens and workflow.
+
+
+### Staff administration and saved uploads
+
+Admins can edit staff names, login numbers/usernames and passwords from Employees, deactivate/reactivate accounts, or delete a sales/back-office account. Account changes invalidate existing sessions. Deletion disables login and removes the staff member from account management while preserving case ownership, payments and audit history. Admin accounts cannot be changed through these staff controls.
+
+Incomplete quote intakes remain visible to their salesperson under Case Review & Quotes, with saved-file counts and controls to reselect missing files. Back office receives the case only after all selected uploads are confirmed and sales submits it for review. Back-office remarks and mandatory pricing remarks are visible to sales alongside the quoted payment request. Ordinary unpaid cases and their document previews/downloads are unavailable to back office until payment is confirmed (the existing main-branch recorded cash workflow is preserved).
+
+
+### Repeatable release verification
+
+`node --test tests/service-lifecycle.test.js` creates an isolated database and completes every service and pricing variant, including simulated receiving-account verification, correction/reupload, final document return and ZIP download.
+
+After deployment, maintainers can run `node scripts/verify-live-workflows.js https://success-online.vercel.app --create-test --simulate-payments` using the private configured database, server signing secret and staff logins. The script creates signed, clearly labelled synthetic Caste Validity, PF and Ration Card cases, checks staff administration, and completes the workflows using temporary `acceptance_test` receipts. No bank reference is invented and no money is transferred. These receipts are excluded from financial reports and payment collections, and the signed cases never sync to Sheets. The script removes its temporary receipts and active test cases and writes a JSON report in `deliverables/`. No public endpoint grants a payment bypass, and ordinary clients cannot authorize a synthetic case.
+
+Deleting a back-office employee releases unfinished cases for another employee to claim while preserving their current work stage and history.

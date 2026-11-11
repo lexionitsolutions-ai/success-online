@@ -1,3 +1,4 @@
+import {serviceOptions, optionFields} from './service-options.js';
 import { serviceCatalog } from './service-catalog.js';
 
 // Each running version uses its own forms even if an older deployment refreshes
@@ -6,9 +7,9 @@ export function currentServiceForms(rows) {
   const catalog = new Map(serviceCatalog.map(service => [service.slug, service]));
   return new Map(rows.flatMap(row => {
     const service = catalog.get(row.slug);
-    if (!service || row.name !== (service.variant || 'Application')) return [];
+    if (!service || (row.name !== (service.variant || 'Application') && !serviceOptions(service).some(option=>option.name===row.name))) return [];
     return [[row.id, {
-      fields_json: JSON.stringify(service.fields || []),
+      fields_json: JSON.stringify(serviceOptions(service).find(option=>option.name===row.name) ? optionFields(service,serviceOptions(service).find(option=>option.name===row.name)) : service.fields || []),
       documents_json: JSON.stringify(service.documents || []),
       instructions: service.instructions || ''
     }]];
@@ -30,9 +31,9 @@ export async function syncServiceForms(db) {
   await db.transaction(async () => {
     for (const row of rows) {
       const service = catalog.get(row.slug);
-      if (!service || row.name !== (service.variant || 'Application')) continue;
+      if (!service || (row.name !== (service.variant || 'Application') && !serviceOptions(service).some(option=>option.name===row.name))) continue;
       if (row.service_name !== service.name) await db.run('UPDATE services SET name=$name WHERE id=$id', {$name:service.name,$id:row.service_id});
-      const fields = JSON.stringify(service.fields || []);
+      const fields = JSON.stringify(serviceOptions(service).find(option=>option.name===row.name) ? optionFields(service,serviceOptions(service).find(option=>option.name===row.name)) : service.fields || []);
       const documents = JSON.stringify(service.documents || []);
       const instructions = service.instructions || 'Required documents follow the client-provided checklist. Confirm current requirements and fees before submission.';
       if (row.fields_json === fields && row.documents_json === documents && row.instructions === instructions) continue;
