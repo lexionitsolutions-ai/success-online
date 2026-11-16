@@ -21,6 +21,43 @@ function client() {
   return { context, run: source => vm.runInContext(source, context) };
 }
 
+test('grouped pricing keeps a separate price for each selected variant',()=>{
+  const {run}=client();
+  run(`me={id:'admin',role:'admin'};pricingSalesId='sales';pricingData={salespeople:[{id:'sales',name:'Sales',username:'sales',active:true}],overrides:[{sales_user_id:'sales',variant_id:'food-2',price:25000}],prices:[...[1,2,3,4,5].map(n=>({variant_id:'food-'+n,service_name:'Food License',variant_name:n===1?'1 year':n+' years',price:n*10000})),...['Job','Education','Election'].map(name=>({variant_id:name,service_name:'Caste Validity Certificate',variant_name:name,price:90000}))]}`);
+  let html=run('renderPricing()');
+  assert.equal((html.match(/class="analytics-panel pricing-card"/g)||[]).length,2);
+  for(const option of ['1 year','2 years','3 years','4 years','5 years','Job','Education','Election']) assert.ok(html.includes('>'+option+'</option>'));
+  run("pricingVariants.set('Food License','food-2')");
+  html=run('renderPricing()');
+  assert.match(html,/saveSalespersonPrice\(event,'food-2'\)/);
+  assert.match(html,/value="250.00"/);
+  run("pricingVariants.set('Food License','food-3')");
+  assert.match(run('renderPricing()'),/value="300.00"/);
+});
+
+test('case chat aligns by author, escapes messages and allows sales replies',()=>{
+  const {run}=client();
+  run(`me={id:'sales',role:'sales'};const chatCase={id:'case',status:'Awaiting Quoted Payment',quote:{submittedAt:'2026-11-16',reason:'Reviewed',reviewedBy:'office',reviewedAt:'2026-11-16'}};const chatNotes=[{actor_id:'office',actor:'Office',note:'Please confirm',created_at:'2026-11-16',next_action:'{"type":"backoffice_remark"}'},{actor_id:'sales',actor:'Sales',note:'<script>Confirmed</script>',created_at:'2026-11-17',next_action:'{"type":"case_message"}'}]`);
+  const html=run('backofficeRemarks(chatCase,chatNotes)');
+  assert.match(html,/chat-incoming/);assert.match(html,/chat-outgoing/);
+  assert.match(html,/&lt;script&gt;Confirmed&lt;\/script&gt;/);
+  assert.match(html,/Send message/);
+  run("me={id:'office',role:'backoffice'}");
+  assert.match(run('backofficeRemarks(chatCase,chatNotes)'),/chat-outgoing"><strong data-language-preserve>Office/);
+});
+
+test('staff language control translates labels while preserving stored option values',()=>{
+  const {run}=client();
+  for(const role of ['admin','backoffice','sales']) {
+    run(`me={role:'${role}',name:'Test Staff',username:'staff'};intakeLanguage='mr'`);
+    assert.match(run('shell("")'),/aria-label="Display language"/);
+  }
+  assert.equal(run("intakeTranslate('Application details',intakeTranslationMap())"),'अर्जाचा तपशील');
+  assert.equal(run("intakeTranslate('Send message',intakeTranslationMap())"),'संदेश पाठवा');
+  run("intakeLanguage='en'");
+  assert.equal(run("intakeTranslate('अर्जाचा तपशील',intakeTranslationMap())"),'Application details');
+});
+
 test('quote intake replaces checkout with review and shows exact quoted payment links',()=>{
   const {run}=client();
   run("me={role:'sales'};draft={step:4,customer:{name:'Test Client',mobile:'9876543210'},details:{},docs:{}};");

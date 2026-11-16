@@ -764,6 +764,10 @@ async function routeApi(req, res, url) {
     if (!c || c.status==='Deleted' || !canSee(user, c)) return send(res, c && c.status!=='Deleted' ? 403 : 404, { error: c && c.status!=='Deleted' ? 'Not allowed' : 'Not found' });
     if(req.method==='DELETE' && !caseMatch[2]) return send(res,200,await deleteUnpaidCase({db,c,user,recomputeCase}));
     if (req.method === 'GET' && !(await staffCanReadCase(user,c))) return send(res,403,{error:'Payment must be confirmed before this case is visible to back office or admin.'});
+    if(req.method==='GET' && caseMatch[2]==='messages') {
+      const notes=await all('SELECT n.*,u.name actor FROM notes n JOIN users u ON u.id=n.actor_id WHERE case_id=$id ORDER BY created_at',{$id:c.id});
+      return send(res,200,{notes:user.role==='sales'?notes.filter(note=>note.visibility==='sales'):notes,quote:caseQuote(c),status:c.status});
+    }
     if(req.method==='POST' && ['submit-review','set-quote'].includes(caseMatch[2])) {
       const service=await one('SELECT slug FROM services WHERE id=$id',{$id:c.service_id});
       const quote=quotedServices.includes(service?.slug) ? caseQuote(c) : null;
@@ -793,14 +797,16 @@ async function routeApi(req, res, url) {
       return send(res,200,await caseDetailData(updated,user));
     }
     if(req.method==='POST' && caseMatch[2]==='remark') {
-      if(!['backoffice','admin'].includes(user.role)) return send(res,403,{error:'Only back office or admin can write remarks'});
-      if(!quoteVisible(c) || ['Closed','Delivered','Cancelled','Rejected'].includes(c.status)) return send(res,409,{error:'Submit this case for review before adding remarks'});
+      if(!['sales','backoffice','admin'].includes(user.role)) return send(res,403,{error:'Only case staff can send messages'});
+      if(!quoteVisible(c) || ['Cancelled','Rejected'].includes(c.status)) return send(res,409,{error:'Submit this case for review before adding remarks'});
       const b=await body(req),note=String(b.remark || '').trim();
       if(!note || note.length>2000) return send(res,400,{error:'Enter a remark up to 2000 characters'});
       const stamp=now();
-      await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)',{$id:id('note'),$case:c.id,$actor:user.id,$old:c.status,$new:c.status,$note:note,$vis:'sales',$next:JSON.stringify({type:'backoffice_remark'}),$at:stamp});
+      const savedNote={id:id('note'),case_id:c.id,actor_id:user.id,actor:user.name,old_status:c.status,new_status:c.status,note,visibility:'sales',next_action:JSON.stringify({type:user.role==='sales'?'case_message':'backoffice_remark'}),created_at:stamp};
+      await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)',{$id:savedNote.id,$case:c.id,$actor:user.id,$old:c.status,$new:c.status,$note:note,$vis:'sales',$next:savedNote.next_action,$at:stamp});
       await run('UPDATE cases SET updated_at=$at WHERE id=$id',{$id:c.id,$at:stamp});
-      await notifyCaseUpdate(c,user,'Back-office remark added');
+      await notifyCaseUpdate(c,user,'New case message');
+      if(b.chatOnly===true) return send(res,200,{note:savedNote});
       return send(res,200,await caseDetailData(c,user));
     }
     if(req.method==='POST' && caseMatch[2]==='resume-upload') {
@@ -1253,7 +1259,7 @@ export async function handler(req, res) {
     const paymentRequest = /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/(payment-order|cash-payment)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname);
     const readOnly = (req.method === 'GET' && (
       ['/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments','/api/payments/cash-pending'].includes(url.pathname) ||
-      /^\/api\/cases\/[^/]+$/.test(url.pathname) || /^\/api\/documents\/[^/]+\/(download|preview|view)$/.test(url.pathname) || /^\/api\/announcements(?:\/[^/]+\/image)?$/.test(url.pathname)
+      /^\/api\/cases\/[^/]+(?:\/messages)?$/.test(url.pathname) || /^\/api\/documents\/[^/]+\/(download|preview|view)$/.test(url.pathname) || /^\/api\/announcements(?:\/[^/]+\/image)?$/.test(url.pathname)
     )) || (req.method === 'POST' && ['/api/login','/api/logout'].includes(url.pathname));
     const route = async () => {
       // List screens do not need to reload payment configuration or hold a

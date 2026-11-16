@@ -106,7 +106,18 @@ test('review before payment, exact quotes, independent option pricing, and one-t
         assert.ok((await request('/api/cases',{cookie})).data.cases.some(row=>row.id===c.id));
         assert.equal((await request(base,{cookie})).status,200);
       }
-      assert.equal((await request(base+'/remark',{cookie:sales,body:{remark:'Tampered'}})).status,403);
+      assert.equal((await request(base+'/remark',{cookie:other,body:{remark:'Unauthorized'}})).status,403);
+      assert.equal((await request(base+'/remark',{cookie:sales,body:{remark:'Please confirm the required charges.'}})).status,200);
+      const reply=(await request(base,{cookie:office})).data.notes.find(n=>n.next_action.includes('case_message'));
+      assert.equal(reply.note,'Please confirm the required charges.');
+      const fastReply=await request(base+'/remark',{cookie:sales,body:{remark:'A quick chat reply.',chatOnly:true}});
+      assert.equal(fastReply.status,200);
+      assert.equal(fastReply.data.note.note,'A quick chat reply.');
+      assert.equal(fastReply.data.case,undefined);
+      const chat=await request(base+'/messages',{cookie:office});
+      assert.equal(chat.status,200);
+      assert.ok(chat.data.notes.some(note=>note.id===fastReply.data.note.id));
+      assert.equal((await request(base+'/messages',{cookie:other})).status,403);
       assert.equal((await request(base+'/remark',{cookie:office,body:{remark:'Urgent processing and correction charges will be included.'}})).status,200);
       const remarks=(await request(base,{cookie:sales})).data.notes.filter(n=>n.next_action.includes('backoffice_remark'));
       assert.equal(remarks.length,1);assert.match(remarks[0].note,/Urgent processing/);
@@ -133,6 +144,10 @@ test('review before payment, exact quotes, independent option pricing, and one-t
       await verifyTestOrder(request,admin,sales,reopened.id,String(utr++));
       assert.equal((await request(base,{cookie:sales})).data.case.status,'Ready for Assignment');
       assert.equal((await request(base+'/claim',{cookie:office,body:{}})).status,200);
+      const completedDb=new DatabaseSync(path);
+      completedDb.prepare("UPDATE cases SET status='Closed' WHERE id=?").run(c.id);completedDb.close();
+      assert.equal((await request(base+'/remark',{cookie:sales,body:{remark:'Thank you for completing this case.',chatOnly:true}})).status,200);
+      assert.equal((await request(base,{cookie:sales})).data.case.status,'Closed');
     }
     for(const [slug,names] of [['food-license',['1 year','2 years','3 years','4 years','5 years']],['caste-validity',['Job','Education','Election']]]) {
       const service=services.find(s=>s.slug===slug);assert.deepEqual(service.variants.map(v=>v.name).sort(),names.sort());

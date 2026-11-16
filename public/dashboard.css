@@ -308,6 +308,19 @@
 .pricing-card { min-width:0; display:flex; flex-direction:column; align-items:stretch; gap:12px; }
 .pricing-card h2,.pricing-card p { margin:0; }
 .pricing-card h2 { font-size:17px; }
+.case-chat { display:flex; flex-direction:column; gap:12px; padding:18px; background:#efeae2; border:1px solid var(--line); border-radius:12px; max-height:460px; overflow-y:auto; min-width:0; overflow-x:hidden; }
+.backoffice-remarks .chat-message { box-sizing:border-box; align-self:flex-start; max-width:80%; min-width:0; padding:12px 16px; border:0; background:#fff; border-radius:0 12px 12px 12px; box-shadow:0 1px 2px #00000016; overflow-wrap:anywhere; word-break:break-word; flex-shrink:0; }
+.chat-message.chat-outgoing { align-self:flex-end; background:#d9fdd3; border-radius:12px 0 12px 12px; }
+.chat-message p { margin:6px 0; white-space:pre-wrap; }
+.chat-message>strong { display:block; font-size:13px; color:#087f65; }
+.chat-message>small { display:block; font-size:11px; color:#526878; }
+.chat-message>small:last-child { text-align:right; }
+.chat-compose { margin-top:12px; }
+.chat-compose label { min-width:0; }
+.chat-compose textarea { box-sizing:border-box; width:100%; resize:vertical; }
+.chat-compose-result { margin:0; min-height:1.5em; color:var(--muted); }
+@media(max-width:600px) { .case-chat { padding:10px; } .backoffice-remarks .chat-message { max-width:92%; } .top-actions .intake-language-toggle button { padding:6px 8px; } }
+@media(max-width:760px) { .shell .top { flex-wrap:wrap; } .shell .top-actions { flex:1 1 100%; min-width:0; } .shell .top-actions .profile { margin-left:auto; } }
 .pricing-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:auto; }
 .pricing-result { min-height:18px; color:var(--green); }
 .intake-notices { overflow:hidden; border:1px solid #dce5ef; border-radius:14px; background:#fff; box-shadow:0 3px 12px #18364b05; }

@@ -54,6 +54,128 @@ const intakeWords = {
   'UAN Number': 'यूएएन क्रमांक', 'Applicant / अर्जदार': 'अर्जदार'
 };
 
+Object.assign(intakeWords, {
+  'Back-office quote':'बॅक ऑफिसने निश्चित केलेले शुल्क',
+  'Sending...':'पाठवत आहे...', 'Message sent.':'संदेश पाठवला.',
+  "Overview": "आढावा",
+  "Dashboard": "डॅशबोर्ड",
+  "Cases": "अर्ज",
+  "New case": "नवीन अर्ज",
+  "All cases": "सर्व अर्ज",
+  "Pending Cases": "प्रलंबित अर्ज",
+  "Completed Cases": "पूर्ण झालेले अर्ज",
+  "Active Cases": "सक्रिय अर्ज",
+  "Operations": "कामकाज",
+  "Business analytics": "व्यवसाय विश्लेषण",
+  "Case Review & Quotes": "अर्ज तपासणी व शुल्क",
+  "Sales Performance": "विक्री कामगिरी",
+  "Backoffice Performance": "बॅक ऑफिस कामगिरी",
+  "Pricing": "सेवांचे दर",
+  "Payments": "देयके",
+  "Employees": "कर्मचारी",
+  "Admin workspace": "प्रशासक कार्यक्षेत्र",
+  "Back office": "बॅक ऑफिस",
+  "Sales": "विक्री",
+  "Administrator": "प्रशासक",
+  "Application details": "अर्जाचा तपशील",
+  "Information collected for this service request.": "या सेवा अर्जासाठी गोळा केलेली माहिती.",
+  "Status": "स्थिती",
+  "Payment": "देयक",
+  "Total": "एकूण",
+  "Price": "दर",
+  "Owner": "जबाबदार कर्मचारी",
+  "Unassigned": "नियुक्त केलेले नाही",
+  "PENDING": "प्रलंबित",
+  "Pending": "प्रलंबित",
+  "Awaiting Quoted Payment": "निश्चित शुल्क भरणे बाकी",
+  "Awaiting Back Office Review": "बॅक ऑफिस तपासणी बाकी",
+  "Document Review": "कागदपत्रांची तपासणी",
+  "Ready for Assignment": "नियुक्तीसाठी तयार",
+  "Assigned": "नियुक्त केले",
+  "Correction Required": "दुरुस्ती आवश्यक",
+  "Approved": "मंजूर",
+  "Rejected": "नामंजूर",
+  "Cancelled": "रद्द",
+  "Closed": "बंद",
+  "Delivered": "वितरित",
+  "Timeline": "इतिहास",
+  "Recorded status changes and internal notes.": "स्थितीतील बदल आणि अंतर्गत नोंदी.",
+  "No updates yet.": "अद्याप कोणतेही बदल नाहीत.",
+  "Case chat": "अर्जावरील संवाद",
+  "Messages between sales, back office and admin.": "विक्री, बॅक ऑफिस आणि प्रशासक यांच्यातील संदेश.",
+  "Pricing remarks": "शुल्काबाबत टिप्पणी",
+  "No messages yet.": "अद्याप कोणतेही संदेश नाहीत.",
+  "Message": "संदेश",
+  "Type a message": "संदेश लिहा",
+  "Send message": "संदेश पाठवा",
+  "Back-office review & pricing": "बॅक ऑफिस तपासणी व शुल्क",
+  "Final total payable (₹)": "अंतिम देय रक्कम (₹)",
+  "Pricing remarks ? why this amount is chargeable": "शुल्काबाबत टिप्पणी — या रकमेचे कारण",
+  "Send quote & payment request": "शुल्क आणि देयकाची विनंती पाठवा",
+  "Submit to back office": "बॅक ऑफिसला पाठवा",
+  "Documents submitted. Back office will confirm the final price after review.": "कागदपत्रे सादर केली आहेत. तपासणीनंतर बॅक ऑफिस अंतिम शुल्क निश्चित करेल.",
+  "Upload all documents, then submit the case to back office. Payment follows review.": "सर्व कागदपत्रे अपलोड करून अर्ज बॅक ऑफिसला पाठवा. तपासणीनंतर शुल्क भरायचे आहे.",
+  "Open payment link": "देयकाची लिंक उघडा",
+  "Download all files": "सर्व फाइल डाउनलोड करा",
+  "Upload every required document before moving the case forward.": "अर्ज पुढे पाठवण्यापूर्वी सर्व आवश्यक कागदपत्रे अपलोड करा.",
+  "Request reupload": "पुन्हा अपलोड करण्याची विनंती",
+  "Current price (Rs.)": "सध्याचा दर (रु.)",
+  "Update price": "दर अद्ययावत करा",
+  "Duration": "कालावधी",
+  "Purpose": "उद्देश",
+  "Salesperson": "विक्री कर्मचारी",
+  "Choose a salesperson...": "विक्री कर्मचारी निवडा...",
+  "Price updated.": "दर अद्ययावत केला.",
+  "Saving...": "जतन करत आहे...",
+  "Staff login": "कर्मचारी लॉगिन",
+  "Your account": "आपले खाते",
+  "Switch account": "खाते बदला",
+  "Sign out": "बाहेर पडा",
+  "Search": "शोधा",
+  "Customer name": "ग्राहकाचे नाव",
+  "Action": "कृती",
+  "View": "पाहा",
+  "Claim case": "अर्ज स्वीकारा",
+  "Show password": "पासवर्ड दाखवा",
+  "Hide password": "पासवर्ड लपवा",
+  "Ration card request": "रेशन कार्डची विनंती",
+  "Changes to existing card": "विद्यमान कार्डमध्ये बदल",
+  "Add a member?": "सदस्य जोडायचा आहे का?",
+  "Add a member due to marriage?": "लग्नामुळे सदस्य जोडायचा आहे का?",
+  "Remove a member?": "सदस्य काढायचा आहे का?",
+  "Remove a member due to marriage?": "लग्नामुळे सदस्य काढायचा आहे का?",
+  "Change ration card address?": "रेशन कार्डचा पत्ता बदलायचा आहे का?",
+  "Ration card residence": "रेशन कार्डवरील निवास",
+  "Is the ration card white?": "रेशन कार्ड पांढरे आहे का?"
+});
+
+Object.assign(intakeWords, {
+  'My overview':'माझा आढावा', 'Operations overview':'कामकाजाचा आढावा', 'Business overview':'व्यवसायाचा आढावा',
+  'Active cases':'सक्रिय अर्ज', 'Missing documents':'अपूर्ण कागदपत्रे', 'Cases pending':'प्रलंबित अर्ज',
+  'Ready to assign':'नियुक्तीसाठी तयार', 'Completed cases':'पूर्ण झालेले अर्ज',
+  'Priorities, customer cases, and work requiring action.':'प्राधान्यक्रम, ग्राहकांचे अर्ज आणि आवश्यक कामे.',
+  'Payment and documents complete':'देयक व कागदपत्रे पूर्ण', 'Customer follow-up needed':'ग्राहकाशी संपर्क आवश्यक',
+  'Payment or documents pending':'देयक किंवा कागदपत्रे बाकी', 'Available to operations':'कामकाजासाठी उपलब्ध',
+  'View completed applications →':'पूर्ण झालेले अर्ज पाहा →', 'Recent Updates':'अलीकडील बदल',
+  'Most recently updated cases in your workload.':'आपल्या कामातील अलीकडे अद्ययावत झालेले अर्ज.',
+  'No recent updates yet.':'अद्याप कोणतेही नवीन बदल नाहीत.', 'View all cases':'सर्व अर्ज पाहा',
+  'Team noticeboard':'कर्मचारी सूचना फलक', 'Announcements':'सूचना', 'News, pictures and updates from your admin.':'प्रशासकाकडून बातम्या, छायाचित्रे आणि सूचना.',
+  'No announcements yet':'अद्याप कोणत्याही सूचना नाहीत', 'New team updates will appear here.':'कर्मचाऱ्यांसाठी नवीन सूचना येथे दिसतील.',
+  'Operations queue':'कामांची यादी', 'Claim, review, submit, and follow up on customer cases.':'ग्राहकांचे अर्ज स्वीकारा, तपासा, सादर करा आणि पाठपुरावा करा.',
+  'Unassigned work':'नियुक्त न केलेले काम', 'Current workload':'सध्याची कामे',
+  'Search and manage customer applications still in progress.':'प्रक्रियेत असलेले ग्राहकांचे अर्ज शोधा व व्यवस्थापित करा.',
+  'Closed customer applications and their received documents.':'पूर्ण झालेले ग्राहकांचे अर्ज आणि प्राप्त कागदपत्रे.',
+  'Financial performance, team output, and operational health.':'आर्थिक कामगिरी, कर्मचाऱ्यांचे काम आणि कामकाजाची स्थिती.',
+  'Collections':'जमा रक्कम', 'Business revenue':'व्यवसाय उत्पन्न', 'Service charges and tax':'सेवा शुल्क व कर',
+  'New cases':'नवीन अर्ज', 'Payment confirmed':'देयकाची पुष्टी झाली',
+  'View and update service prices for each salesperson.':'प्रत्येक विक्री कर्मचाऱ्यासाठी सेवांचे दर पाहा व अद्ययावत करा.',
+  'Track document review and open the payment request after back office confirms the case price.':'कागदपत्रांच्या तपासणीचा मागोवा घ्या आणि बॅक ऑफिसने शुल्क निश्चित केल्यानंतर देयकाची विनंती उघडा.',
+  'Review Passport, PF Working and Ration Card documents, then send the final price to sales.':'पासपोर्ट, पीएफ आणि रेशन कार्डची कागदपत्रे तपासून अंतिम शुल्क विक्री कर्मचाऱ्यांना पाठवा.',
+  'No cases awaiting review or quoted payment.':'तपासणी किंवा निश्चित शुल्कासाठी कोणतेही अर्ज प्रलंबित नाहीत.',
+  'Reference':'अर्ज क्रमांक', 'Customer':'ग्राहक', 'Updated':'अद्ययावत', 'Created':'तयार केले', 'Details':'तपशील',
+  'Next action':'पुढील कृती', 'Open':'उघडा', 'Filter':'फिल्टर', 'All statuses':'सर्व स्थिती', 'All services':'सर्व सेवा'
+});
+
 let intakeLanguage = 'en';
 try { intakeLanguage = localStorage.getItem('success-online.intake-language') === 'mr' ? 'mr' : 'en'; } catch {}
 let intakeLanguageObserver;
@@ -121,7 +243,7 @@ function intakeTranslate(value, maps) {
 }
 
 function applyIntakeLanguage() {
-  const root = document.querySelector('#drawer[data-intake]');
+  const root = document.body;
   if (!root) return;
   intakeLanguageObserver?.disconnect();
   root.lang = intakeLanguage;
@@ -146,7 +268,7 @@ function applyIntakeLanguage() {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode;
-    if (node.parentElement.closest('.intake-language-toggle, input, textarea, script, style, dd, .doc em, .selected-pages li>span, [data-marathi-input]')) continue;
+    if (node.parentElement.closest('.intake-language-toggle, input, textarea, script, style, dd, .doc em, .selected-pages li>span, [data-marathi-input], [data-language-preserve], .chat-message-text, .document-file-name')) continue;
     let record = intakeTextSources.get(node);
     if (!record || record.rendered !== node.data) record = { source: node.data };
     record.rendered = intakeTranslate(record.source, maps);
@@ -166,6 +288,7 @@ function applyIntakeLanguage() {
     intakeAttributeSources.set(el, records);
   }
   for (const button of root.querySelectorAll('[data-intake-language]')) button.setAttribute('aria-pressed', String(button.dataset.intakeLanguage === intakeLanguage));
+  if (typeof MutationObserver === 'undefined') return;
   intakeLanguageObserver ||= new MutationObserver(applyIntakeLanguage);
   intakeLanguageObserver.observe(root, { childList: true, characterData: true, subtree: true });
 }
@@ -175,6 +298,10 @@ function setIntakeLanguage(language) {
   intakeLanguage = language;
   try { localStorage.setItem('success-online.intake-language', language); } catch {}
   applyIntakeLanguage();
+}
+
+function languageToggle() {
+  return `<div class="intake-language-toggle" role="group" aria-label="Display language"><button type="button" lang="en" data-intake-language="en" aria-pressed="${intakeLanguage === 'en'}" onclick="setIntakeLanguage('en')">English</button><button type="button" lang="mr" data-intake-language="mr" aria-pressed="${intakeLanguage === 'mr'}" onclick="setIntakeLanguage('mr')">मराठी</button></div>`;
 }
 
 function removeNameNumbers(input) { input.value = input.value.replace(/\p{N}/gu, ''); }
@@ -395,7 +522,7 @@ function shell(content) {
     <div class="workspace">
       <header class="top">
         <div class="top-identity"><div class="mobile-brand"><span class="mark">SO</span><div><strong>Success Online</strong><small>${h(roleName(me.role))}</small></div></div><p class="desktop-identity">${h(me.name)} <span class="role">${h(roleName(me.role))}</span></p></div>
-        <div class="top-actions">${canCreate?`<button class="primary new-case-button" onclick="startCase()">${icon('plus')}<span>New case</span></button>`:''}<details class="profile"><summary class="profile-button" aria-label="Open profile menu"><span class="avatar">${h(initials)}</span></summary><div class="profile-menu"><p class="eyebrow">Your account</p><strong>${h(me.name)}</strong><small>${h(roleName(me.role))}</small><div class="profile-login"><span>Staff login</span><strong>${h(me.username)}</strong></div><button onclick="setView('dashboard')">${icon('dashboard')}Overview</button><button onclick="switchAccount()">${icon('switch')}Switch account</button><button class="profile-signout" onclick="logout()">${icon('logout')}Sign out</button></div></details></div>
+        <div class="top-actions">${languageToggle()}${canCreate?`<button class="primary new-case-button" onclick="startCase()">${icon('plus')}<span>New case</span></button>`:''}<details class="profile"><summary class="profile-button" aria-label="Open profile menu"><span class="avatar">${h(initials)}</span></summary><div class="profile-menu"><p class="eyebrow">Your account</p><strong>${h(me.name)}</strong><small>${h(roleName(me.role))}</small><div class="profile-login"><span>Staff login</span><strong>${h(me.username)}</strong></div><button onclick="setView('dashboard')">${icon('dashboard')}Overview</button><button onclick="switchAccount()">${icon('switch')}Switch account</button><button class="profile-signout" onclick="logout()">${icon('logout')}Sign out</button></div></details></div>
       </header>
       <main class="content">${content}</main>
       <nav class="mobile-nav" aria-label="Mobile navigation">${primaryLinks.map(item=>navButton(item,true)).join('')}${moreLinks.length?`<details class="mobile-more"><summary class="${moreLinks.includes(view)?'active':''}">${icon('more')}<span>More</span></summary><div class="more-menu"><p class="eyebrow">Admin workspace</p>${moreLinks.map(item=>navButton(item)).join('')}</div></details>`:''}</nav>
@@ -408,6 +535,7 @@ function render() {
   caseListNeedsRender = false;
   const content = view === 'quotes' ? renderQuotes() : view === 'salesPerformance' ? renderPerformance('sales') : view === 'backofficePerformance' ? renderPerformance('backoffice') : view === 'pending' ? renderPendingCases() : view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : view === 'pricing' ? renderPricing() : renderDashboard();
   app.innerHTML = shell(content);
+  applyIntakeLanguage();
   labelTables();
   renderBackgroundUploads();
 }
@@ -1358,6 +1486,7 @@ async function openCase(caseId) {
     selectedCase = data;
     void markCaseUpdatesRead(caseId);
     document.body.insertAdjacentHTML('beforeend', `<div class="drawer" id="drawer"><div class="panel case-panel">${caseDetail(data.case, data.documents, data.notes)}</div></div>`);
+    startChatPolling();
   } catch (error) { toast(error.message); }
 }
 
@@ -1622,16 +1751,65 @@ async function resumeCaseUpload(caseId,key,input) {
     setDrawerBusy();renderSavedCase(result);void refreshCaseUpdates();toast(result.case.quote?.submittedAt?'Documents submitted to back office.':'File saved. Complete the remaining uploads.');
   } catch(error) {toast(error.message);const result=await api(`/api/cases/${caseId}`).catch(()=>null);if(result){setDrawerBusy();renderSavedCase(result);}} finally {setDrawerBusy();}
 }
+let chatPollTimer = null;
+let chatPollGeneration = 0;
+let chatSending = false;
+let chatRevision = 0;
+function caseChatMessages(item,notes) {
+  const remarks=notes.filter(note=>{try{return ['backoffice_remark','case_message'].includes(JSON.parse(note.next_action || '{}').type);}catch{return false;}});
+  const messages=remarks.map(note=>({...note}));
+  if(item.quote?.reason) messages.push({note:item.quote.reason,actor_id:item.quote.reviewedBy,actor:notes.find(note=>note.actor_id===item.quote.reviewedBy)?.actor || 'Back office',created_at:item.quote.reviewedAt || item.quote.submittedAt,pricing:true});
+  messages.sort((a,b)=>String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  return messages.map(note=>`<article class="chat-message ${note.actor_id && note.actor_id===me.id?'chat-outgoing':'chat-incoming'}"><strong data-language-preserve>${h(note.actor)}</strong>${note.pricing?'<small>Pricing remarks</small>':''}<p class="chat-message-text" dir="auto">${h(note.note)}</p><small data-language-preserve>${dateTime(note.created_at)}</small></article>`).join('') || '<p class="muted">No messages yet.</p>';
+}
 function backofficeRemarks(item,notes) {
-  const remarks=notes.filter(note=>{try{return JSON.parse(note.next_action || '{}').type==='backoffice_remark';}catch{return false;}});
-  return `<section class="detail-section backoffice-remarks"><h3>Back-office remarks</h3><p>Case assessment, document feedback and reasons for the quoted charges. Visible to sales and back office.</p>${item.quote.reason ? `<p><strong>Pricing remarks</strong><br>${h(item.quote.reason)}</p>` : ''}${remarks.map(note=>`<article><p>${h(note.note)}</p><small>${h(note.actor)} · ${dateTime(note.created_at)}</small></article>`).join('') || '<p class="muted">No additional remarks yet.</p>'}${['admin','backoffice'].includes(me.role) && item.quote.submittedAt && !['Closed','Delivered','Cancelled','Rejected'].includes(item.status) ? `<form class="quote-review-form" onsubmit="saveBackofficeRemark(event,'${item.id}')"><label>Add remark<textarea name="remark" required maxlength="2000" rows="3" placeholder="Explain document requirements, urgency or charges"></textarea></label><button class="primary">Send remark to sales</button></form>` : ''}</section>`;
+  return `<section class="detail-section backoffice-remarks"><h3>Case chat</h3><p>Messages between sales, back office and admin.</p><div class="case-chat" role="log" aria-live="polite" aria-relevant="additions" aria-label="Case messages">${caseChatMessages(item,notes)}</div>${['admin','backoffice','sales'].includes(me.role) && item.quote?.submittedAt && !['Cancelled','Rejected'].includes(item.status) ? `<form class="quote-review-form chat-compose" onsubmit="saveBackofficeRemark(event,'${item.id}')"><label>Message<textarea name="remark" required maxlength="2000" rows="2" placeholder="Type a message"></textarea></label><button class="primary">Send message</button><p class="chat-compose-result" role="status" aria-live="polite"></p></form>` : ''}</section>`;
+}
+function updateChatMessages(scrollToLatest=false) {
+  const log=document.querySelector('#drawer .case-chat');
+  if(!log || !selectedCase) return;
+  const atBottom=log.scrollHeight-log.scrollTop-log.clientHeight<60;
+  const html=caseChatMessages(selectedCase.case,selectedCase.notes);
+  if(log.dataset.messages!==html) {
+    log.innerHTML=html;log.dataset.messages=html;
+    if(scrollToLatest || atBottom) log.scrollTop=log.scrollHeight;
+  }
+}
+async function refreshOpenCaseChat() {
+  const caseId=selectedCase?.case.id,userId=me?.id,generation=chatPollGeneration,revision=chatRevision;
+  if(!caseId || !userId || document.hidden || drawerBusy || chatSending || !document.querySelector('#drawer .case-chat')) return;
+  const result=await api(`/api/cases/${caseId}/messages`);
+  if(generation!==chatPollGeneration || revision!==chatRevision || selectedCase?.case.id!==caseId || me?.id!==userId || chatSending) return;
+  selectedCase.notes=result.notes;
+  selectedCase.case.quote=result.quote;
+  updateChatMessages();
+}
+function startChatPolling() {
+  clearTimeout(chatPollTimer);
+  const generation=++chatPollGeneration;
+  updateChatMessages(true);
+  const tick=async()=>{
+    try {await refreshOpenCaseChat();} catch { /* Keep the draft and retry on the next tick. */ }
+    if(generation===chatPollGeneration && me && document.querySelector('#drawer .case-chat')) chatPollTimer=setTimeout(tick,2500);
+  };
+  chatPollTimer=setTimeout(tick,2500);
 }
 async function saveBackofficeRemark(event,caseId) {
-  event.preventDefault();if(drawerBusy) return;
-  const remark=event.target.elements.remark.value.trim();if(!remark)return;
-  setDrawerBusy('Saving remark…');
-  try{const result=await api(`/api/cases/${caseId}/remark`,{method:'POST',body:{remark}});setDrawerBusy();renderSavedCase(result);void refreshCaseUpdates();toast('Remark sent to sales.');}catch(error){toast(error.message);}finally{setDrawerBusy();}
+  event.preventDefault();if(drawerBusy || chatSending) return;
+  const form=event.target,input=form.elements.remark,remark=input.value.trim();if(!remark)return;
+  const userId=me?.id,button=form.querySelector('button'),result=form.querySelector('.chat-compose-result');
+  chatSending=true;button.disabled=true;input.readOnly=true;result.textContent='Sending...';
+  try {
+    const saved=await api(`/api/cases/${caseId}/remark`,{method:'POST',body:{remark,chatOnly:true}});
+    if(me?.id!==userId || selectedCase?.case.id!==caseId) return;
+    chatRevision++;
+    if(!selectedCase.notes.some(note=>note.id===saved.note.id)) selectedCase.notes.push(saved.note);
+    updateChatMessages(true);
+    input.value='';result.textContent='Message sent.';
+  } catch(error) {result.textContent=error.message;}
+  finally {chatSending=false;button.disabled=false;input.readOnly=false;if(form.isConnected) input.focus();}
 }
+
 Object.assign(window,{resumeCaseUpload,finishSavedIntake,saveBackofficeRemark});
 function quoteReviewPanel(item) {
   const quote=item.quote;
@@ -1683,12 +1861,12 @@ async function requestCaseReupload(event,caseId) {
 function caseDetail(item, documents, notes) {
   const intakeDetails = Object.entries(item.details || {}).filter(([, value]) => value).map(([label, value]) => `<div><span>${h(label)}</span><strong${label === 'Password' ? ' class="pf-password-value"' : ''}>${h(value)}</strong>${label === 'Password' && (me.role === 'admin' || (me.role === 'backoffice' && item.backoffice?.id === me.id)) ? `<button type="button" class="quiet" onclick="togglePFPassword('${item.id}',this)">Show password</button>` : ''}</div>`).join('');
   const priced = item.amounts.total > 0;
-  return `<div class="drawer-head"><div><p class="eyebrow">${h(item.ref)}</p><h2>${h(item.customer.name)}</h2><p>${h(item.service.name)} · ${h(item.variant.name)}</p></div><button class="quiet" onclick="closeDrawer()">Close</button></div>
+  return `<div class="drawer-head"><div><p class="eyebrow">${h(item.ref)}</p><h2 data-language-preserve>${h(item.customer.name)}</h2><p>${h(item.service.name)} · ${h(item.variant.name)}</p></div><div class="intake-header-actions">${languageToggle()}<button class="quiet" onclick="closeDrawer()">Close</button></div></div>
     ${item.syntheticTest ? '<aside class="correction-notice"><strong>Synthetic acceptance test</strong><p>No real money has been received. Do not pay or submit this test case to a government portal.</p></aside>' : ''}
-    <div class="case-summary"><div><span>Status</span>${statusBadge(item.status)}</div><div><span>Payment</span>${statusBadge(item.payment_state)}</div><div><span>${priced ? 'Total' : 'Price'}</span><strong>${priced ? money(item.amounts.total) : 'To be confirmed'}</strong></div><div><span>Owner</span><strong>${h(item.backoffice?.name || 'Unassigned')}</strong></div></div>
+    <div class="case-summary"><div><span>Status</span>${statusBadge(item.status)}</div><div><span>Payment</span>${statusBadge(item.payment_state)}</div><div><span>${priced ? 'Total' : 'Price'}</span><strong>${priced ? money(item.amounts.total) : 'To be confirmed'}</strong></div><div><span>Owner</span><strong data-language-preserve>${h(item.backoffice?.name || 'Unassigned')}</strong></div></div>
     ${intakeDetails ? `<section class="detail-section"><div class="panel-title"><div><h3>Application details</h3><p>Information collected for this service request.</p></div></div><div class="review">${intakeDetails}</div></section>` : ''}
     ${item.status === 'Correction Required' ? `<section class="correction-notice"><strong>Returned to sales for correction</strong><p>${h(notes.filter(note => note.new_status === 'Correction Required').at(-1)?.note || 'Review the case timeline and update the requested documents.')}</p></section>` : ''}
-    ${item.quote?.amount ? `<section class="detail-section"><h3>Back-office quote: ${money(item.quote.amount)}</h3><p>${h(item.quote.reason)}</p>${['sales','admin'].includes(me.role) ? `<a href="/?pay=${encodeURIComponent(item.id)}">Open payment link</a>` : ''}</section>` : ''}
+    ${item.quote?.amount ? `<section class="detail-section"><h3><span>Back-office quote</span>: ${money(item.quote.amount)}</h3>${['sales','admin'].includes(me.role) ? `<a href="/?pay=${encodeURIComponent(item.id)}">Open payment link</a>` : ''}</section>` : ''}
     ${casePaymentCard(item)}
     ${item.quote ? backofficeRemarks(item,notes) : ''}
     <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div><div class="document-section-actions">${canRequestReupload(item)?'<button type="button" class="request-reupload-button" onclick="showCaseReuploadRequest()">Request reupload</button>':''}${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div></div>${caseReuploadForm(item)}<div class="upload-list">${documentChecklist(item, documents)}</div>${reuploadSubmissionPanel(item)}</section>
@@ -1847,6 +2025,7 @@ async function progress(caseId) {
 
 function closeDrawer() {
   if(drawerBusy) return;
+  clearTimeout(chatPollTimer);chatPollGeneration++;
   intakeLanguageObserver?.disconnect();
   closeDocumentPreview();
   document.querySelector('#drawer')?.remove();
@@ -1901,15 +2080,27 @@ function renderPricing() {
   if (pricingError) return `${head}<section class="analytics-panel"><p role="alert">Could not load pricing: ${h(pricingError)}</p><button class="primary" onclick="loadPricing()">Retry</button></section>`;
   if (!pricingData) return head + empty('Loading pricing...');
   const selected = pricingData.salespeople.find(person => person.id === pricingSalesId);
-  return `${head}<section class="analytics-panel pricing-panel"><label class="pricing-salesperson">Salesperson<select id="pricingSalesperson" onchange="selectPricingSalesperson(this.value)"><option value="">Choose a salesperson...</option>${pricingData.salespeople.map(person=>`<option value="${h(person.id)}" ${person.id===pricingSalesId?'selected':''}>${h(person.name)} (${h(person.username)})${person.active?'':' - Inactive'}</option>`).join('')}</select></label></section>${selected?`<section class="pricing-grid" aria-label="Service prices for ${h(selected.name)}">${pricingData.prices.filter(price=>!['Passport','PF Working (Provident Fund)','Ration Card'].includes(price.service_name)).map(price=>{
-    const custom=pricingData.overrides.find(item=>item.sales_user_id===selected.id && item.variant_id===price.variant_id);
-    return `<form class="analytics-panel pricing-card" onsubmit="saveSalespersonPrice(event,'${h(price.variant_id)}')"><h2>${h(price.service_name)}</h2><small>${h(price.variant_name)}</small><label>Current price (Rs.)<input name="price" aria-label="${h(price.service_name)}${['Food License','Caste Validity Certificate'].includes(price.service_name) ? ' '+h(price.variant_name) : ''} price" type="number" min="0.01" max="1000000" step="0.01" value="${((custom?.price ?? price.price)/100).toFixed(2)}" required></label><div class="pricing-actions"><button class="primary" type="submit">Update price</button></div><small class="pricing-result" role="status"></small></form>`;
-  }).join('')}</section>`:empty(pricingData.salespeople.length?'Choose a salesperson to edit their service prices.':'Create a sales employee in Employees to set their prices.')}`;
+  return `${head}<section class="analytics-panel pricing-panel"><label class="pricing-salesperson">Salesperson<select id="pricingSalesperson" onchange="selectPricingSalesperson(this.value)"><option value="">Choose a salesperson...</option>${pricingData.salespeople.map(person=>`<option value="${h(person.id)}" ${person.id===pricingSalesId?'selected':''}>${h(person.name)} (${h(person.username)})${person.active?'':' - Inactive'}</option>`).join('')}</select></label></section>${selected?`<section class="pricing-grid" aria-label="Service prices for ${h(selected.name)}">${pricingData.prices.filter(price=>!['Passport','PF Working (Provident Fund)','Ration Card'].includes(price.service_name)).filter((price,index,prices)=>!['Food License','Caste Validity Certificate'].includes(price.service_name) || prices.findIndex(other=>other.service_name===price.service_name)===index).map(price=>renderPricingCard(price)).join('')}</section>`:empty(pricingData.salespeople.length?'Choose a salesperson to edit their service prices.':'Create a sales employee in Employees to set their prices.')}`;
 }
+const pricingVariants = new Map();
+function renderPricingCard(initial) {
+  const grouped=['Food License','Caste Validity Certificate'].includes(initial.service_name);
+  const options=pricingData.prices.filter(price=>price.service_name===initial.service_name);
+  const price=grouped ? options.find(price=>price.variant_id===pricingVariants.get(initial.service_name)) || initial : initial;
+  const custom=pricingData.overrides.find(item=>item.sales_user_id===pricingSalesId && item.variant_id===price.variant_id);
+  return `<form class="analytics-panel pricing-card" onsubmit="saveSalespersonPrice(event,'${h(price.variant_id)}')"><h2>${h(price.service_name)}</h2>${grouped?`<label>${price.service_name==='Food License'?'Duration':'Purpose'}<select name="variant" onchange="selectPricingVariant(this)">${options.map(option=>`<option value="${h(option.variant_id)}" ${option.variant_id===price.variant_id?'selected':''}>${h(option.variant_name)}</option>`).join('')}</select></label>`:`<small>${h(price.variant_name)}</small>`}<label>Current price (Rs.)<input name="price" aria-label="${h(price.service_name)}${grouped?' '+h(price.variant_name):''} price" type="number" min="0.01" max="1000000" step="0.01" value="${((custom?.price ?? price.price)/100).toFixed(2)}" required></label><div class="pricing-actions"><button class="primary" type="submit">Update price</button></div><small class="pricing-result" role="status"></small></form>`;
+}
+function selectPricingVariant(select) {
+  const price=pricingData.prices.find(price=>price.variant_id===select.value);
+  if(!price) return;
+  pricingVariants.set(price.service_name,price.variant_id);
+  select.form.outerHTML=renderPricingCard(price);
+}
+
 function selectPricingSalesperson(value) { pricingSalesId=value;render(); }
 async function persistSalespersonPrice(form,variantId,price) {
   const salesUserId=pricingSalesId, owner=me?.id;
-  const buttons=[...form.querySelectorAll('button')];
+  const buttons=[...form.querySelectorAll('button, select')];
   const result=form.querySelector('.pricing-result');
   buttons.forEach(button=>button.disabled=true);result.textContent='Saving...';
   try {
@@ -1931,7 +2122,7 @@ async function saveSalespersonPrice(event,variantId) {
   const price=Math.round(Number(event.target.elements.price.value)*100);
   await persistSalespersonPrice(event.target,variantId,price);
 }
-Object.assign(window,{loadPricing,selectPricingSalesperson,saveSalespersonPrice});
+Object.assign(window,{loadPricing,selectPricingSalesperson,selectPricingVariant,saveSalespersonPrice});
 
 let paymentData = null, paymentSettings = null, checkout = null;
 let paymentFilters = '';
