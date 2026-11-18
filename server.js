@@ -22,6 +22,7 @@ import { PF_PASSWORD_KEY, encryptPFPassword, decryptPFPassword, publicCaseDetail
 import { INTAKE_UPLOADS, createUploadBatch, uploadBatchState, uploadManifestEntry } from './intake-uploads.js';
 import { sheetHeaders, operationsRows } from './operations-schema.js';
 import { createPayments, paymentSchema, paymentConfig, priceAmounts } from './payments.js';
+import {ingestSmsObservation,enrollSmsDevice} from './sms-observer.js';
 import { correctionStatuses, reuploadState } from './reuploads.js';
 import {announcementSchema, createAnnouncements} from './announcements.js';
 import {staffPerformance} from './staff-performance.js';
@@ -559,6 +560,19 @@ async function processingGate(c,res) {
   send(res,409,{error:'Payment must be received and verified before back-office processing'});return false;
 }
 async function routeApi(req, res, url) {
+  if(url.pathname==='/api/sms-observer/pair') {
+    if(req.method!=='POST')return send(res,405,{error:'Method not allowed'});
+    return send(res,200,await enrollSmsDevice(req,db));
+  }
+  if(url.pathname==='/api/sms-observer/events') {
+    if(req.method!=='POST') return send(res,405,{error:'Method not allowed'});
+    const result=await ingestSmsObservation(req,db,paymentConfig());
+    if(result.observationId) {
+      const observation=await one('SELECT rrn FROM sms_payment_observations WHERE id=$id',{$id:result.observationId});
+      if(observation)await paymentSystem.autoConfirmSms(observation.rrn);
+    }
+    return send(res,200,result);
+  }
   if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true });
   if (req.method === 'POST' && url.pathname === '/api/login') return body(req).then(async b => {
     const u = (await one("SELECT u.*,COALESCE(s.value,'0') session_version FROM users u LEFT JOIN integration_settings s ON s.name='STAFF_SESSION_' || u.id WHERE u.username=$u AND u.active=1", { $u: b.username }));
@@ -1262,7 +1276,7 @@ export async function handler(req, res) {
     const sheetsJobs = new Set(),caseMirrorJobs=new Set();
     const documentRequest = req.method==='POST' && (url.pathname==='/api/cases' || /\/api\/cases\/[^/]+\/(documents|finish-uploads)$/.test(url.pathname));
     const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|submit-received-document|request-reupload|submit-reupload|submit-review|set-quote|remark|resume-upload)$/.test(url.pathname);
-    const paymentRequest = /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/(payment-order|cash-payment)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname);
+    const paymentRequest = url.pathname==='/api/sms-observer/events' || /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/(payment-order|cash-payment)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname);
     const readOnly = (req.method === 'GET' && (
       ['/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments','/api/payments/cash-pending'].includes(url.pathname) ||
       /^\/api\/cases\/[^/]+(?:\/messages)?$/.test(url.pathname) || /^\/api\/documents\/[^/]+\/(download|preview|view)$/.test(url.pathname) || /^\/api\/announcements(?:\/[^/]+\/image)?$/.test(url.pathname)
@@ -1278,7 +1292,7 @@ export async function handler(req, res) {
         for (const setting of settings) process.env[setting.name] = setting.value;
         servicePrices=new Map(prices.map(p=>[p.variant_id,{price:p.price,original:JSON.parse(p.original_config)}]));
       }
-      if (db.cloud && url.pathname!=='/api/payments/cash-pending' && (/^\/api\/payments\//.test(url.pathname) || /\/payment-order$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname))) await one('SELECT pg_advisory_xact_lock(73194204)');
+      if (db.cloud && url.pathname!=='/api/payments/cash-pending' && (url.pathname==='/api/sms-observer/events' || /^\/api\/payments\//.test(url.pathname) || /\/payment-order$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname))) await one('SELECT pg_advisory_xact_lock(73194204)');
       await routeApi(req, buffered, url);
     };
     await deferredCaseMirrors.run(caseMirrorJobs,()=>deferredSheets.run(sheetsJobs, () => readOnly && db.cloud ? route() : db.transaction(route)));

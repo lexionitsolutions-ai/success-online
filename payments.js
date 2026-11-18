@@ -4,6 +4,9 @@ import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 import {batchSchema,createBatchPayments} from './payment-batches.js';
 import {cashSchema,createCashPayments,cashAccount} from './cash-payments.js';
+import {smsObserverSchema,paymentSmsEvidence,observerConfig} from './sms-observer.js';
+import {confirmMatchedSms,smsAutoConfirmEnabled} from './sms-auto-confirm.js';
+import {smsCheckoutSchema,reserveSmsCheckout,checkoutAmounts,claimUniqueSms,reconcileUniqueCheckout} from './sms-checkouts.js';
 
 export function paymentConfig() {
   return { upiId: '0791934A0195602.bqr@kotak', payeeName: 'SUCCESS ONLINE SERVICES', mobile: '+91 7558548187', currency: 'INR', accountType:'merchant', testPricingMode: process.env.TEST_PRICING_MODE !== 'false' };
@@ -44,7 +47,7 @@ CREATE TABLE IF NOT EXISTS verified_upi_refs (utr TEXT PRIMARY KEY, payment_id T
 CREATE TABLE IF NOT EXISTS payment_exceptions (case_id TEXT PRIMARY KEY REFERENCES cases(id), approved_by TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS one_paid_upi_per_case ON payments(case_id) WHERE gateway='direct_upi' AND status='PAID';
 CREATE INDEX IF NOT EXISTS upi_status_idx ON payments(gateway,status,created_at);
-` + batchSchema + cashSchema;
+` + batchSchema + cashSchema + smsObserverSchema + smsCheckoutSchema;
 const fail = (status,message) => { throw Object.assign(new Error(message),{status}); };
 const normalizeUTR = value => {
   const utr = String(value || '').trim();
@@ -54,6 +57,11 @@ const normalizeUTR = value => {
 export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}) {
   const {one,all,run} = db;
   const cash=createCashPayments({db,config:paymentConfig});
+  const autoConfirmSms=async rrn=>{
+    if(!await receiverReady())return false;
+    await claimUniqueSms(db,rrn,paymentConfig());
+    return confirmMatchedSms(db,rrn,{receiver:paymentConfig(),receiverReady,recomputeCase,scheduleCaseSync,assertBalanceFits:cash.assertFits});
+  };
   const at = () => new Date().toISOString();
   async function audit(user, action, entity, notes) {
     await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:randomUUID(),$actor:user.id,$action:`payment.${action}`,$type:'payment',$entity:entity,$reason:notes || '',$at:at()});
@@ -69,7 +77,8 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
     if(caseId) {params.$case=caseId;filters.push('p.case_id=$case');}
     if(user.role==='sales') {params.$user=user.id;filters.push('c.sales_user_id=$user');}
     if(paymentId) {params.$payment=paymentId;filters.push('p.id=$payment');}
-    return all(`SELECT p.*,o.*,ca.case_id cash_account,bi.batch_id,pb.status batch_status,EXISTS (SELECT 1 FROM payments locked WHERE locked.case_id=p.case_id AND locked.gateway='direct_upi' AND locked.status IN ('PAID','AWAITING_VERIFICATION')) case_payment_locked,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id LEFT JOIN payment_batch_items bi ON bi.payment_id=p.id LEFT JOIN payment_batches pb ON pb.id=bi.batch_id JOIN cases c ON c.id=p.case_id LEFT JOIN cash_accounts ca ON ca.case_id=c.id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${filters.length ? 'WHERE '+filters.join(' AND ') : ''} ORDER BY p.created_at DESC,p.id`,params);
+    const rows=await all(`SELECT p.*,o.*,ca.case_id cash_account,bi.batch_id,pb.status batch_status,EXISTS (SELECT 1 FROM payments locked WHERE locked.case_id=p.case_id AND locked.gateway='direct_upi' AND locked.status IN ('PAID','AWAITING_VERIFICATION')) case_payment_locked,cu.name customer_name,cu.mobile customer_mobile,c.ref case_ref,c.status case_status,c.customer_id,c.service_id,c.sales_user_id,u.name employee_name FROM payments p JOIN upi_orders o ON o.payment_id=p.id LEFT JOIN payment_batch_items bi ON bi.payment_id=p.id LEFT JOIN payment_batches pb ON pb.id=bi.batch_id JOIN cases c ON c.id=p.case_id LEFT JOIN cash_accounts ca ON ca.case_id=c.id JOIN customers cu ON cu.id=c.customer_id JOIN users u ON u.id=o.created_by ${filters.length ? 'WHERE '+filters.join(' AND ') : ''} ORDER BY p.created_at DESC,p.id`,params);
+    return rows.map(p=>({...p,smsAutoConfirmEnabled:p.gateway!=='cash' && smsAutoConfirmEnabled()}));
   }
   async function createOrder(c,user,{individual=false}={}) {
     const quote=caseQuote(c);
@@ -129,15 +138,17 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
     const balance=p.gateway==='balance_upi'?await cash.summary(p.case_id):null;
     const cashPaymentAllowed=!p.cash_account && cashAccount(user) && p.sales_user_id===user.id && !otherPaid && !otherClaim && p.gateway!=='cash' && ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status) && !['Deleted','Cancelled','Closed','Delivered'].includes(p.case_status);
     const active = p.gateway!=='cash' && ready && !receiverChanged && !otherPaid && !otherClaim && (!balance || p.amount===balance.amountToPay) && p.case_status!=='Cancelled' && ['PENDING','INITIATED'].includes(p.status);
-    const upiIntent = active ? generateUPIPaymentURL({upiId:p.upi_id,payeeName:p.payee_name,amount:p.amount,orderId:p.gateway_order_id,serviceName:p.service_name,customerName:p.customer_name}) : null;
-    return {...p,cashPaymentAllowed:cashPaymentAllowed || cashAccount(user) && p.sales_user_id===user.id && p.gateway==='balance_upi' && !!balance?.amountToPay && !['Deleted','Cancelled'].includes(p.case_status) && ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status),orderId:p.gateway_order_id,receiverReady:ready,receiverChanged,otherClaimPending:!!otherClaim,otherPaymentVerified:!!otherPaid,receiverAccountType:receiverChanged ? 'previous_receiver' : config.accountType,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
+    const reservation=await reserveSmsCheckout(db,p,active);
+    const amounts=checkoutAmounts(reservation,p.amount);
+    const upiIntent = active ? generateUPIPaymentURL({upiId:p.upi_id,payeeName:p.payee_name,amount:amounts.payableAmount,orderId:p.gateway_order_id,serviceName:p.service_name,customerName:p.customer_name}) : null;
+    return {...p,...amounts,smsAutoConfirmEnabled:smsAutoConfirmEnabled(),smsObserverEnabled:Boolean(observerConfig().enabled),smsEvidence:await paymentSmsEvidence(db,p,config),cashPaymentAllowed:cashPaymentAllowed || cashAccount(user) && p.sales_user_id===user.id && p.gateway==='balance_upi' && !!balance?.amountToPay && !['Deleted','Cancelled'].includes(p.case_status) && ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status),orderId:p.gateway_order_id,receiverReady:ready,receiverChanged,otherClaimPending:!!otherClaim,otherPaymentVerified:!!otherPaid,receiverAccountType:receiverChanged ? 'previous_receiver' : config.accountType,upiIntent,qrDataUrl:upiIntent ? await QRCode.toDataURL(upiIntent,{width:360,margin:4,errorCorrectionLevel:'M'}) : null,attempts:await all('SELECT * FROM payment_attempts WHERE payment_id=$id ORDER BY created_at',{$id:pid})};
   }
   async function event(p,user,action,b,{touch=true}={}) {
     if(touch) await run('UPDATE upi_orders SET updated_at=$at WHERE payment_id=$id',{$at:at(),$id:p.id});
     await run('INSERT INTO payment_attempts VALUES ($id,$payment,$action,$method,$utr,$actor,$notes,$at)',{$id:randomUUID(),$payment:p.id,$action:action,$method:b.method || null,$utr:b.utr || null,$actor:user.id,$notes:b.notes || '',$at:at()});
     await audit(user,action,p.id,b.notes);
   }
-  const batches=createBatchPayments({db,send,body,createOrder,recomputeCase,receiverReady,event,config:paymentConfig,generateURL:generateUPIPaymentURL});
+  const batches=createBatchPayments({db,send,body,createOrder,recomputeCase,receiverReady,event,config:paymentConfig,generateURL:generateUPIPaymentURL,autoConfirmSms});
   async function handle(req,res,url,user) {
     if(await batches.handle(req,res,url,user)) return true;
     if (url.pathname === '/api/admin/pricing') {
@@ -227,7 +238,7 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
       }
       send(res,200,{payments:rows,metrics}); return true;
     }
-    const match=url.pathname.match(/^\/api\/payments\/([^/]+)(?:\/(initiate|submit|cancel|verify|reject|refund|receipt))?$/);
+    const match=url.pathname.match(/^\/api\/payments\/([^/]+)(?:\/(initiate|submit|cancel|verify|reject|refund|receipt|check))?$/);
     if (!match) return false;
     if (req.method==='POST' && db.cloud) {
       // Serialize payment mutations with order creation, refunds and case processing.
@@ -239,6 +250,12 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
       send(res,200,p);return true;
     }
     if(req.method!=='POST' || !action || action==='receipt') fail(405,'Method not allowed');
+    if(action==='check') {
+      if(!['admin','sales'].includes(user.role))fail(403,'Not allowed');
+      await reconcileUniqueCheckout(db,p.id,autoConfirmSms);
+      if(p.status==='AWAITING_VERIFICATION')await autoConfirmSms(p.transaction_id);
+      send(res,200,{ok:true,payment:await detail(p.id,user)});return true;
+    }
     const b=await body(req);
     b.notes=String(b.notes || '').trim().slice(0,1000);
     if(['verify','reject','refund'].includes(action) && user.role!=='admin') fail(403,'Only administrators can verify receiving account records');
@@ -282,11 +299,12 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
       await run("UPDATE payments SET status='REFUNDED' WHERE id=$id",{$id:p.id});
     }
     await event(p,user,action,b,{touch:action!=='verify'});
+    if(action==='submit')await autoConfirmSms(b.utr);
     if(p.gateway==='cash' && action==='verify' && scheduleCaseSync) {
       await recomputeCase(p.case_id,{sync:false});
       await scheduleCaseSync(p.case_id);
     } else await recomputeCase(p.case_id);
     send(res,200,{ok:true,payment:await detail(p.id,user)}); return true;
   }
-  return {handle,createOrder,detail,list,receiverReady,audit,cash};
+  return {handle,createOrder,detail,list,receiverReady,audit,cash,autoConfirmSms};
 }

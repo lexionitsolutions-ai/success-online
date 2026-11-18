@@ -57,6 +57,15 @@ const intakeWords = {
 Object.assign(intakeWords, {
   'Back-office quote':'बॅक ऑफिसने निश्चित केलेले शुल्क',
   'Sending...':'पाठवत आहे...', 'Message sent.':'संदेश पाठवला.',
+  'Payment alert received':'देयकाचा संदेश मिळाला', 'Payment alert needs review':'देयकाचा संदेश तपासणे आवश्यक आहे',
+  'Payment successful':'देयक यशस्वी झाले', 'Confirming your payment':'देयकाची पुष्टी करत आहे',
+  'Continue to case':'अर्जाकडे जा',
+  'Waiting for the merchant phone to confirm this transaction. This screen updates automatically.':'व्यापाऱ्याच्या फोनवरून व्यवहाराच्या पुष्टीची प्रतीक्षा आहे. हा पडदा आपोआप अद्ययावत होईल.',
+  'Enter the reference from your UPI app. Matching merchant SMS will confirm this payment automatically.':'तुमच्या यूपीआय ॲपमधील संदर्भ क्रमांक भरा. जुळणाऱ्या संदेशावरून देयकाची पुष्टी आपोआप होईल.',
+  'Waiting for payment alert':'देयकाच्या संदेशाची प्रतीक्षा', 'Check payment alert':'देयकाचा संदेश तपासा',
+  'A matching Worldline SMS was received. Admin verification is still required.':'जुळणारा वर्ल्डलाइन संदेश मिळाला. प्रशासकाची पडताळणी अद्याप आवश्यक आहे.',
+  'The SMS reference needs manual review. It does not confirm this payment.':'संदेशातील संदर्भाची तपासणी आवश्यक आहे. यामुळे देयकाची पुष्टी होत नाही.',
+  'Once the merchant phone forwards the SMS, check here for a matching reference.':'व्यापाऱ्याच्या फोनवरून संदेश आल्यावर जुळणारा संदर्भ येथे तपासा.',
   "Overview": "आढावा",
   "Dashboard": "डॅशबोर्ड",
   "Cases": "अर्ज",
@@ -2026,6 +2035,7 @@ async function progress(caseId) {
 function closeDrawer() {
   if(drawerBusy) return;
   clearTimeout(chatPollTimer);chatPollGeneration++;
+  clearTimeout(paymentStatusTimer);paymentStatusGeneration++;
   intakeLanguageObserver?.disconnect();
   closeDocumentPreview();
   document.querySelector('#drawer')?.remove();
@@ -2192,7 +2202,7 @@ function paymentCaseRows() {
 }
 function paymentTableRow(p) {
   const payable = batchEligible(p);
-  const review = me.role === 'admin' && p.status === 'AWAITING_VERIFICATION';
+  const review = me.role === 'admin' && p.status === 'AWAITING_VERIFICATION' && !p.smsAutoConfirmEnabled;
   const status = ({PENDING:'Unpaid',INITIATED:'Unpaid',AWAITING_VERIFICATION:'Under review',PAID:'Verified',CANCELLED:'Cancelled checkout',EXPIRED:'Expired checkout',FAILED:'Claim rejected',REFUNDED:'Refunded'})[p.status] || p.status;
   const tone = p.status === 'PAID' ? 'success' : ['PENDING','INITIATED','AWAITING_VERIFICATION','FAILED'].includes(p.status) ? 'warning' : 'neutral';
   return `<tr class="${selectedPaymentCases.has(p.case_id) && payable ? 'payment-row-selected' : ''}">
@@ -2275,7 +2285,7 @@ function exportPayments() {
   downloadPaymentAsset(URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'})),'payments.csv',true);
 }
 function downloadPaymentAsset(url,name,revoke=false) {const a=document.createElement('a');a.href=url;a.download=name;a.click();if(revoke) setTimeout(()=>URL.revokeObjectURL(url),1000);}
-async function copyPayment(kind) {try {await navigator.clipboard.writeText(kind==='id' ? checkout.upi_id : kind==='amount' ? (checkout.amount/100).toFixed(2) : kind==='order' ? checkout.gateway_order_id : checkout.upiIntent);toast('Copied');} catch {toast('Copy unavailable. Select the displayed payment details manually.');}}
+async function copyPayment(kind) {try {await navigator.clipboard.writeText(kind==='id' ? checkout.upi_id : kind==='amount' ? ((checkout.payableAmount ?? checkout.amount)/100).toFixed(2) : kind==='order' ? checkout.gateway_order_id : checkout.upiIntent);toast('Copied');} catch {toast('Copy unavailable. Select the displayed payment details manually.');}}
 async function pay(caseId) {
   if(drawerBusy) return;
   setDrawerBusy('Opening checkout…');
@@ -2284,6 +2294,7 @@ async function pay(caseId) {
     setDrawerBusy();await showPayment(p.id,p);
   } catch(e) {toast(e.message);} finally {setDrawerBusy();}
 }
+let paymentStatusTimer=null,paymentStatusGeneration=0;
 async function showPayment(pid,payment=null) {
   if(drawerBusy) return;
   try {
@@ -2291,6 +2302,7 @@ async function showPayment(pid,payment=null) {
     document.body.insertAdjacentHTML('beforeend',`<div class="drawer payment-overlay" id="drawer"><div class="panel case-panel payment-checkout" role="dialog" aria-modal="true" aria-label="Payment checkout">${checkoutHTML(checkout)}</div></div>`);
     document.body.classList.add('payment-open');
     const dialog=document.querySelector('.payment-checkout');
+    startPaymentStatusPolling();
     dialog.querySelector('.checkout-close')?.focus({preventScroll:true});
     dialog.addEventListener('keydown',event=>{
       if(event.key==='Escape') {event.preventDefault();closeDrawer();return;}
@@ -2321,6 +2333,8 @@ async function recordCheckoutCash(event) {
 function checkoutHTML(p) {
   if(p.gateway==='cash') return cashReceiptHTML(p);
   const active=!!p.upiIntent, editable=['sales','admin'].includes(me.role), verified=p.status==='PAID';
+  const payableAmount=p.payableAmount ?? p.amount;
+  const watching=p.automaticReference && ['PENDING','INITIATED','AWAITING_VERIFICATION'].includes(p.status);
   const compact=(window.innerWidth || 1280)<701;
   const labels={PENDING:'Unpaid Payment',INITIATED:'Unpaid Payment',AWAITING_VERIFICATION:'Under review',PAID:'Verified',FAILED:'Claim rejected',CANCELLED:'Cancelled',EXPIRED:'Expired',REFUNDED:'Refunded'};
   const receiverChanged=p.receiverChanged && ['PENDING','INITIATED','EXPIRED','CANCELLED','FAILED'].includes(p.status);
@@ -2328,21 +2342,69 @@ function checkoutHTML(p) {
   const glyph=(name)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{close:'<path d="m6 6 12 12M18 6 6 18"/>',arrow:'<path d="m9 5 7 7-7 7"/>',download:'<path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/>',check:'<path d="m5 12 4 4L19 6"/>',qr:'<path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h3v3h-3zM21 15v6h-6"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'}[name]}</svg>`;
   const primary=editable && !['PAID','REFUNDED'].includes(p.status);
   return `<header class="checkout-header"><div class="checkout-brand"><span class="checkout-brand-mark">SO</span><div><h2>${h(p.payee_name)}</h2><p>UPI checkout</p></div></div><button class="checkout-close" onclick="closeDrawer()" aria-label="Close">${glyph('close')}</button></header>
-    <div class="checkout-body"><aside class="checkout-summary"><span class="checkout-kicker">TOTAL PAYABLE</span><div class="checkout-amount">${money(p.amount)}</div><span class="checkout-status checkout-status-${p.status.toLowerCase()}"><i></i>${h(labels[p.status] || p.status)}</span><div class="checkout-service"><span>Services</span><strong>${h(p.service_name)}</strong></div><div class="checkout-customer"><span>Customer</span><strong>${h(p.customer_name)}</strong></div>${p.batch ? `<section class="summary-box checkout-batch-items"><strong>Included work orders</strong>${p.items.map(item=>`<p>${h(item.customer_name)} - ${h(item.service_name)} - ${h(item.ref)} <strong>${money(item.amount)}</strong></p>`).join('')}</section>` : ''}<details class="checkout-order"><summary>Order details</summary><dl><dt class="checkout-mobile-customer">Customer</dt><dd class="checkout-mobile-customer">${h(p.customer_name)}</dd><dt>Order ID</dt><dd class="selectable">${h(p.gateway_order_id)}</dd><dt>UPI ID</dt><dd class="selectable">${h(p.upi_id)}</dd><dt>Checkout expiry</dt><dd>${dateTime(p.expires_at)}</dd></dl>${active ? '<button class="checkout-text-button" onclick="copyPayment(\'link\')">Copy payment link</button>' : ''}</details></aside>
+    <div class="checkout-body"><aside class="checkout-summary"><span class="checkout-kicker">TOTAL PAYABLE</span><div class="checkout-amount">${money(payableAmount)}</div>${p.matchingAdjustment ? `<dl class="checkout-price-breakdown"><div><dt>Service total</dt><dd>${money(p.amount)}</dd></div><div><dt>Payment matching amount</dt><dd>${money(p.matchingAdjustment)}</dd></div></dl>` : ''}<span class="checkout-status checkout-status-${p.status.toLowerCase()}"><i></i>${h(labels[p.status] || p.status)}</span><div class="checkout-service"><span>Services</span><strong>${h(p.service_name)}</strong></div><div class="checkout-customer"><span>Customer</span><strong>${h(p.customer_name)}</strong></div>${p.batch ? `<section class="summary-box checkout-batch-items"><strong>Included work orders</strong>${p.items.map(item=>`<p>${h(item.customer_name)} - ${h(item.service_name)} - ${h(item.ref)} <strong>${money(item.amount)}</strong></p>`).join('')}</section>` : ''}<details class="checkout-order"><summary>Order details</summary><dl><dt class="checkout-mobile-customer">Customer</dt><dd class="checkout-mobile-customer">${h(p.customer_name)}</dd><dt>Order ID</dt><dd class="selectable">${h(p.gateway_order_id)}</dd><dt>UPI ID</dt><dd class="selectable">${h(p.upi_id)}</dd><dt>Checkout expiry</dt><dd>${dateTime(p.expires_at)}</dd></dl>${active ? '<button class="checkout-text-button" onclick="copyPayment(\'link\')">Copy payment link</button>' : ''}</details></aside>
     <main class="checkout-main">${cashCheckoutOptions(p)}
       ${!p.receiverReady ? '<div class="checkout-notice" role="alert"><strong>Checkout is not enabled yet</strong><p>An administrator can enable the receiving account in Payments settings.</p></div>' : ''}
       ${p.otherClaimPending ? '<div class="checkout-notice" role="alert"><strong>A payment claim is already under review</strong><p>Wait for verification before making another payment for this service.</p></div>' : ''}
       ${inactive ? `<div class="checkout-notice" role="alert"><strong>${receiverChanged ? 'Receiving account updated' : h(labels[p.status])+' checkout'}</strong><p>Reopen checkout to start a new payment request. If you already sent money, submit its UTR instead. An inactive checkout does not cancel a bank transfer.</p></div>` : ''}
-      ${p.status==='AWAITING_VERIFICATION' ? `<div class="checkout-result checkout-review"><span class="checkout-result-icon">${glyph('lock')}</span><h3>Payment details received</h3><p>Your payment is awaiting verification.</p><span class="checkout-reference">UTR ${h(p.transaction_id)}</span>${editable ? '<button class="checkout-text-button" onclick="revealPaymentUTR()">Update reference</button>' : ''}</div>` : ''}
-      ${verified ? `<div class="checkout-result"><span class="checkout-result-icon">${glyph('check')}</span><h3>Payment verified</h3><p>Your service can proceed once the required documents are complete.</p></div><section class="checkout-receipt"><h3>Verified payment receipt</h3><div><span>Transaction reference</span><strong class="selectable">${h(p.transaction_id)}</strong></div><div><span>Verified on</span><strong>${dateTime(p.verified_at)}</strong></div><button class="checkout-secondary" onclick="downloadReceipt()">${glyph('download')}Download receipt</button></section>` : ''}
+      ${watching ? `<div class="checkout-result checkout-review" role="status" aria-live="polite"><span class="payment-wait-spinner" aria-hidden="true"></span><h3>Waiting for payment confirmation</h3><p>Pay exactly <strong>${money(payableAmount)}</strong>. This screen confirms automatically when the merchant phone receives the matching SMS.</p><button class="checkout-text-button" onclick="revealPaymentUTR()">Payment not showing? Enter UTR</button></div>` : ''}
+      ${!watching && p.status==='AWAITING_VERIFICATION' ? `<div class="checkout-result checkout-review"><span class="checkout-result-icon">${glyph('lock')}</span><h3>${p.smsAutoConfirmEnabled?'Confirming your payment':'Payment details received'}</h3><p>${p.smsAutoConfirmEnabled?'Waiting for the merchant phone to confirm this transaction. This screen updates automatically.':'Your payment is awaiting verification.'}</p><span class="checkout-reference">UTR ${h(p.transaction_id)}</span>${editable ? '<button class="checkout-text-button" onclick="revealPaymentUTR()">Update reference</button>' : ''}</div>` : ''}
+      ${verified ? `<div class="checkout-result checkout-success" role="status" aria-live="polite"><span class="checkout-result-icon">${glyph('check')}</span><h3>Payment successful</h3><p>Your service can proceed once the required documents are complete.</p></div><section class="checkout-receipt"><h3>Verified payment receipt</h3><div><span>Transaction reference</span><strong class="selectable">${h(p.transaction_id)}</strong></div><div><span>Verified on</span><strong>${dateTime(p.verified_at)}</strong></div><button class="checkout-secondary" onclick="downloadReceipt()">${glyph('download')}Download receipt</button></section>` : ''}
       ${p.status==='REFUNDED' ? '<div class="checkout-result"><h3>Refund verified</h3><p>This payment has been recorded as refunded.</p></div>' : ''}
       ${active && editable ? `<div class="checkout-section-heading"><h3>Pay with UPI</h3><span>UPI</span></div><div class="upi-layout"><section class="upi-apps"><p class="checkout-section-label">Pay with an app</p><div class="upi-options">${['Google Pay','PhonePe','Paytm','BHIM','Other UPI App'].map((app,i)=>`<button class="upi-app upi-${i}" onclick="launchUPI('${app}')">${i<4 ? `<img class="upi-brand-logo" src="/assets/payments/${['google-pay.png','phonepe.svg','paytm.svg','bhim.png'][i]}" alt="" width="96" height="36"><strong class="upi-brand-name">${app}</strong>` : `<span class="upi-app-mark" aria-hidden="true">${glyph('qr')}</span><strong>${app}</strong>`}${glyph('arrow')}</button>`).join('')}</div><p class="checkout-app-note">Amount and recipient are prefilled.</p></section><details class="upi-qr" id="qrChoice" ontoggle="if(this.open && innerWidth&lt;701) this.querySelector('img').scrollIntoView({block:'center'})" ${compact ? '' : 'open'}><summary>${glyph('qr')}Scan & pay<span>${glyph('arrow')}</span></summary><div class="checkout-qr-content"><img src="${p.qrDataUrl}" alt="UPI QR for ${h(p.gateway_order_id)}" width="360" height="360"><p>Scan with any compatible UPI app</p><button class="checkout-text-button" onclick="downloadPaymentAsset(checkout.qrDataUrl,'upi-qr.png')">${glyph('download')}Download QR</button></div></details></div>` : ''}
       ${primary ? `<form id="utrForm" class="checkout-utr" hidden onsubmit="submitUTR(event)"><div class="checkout-section-heading"><h3>Confirm your payment</h3></div><label>UPI transaction reference<input name="utr" inputmode="numeric" pattern="[0-9]{12}" maxlength="12" required placeholder="Enter the 12-digit UTR" value="${h(p.transaction_id || '')}" autocomplete="off"></label><p>Find this in your UPI app’s transaction details. Our team will verify receipt.</p><button class="checkout-primary">Submit payment details</button></form>` : ''}
-      ${me.role==='admin' && p.status==='AWAITING_VERIFICATION' ? `<section class="checkout-verification"><button class="checkout-primary" onclick="verifyUPIPayment()">Verify received payment</button></section>` : ''}
-      ${active && editable ? `<details class="checkout-help"><summary>Need another way to pay?</summary><p>If an app link fails, pay directly to the UPI ID inside your app.</p><button class="checkout-secondary" onclick="startManualUPI()">Pay directly in my UPI app</button><section id="manualUPI" hidden><ol><li>Copy <strong class="selectable">${h(p.upi_id)}</strong>, then open your UPI app and choose to pay a UPI ID. <button class="checkout-text-button" onclick="copyPayment('id')">Copy UPI ID</button></li><li>Review the recipient and pay exactly <strong>${money(p.amount)}</strong>. <button class="checkout-text-button" onclick="copyPayment('amount')">Copy amount</button></li><li>Return here and submit the actual transaction UTR for verification.</li></ol><button class="checkout-text-button" onclick="revealPaymentUTR()">Enter UTR</button></section></details>` : ''}
+      ${me.role==='admin' && p.status==='AWAITING_VERIFICATION' && !p.smsAutoConfirmEnabled ? `<section class="checkout-verification"><button class="checkout-primary" onclick="verifyUPIPayment()">Verify received payment</button></section>` : ''}
+      ${active && editable ? `<details class="checkout-help"><summary>Need another way to pay?</summary><p>If an app link fails, pay directly to the UPI ID inside your app.</p><button class="checkout-secondary" onclick="startManualUPI()">Pay directly in my UPI app</button><section id="manualUPI" hidden><ol><li>Copy <strong class="selectable">${h(p.upi_id)}</strong>, then open your UPI app and choose to pay a UPI ID. <button class="checkout-text-button" onclick="copyPayment('id')">Copy UPI ID</button></li><li>Review the recipient and pay exactly <strong>${money(payableAmount)}</strong>. <button class="checkout-text-button" onclick="copyPayment('amount')">Copy amount</button></li><li>Return here to see the payment status update.</li></ol><button class="checkout-text-button" onclick="revealPaymentUTR()">Enter UTR</button></section></details>` : ''}
+      ${p.smsObserverEnabled && p.status==='AWAITING_VERIFICATION' ? `<section class="checkout-result checkout-review" id="smsPaymentAlert" role="status">${smsPaymentAlert(p)}<button type="button" class="checkout-text-button" onclick="refreshSMSPaymentAlert(this)">Check payment alert</button></section>` : ''}
       ${p.attempts.length ? `<details class="checkout-history"><summary>Payment activity <span>${p.attempts.length}</span></summary><div>${p.attempts.map(e=>`<p><strong>${h(e.action)}</strong><small>${dateTime(e.created_at)}${e.method ? ` · ${h(e.method)}` : ''}</small>${e.utr ? `<small>UTR ${h(e.utr)}</small>` : ''}${e.notes ? `<small>${h(e.notes)}</small>` : ''}</p>`).join('')}</div></details>` : ''}
-    </main></div><footer class="checkout-footer"><p>${glyph('lock')}Authorize payment only in your UPI app.</p><div>${primary && active ? `<button class="checkout-text-button checkout-cancel" onclick="paymentAction('cancel',{})">Cancel</button><button class="checkout-primary" data-claim-trigger onclick="revealPaymentUTR()">I have paid${glyph('arrow')}</button>` : primary && inactive ? `<button class="checkout-secondary" onclick="revealPaymentUTR()">Enter UTR</button><button class="checkout-primary" onclick="reopenPayment()">Reopen checkout</button>` : primary && !p.transaction_id ? '<button class="checkout-secondary" onclick="revealPaymentUTR()">Enter UTR</button>' : ''}</div></footer>`;
+    </main></div><footer class="checkout-footer"><p>${glyph('lock')}Authorize payment only in your UPI app.</p><div>${primary && active && !p.automaticReference ? `<button class="checkout-text-button checkout-cancel" onclick="paymentAction('cancel',{})">Cancel</button><button class="checkout-primary" data-claim-trigger onclick="revealPaymentUTR()">I have paid${glyph('arrow')}</button>` : primary && inactive ? `<button class="checkout-secondary" onclick="revealPaymentUTR()">Enter UTR</button><button class="checkout-primary" onclick="reopenPayment()">Reopen checkout</button>` : primary && !p.transaction_id && !p.automaticReference ? '<button class="checkout-secondary" onclick="revealPaymentUTR()">Enter UTR</button>' : ''}${verified && p.case_id ? `<button class="checkout-primary" onclick="closeDrawer();openCase('${p.case_id}')">Continue to case</button>` : ''}</div></footer>`;
 }
+function smsPaymentAlert(p) {
+  const evidence=p.smsEvidence;
+  return `<div class="sms-alert-content"><h3>${evidence?.status==='matched'?'Payment alert received':evidence?'Payment alert needs review':'Waiting for payment alert'}</h3><p>${evidence?.status==='matched'?(p.smsAutoConfirmEnabled?'Matching merchant SMS received. The payment will confirm automatically if all checks pass.':'A matching Worldline SMS was received. Admin verification is still required.'):evidence?'The SMS reference needs manual review. It does not confirm this payment.':'Once the merchant phone forwards the SMS, check here for a matching reference.'}</p>${evidence?`<small>RRN ${h(evidence.rrn)} | ${dateTime(evidence.transactionAt)}</small>`:''}</div>`;
+}
+async function refreshSMSPaymentAlert(button) {
+  if(drawerBusy || !checkout) return;
+  const id=checkout.id;button.disabled=true;
+  try {
+    const result=await api(`/api/payments/${id}/check`,{method:'POST',body:{}});
+    const payment=result.payment;
+    if(checkout?.id===id && payment.status==='PAID') {await finishAutoPayment(payment);return;}
+    const content=document.querySelector('#smsPaymentAlert .sms-alert-content');
+    if(checkout?.id===id && content) {checkout.smsEvidence=payment.smsEvidence;content.outerHTML=smsPaymentAlert(payment);}
+  } catch(error) {toast(error.message);} finally {button.disabled=false;}
+}
+Object.assign(window,{refreshSMSPaymentAlert});
+
+async function finishAutoPayment(payment) {
+  const owner=me?.id;
+  applyConfirmedPayment(payment);
+  await showPayment(payment.id,payment);
+  toast('Payment successful.');
+  void refreshCaseUpdates().then(()=>{if(me?.id===owner)render();});
+}
+function startPaymentStatusPolling() {
+  clearTimeout(paymentStatusTimer);
+  const generation=++paymentStatusGeneration,id=checkout?.id,owner=me?.id;
+  if(!id || !checkout.smsAutoConfirmEnabled || !(checkout.status==='AWAITING_VERIFICATION' || checkout.automaticReference && ['PENDING','INITIATED'].includes(checkout.status)))return;
+  const tick=async()=>{
+    try {
+      if(!document.hidden && !drawerBusy) {
+        const result=await api(`/api/payments/${id}/check`,{method:'POST',body:{}});
+    const payment=result.payment;
+        if(generation!==paymentStatusGeneration || checkout?.id!==id || me?.id!==owner)return;
+        if(payment.status==='PAID'){await finishAutoPayment(payment);return;}
+        if(['EXPIRED','CANCELLED','FAILED','REFUNDED'].includes(payment.status)){await showPayment(payment.id,payment);return;}
+        checkout.smsEvidence=payment.smsEvidence;
+        const content=document.querySelector('#smsPaymentAlert .sms-alert-content');
+        if(content)content.outerHTML=smsPaymentAlert(payment);
+      }
+    }catch { /* Retain the pending state and retry; network failure is never success. */ }
+    if(generation===paymentStatusGeneration && checkout?.id===id && document.querySelector('.payment-checkout'))paymentStatusTimer=setTimeout(tick,2500);
+  };
+  paymentStatusTimer=setTimeout(tick,2500);
+}
+
 function revealPaymentUTR() {
   const form=document.querySelector('#utrForm');
   if(!form) return;
@@ -2379,7 +2441,7 @@ async function paymentAction(action,body) {
     setDrawerBusy();
     await showPayment(checkout.id,checkout);
     if(action==='verify') toast('Payment received and verified.');
-    if(action==='submit') toast('Payment details submitted successfully. Your payment is awaiting verification.');
+    if(action==='submit') toast(checkout.status==='PAID'?'Payment successful.':checkout.smsAutoConfirmEnabled?'Reference submitted. Waiting for the matching payment SMS.':'Payment details submitted successfully. Your payment is awaiting verification.');
     if(action==='verify' && checkout.gateway==='cash') {
       applyConfirmedPayment(checkout);void refreshCaseUpdates();if(view==='payments')void refreshPayments();
     } else try {await load();} catch {toast('Payment details saved. The dashboard could not refresh; reload it to see the latest status.');}
@@ -2387,7 +2449,7 @@ async function paymentAction(action,body) {
 }
 async function submitUTR(event) {event.preventDefault();await paymentAction('submit',{utr:event.target.utr.value});}
 async function verifyUPIPayment() {await paymentAction('verify',{});}
-async function downloadReceipt() {try {const p=await api(`/api/payments/${checkout.id}/receipt`);const text=`SUCCESS ONLINE SERVICES\nVerified payment receipt (${p.gateway==='cash'?'Cash':'UPI'})\nOrder: ${p.gateway_order_id}\nCustomer: ${p.customer_name}\nService: ${p.service_name}\n${p.batch ? p.items.map(item=>`Work order: ${item.ref} | ${item.customer_name} | ${item.service_name} | INR ${(item.amount/100).toFixed(2)}`).join('\n')+'\n' : ''}Amount: INR ${(p.amount/100).toFixed(2)}\nUTR: ${p.transaction_id}\nVerified at: ${p.verified_at}\nVerified by: ${p.verified_by}\n`;downloadPaymentAsset(URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),'payment-receipt.txt',true);} catch(e) {toast(e.message);}}
+async function downloadReceipt() {try {const p=await api(`/api/payments/${checkout.id}/receipt`);const text=`SUCCESS ONLINE SERVICES\nVerified payment receipt (${p.gateway==='cash'?'Cash':'UPI'})\nOrder: ${p.gateway_order_id}\nCustomer: ${p.customer_name}\nService: ${p.service_name}\n${p.batch ? p.items.map(item=>`Work order: ${item.ref} | ${item.customer_name} | ${item.service_name} | INR ${(item.amount/100).toFixed(2)}`).join('\n')+'\n' : ''}Amount: INR ${((p.payableAmount ?? p.amount)/100).toFixed(2)}\nService total: INR ${(p.amount/100).toFixed(2)}\nPayment matching amount: INR ${((p.matchingAdjustment || 0)/100).toFixed(2)}\nUTR: ${p.transaction_id}\nVerified at: ${p.verified_at}\nVerified by: ${p.verified_by}\n`;downloadPaymentAsset(URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),'payment-receipt.txt',true);} catch(e) {toast(e.message);}}
 Object.assign(window,{setPaymentTab,filterCashPending,recordCashFromPending,showCaseReuploadRequest,requestCaseReupload,confirmPaymentFromList,updateCheckoutCash,recordCheckoutCash,setCashReviewMethod,updateReviewCash,recordCashBalance,rejectCashReceipt,showPayment,pay,launchUPI,startManualUPI,revealPaymentUTR,paymentAction,submitUTR,verifyUPIPayment,filterPayments,resetPaymentFilters,updatePaymentSearch,exportPayments,confirmReceiver,setTestPricing,saveServicePrice,retryPaymentSync,downloadPaymentAsset,copyPayment,downloadReceipt,selectPaymentCase,paySelectedCases,reopenPayment});
 
 

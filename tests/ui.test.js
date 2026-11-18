@@ -21,6 +21,16 @@ function client() {
   return { context, run: source => vm.runInContext(source, context) };
 }
 
+test('SMS payment evidence remains provisional and all dynamic reference text is escaped',()=>{
+  const {run}=client();
+  const pending=run("smsPaymentAlert({smsEvidence:null})");
+  assert.match(pending,/Waiting for payment alert/);
+  const match=run("smsPaymentAlert({smsEvidence:{status:'matched',rrn:'<unsafe>',transactionAt:'2026-11-17T10:00:00Z'}})");
+  assert.match(match,/Payment alert received/);assert.match(match,/Admin verification is still required/);
+  assert.match(match,/&lt;unsafe&gt;/);
+  assert.match(run("smsPaymentAlert({smsEvidence:{status:'amount_mismatch',rrn:'123456789012',transactionAt:'2026-11-17T10:00:00Z'}})"),/Payment alert needs review/);
+});
+
 test('grouped pricing keeps a separate price for each selected variant',()=>{
   const {run}=client();
   run(`me={id:'admin',role:'admin'};pricingSalesId='sales';pricingData={salespeople:[{id:'sales',name:'Sales',username:'sales',active:true}],overrides:[{sales_user_id:'sales',variant_id:'food-2',price:25000}],prices:[...[1,2,3,4,5].map(n=>({variant_id:'food-'+n,service_name:'Food License',variant_name:n===1?'1 year':n+' years',price:n*10000})),...['Job','Education','Election'].map(name=>({variant_id:name,service_name:'Caste Validity Certificate',variant_name:name,price:90000}))]}`);

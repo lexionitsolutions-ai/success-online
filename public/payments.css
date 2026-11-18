@@ -99,3 +99,21 @@ body.payment-open{overflow:hidden}
 .cash-pending-metric:focus-visible { outline:3px solid #2b79c2; outline-offset:3px; }
 @media(max-width:700px) { .cash-pending-panel { padding:14px; } .payment-tabs button { flex:1; } }
 @media(max-width:700px) { .cash-receipt-layout { padding:18px; } }
+.checkout-success .checkout-result-icon{background:#087f5b;color:#fff;animation:payment-confirmed-in .3s ease-out}
+@keyframes payment-confirmed-in{from{transform:scale(.7);opacity:.2}to{transform:scale(1);opacity:1}}
+@media(prefers-reduced-motion:reduce){.checkout-success .checkout-result-icon{animation:none}}
+.payment-wait-spinner {
+  display: inline-block;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 12px;
+  border: 4px solid #dce8e3;
+  border-top-color: #07815f;
+  border-radius: 50%;
+  animation: payment-wait-spin 0.9s linear infinite;
+}
+.checkout-price-breakdown { margin: 12px 0; font-size: 13px; }
+.checkout-price-breakdown div { display: flex; justify-content: space-between; gap: 12px; }
+.checkout-price-breakdown dd { margin: 0; }
+@keyframes payment-wait-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .payment-wait-spinner { animation: none; } }

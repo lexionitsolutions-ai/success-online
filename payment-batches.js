@@ -1,12 +1,14 @@
 import {randomUUID} from 'node:crypto';
 import QRCode from 'qrcode';
+import {smsAutoConfirmEnabled} from './sms-auto-confirm.js';
+import {reserveSmsCheckout,checkoutAmounts,reconcileUniqueCheckout} from './sms-checkouts.js';
 
 export const batchSchema = `
 CREATE TABLE IF NOT EXISTS payment_batches (id TEXT PRIMARY KEY, created_by TEXT NOT NULL REFERENCES users(id), status TEXT NOT NULL, amount INTEGER NOT NULL, transaction_id TEXT, payment_method TEXT, upi_id TEXT NOT NULL, payee_name TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, verified_at TEXT, verified_by TEXT);
 CREATE TABLE IF NOT EXISTS payment_batch_items (batch_id TEXT NOT NULL REFERENCES payment_batches(id), payment_id TEXT UNIQUE NOT NULL REFERENCES payments(id), PRIMARY KEY(batch_id,payment_id));
 `;
 
-export function createBatchPayments({db,send,body,createOrder,recomputeCase,receiverReady,event,config,generateURL}) {
+export function createBatchPayments({db,send,body,createOrder,recomputeCase,receiverReady,event,config,generateURL,autoConfirmSms}) {
   const {one,all,run}=db, now=()=>new Date().toISOString();
   const fail=(status,message)=>{throw Object.assign(new Error(message),{status});};
   const utr=value=>{const ref=String(value || '').trim();if(!/^\d{12}$/.test(ref)) fail(400,'Enter the 12-digit UPI transaction reference.');return ref;};
@@ -29,8 +31,10 @@ export function createBatchPayments({db,send,body,createOrder,recomputeCase,rece
     const otherClaimPending=conflicts.some(p=>p.status==='AWAITING_VERIFICATION'),otherPaymentVerified=conflicts.some(p=>p.status==='PAID');
     const active=ready && !conflicts.length && !receiverChanged && ['PENDING','INITIATED'].includes(batch.status) && items.every(p=>p.case_status!=='Cancelled');
     const names=[...new Set(items.map(p=>p.customer_name))];
-    const intent=active ? generateURL({upiId:batch.upi_id,payeeName:batch.payee_name,amount:batch.amount,orderId:batch.id,customerName:names.length===1?names[0]:`${names[0]} +${names.length-1}`,serviceName:`${items.length} work orders`}) : null;
-    return {...batch,otherClaimPending,otherPaymentVerified,batch:true,batch_id:id,case_id:items[0]?.case_id,gateway_order_id:id,orderId:id,customer_name:names.join(', '),service_name:`${items.length} work orders`,items,receiverReady:ready,receiverChanged,upiIntent:intent,qrDataUrl:intent?await QRCode.toDataURL(intent,{width:360,margin:4,errorCorrectionLevel:'M'}):null,attempts:await all('SELECT a.* FROM payment_attempts a WHERE a.payment_id=(SELECT payment_id FROM payment_batch_items WHERE batch_id=$id ORDER BY payment_id LIMIT 1) ORDER BY a.created_at',{$id:id})};
+    const reservation=await reserveSmsCheckout(db,batch,active);
+    const amounts=checkoutAmounts(reservation,batch.amount);
+    const intent=active ? generateURL({upiId:batch.upi_id,payeeName:batch.payee_name,amount:amounts.payableAmount,orderId:batch.id,customerName:names.length===1?names[0]:`${names[0]} +${names.length-1}`,serviceName:`${items.length} work orders`}) : null;
+    return {...batch,...amounts,smsAutoConfirmEnabled:smsAutoConfirmEnabled(),otherClaimPending,otherPaymentVerified,batch:true,batch_id:id,case_id:items[0]?.case_id,gateway_order_id:id,orderId:id,customer_name:names.join(', '),service_name:`${items.length} work orders`,items,receiverReady:ready,receiverChanged,upiIntent:intent,qrDataUrl:intent?await QRCode.toDataURL(intent,{width:360,margin:4,errorCorrectionLevel:'M'}):null,attempts:await all('SELECT a.* FROM payment_attempts a WHERE a.payment_id=(SELECT payment_id FROM payment_batch_items WHERE batch_id=$id ORDER BY payment_id LIMIT 1) ORDER BY a.created_at',{$id:id})};
   }
   async function prepareSelection(caseIds,user,{allowSingle=false,reuse=true}={}) {
     if(!['sales','admin'].includes(user.role)) fail(403,'Only sales or admin can combine payments');
@@ -89,7 +93,7 @@ export function createBatchPayments({db,send,body,createOrder,recomputeCase,rece
   }
   async function handle(req,res,url,user) {
     if(url.pathname==='/api/payments/batch' && req.method==='POST') {send(res,201,await create((await body(req)).caseIds,user));return true;}
-    const match=url.pathname.match(/^\/api\/payments\/([^/]+)(?:\/(initiate|submit|cancel|verify|reject|refund|receipt|reopen))?$/);
+    const match=url.pathname.match(/^\/api\/payments\/([^/]+)(?:\/(initiate|submit|cancel|verify|reject|refund|receipt|reopen|check))?$/);
     if(!match) return false;
     const member=match[1].startsWith('batch_')?{batch_id:match[1]}:await membership(match[1]);
     if(!member) return false;
@@ -100,6 +104,12 @@ export function createBatchPayments({db,send,body,createOrder,recomputeCase,rece
       send(res,200,p);return true;
     }
     if(req.method!=='POST' || !action || action==='receipt') fail(405,'Method not allowed');
+    if(action==='check') {
+      if(!['admin','sales'].includes(user.role))fail(403,'Not allowed');
+      await reconcileUniqueCheckout(db,p.id,autoConfirmSms);
+      if(p.status==='AWAITING_VERIFICATION')await autoConfirmSms(p.transaction_id);
+      send(res,200,{ok:true,payment:await detail(p.id,user)});return true;
+    }
     if(['verify','reject','refund'].includes(action) && user.role!=='admin') fail(403,'Only administrators can verify receiving account records');
     if(!['admin','sales'].includes(user.role)) fail(403,'Not allowed');
     const b=await body(req); b.notes=String(b.notes || '').trim().slice(0,1000);
@@ -145,6 +155,7 @@ export function createBatchPayments({db,send,body,createOrder,recomputeCase,rece
       await event(item,user,action,{...b,utr:transaction});
       await recomputeCase(item.case_id);
     }
+    if(action==='submit')await autoConfirmSms(transaction);
     send(res,200,{ok:true,payment:await detail(p.id,user)});return true;
   }
   return {handle,detail,membership,prepareSelection};
