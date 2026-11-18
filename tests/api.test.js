@@ -365,7 +365,15 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const zip = await fetch(origin + path + '/download-all?folder=Trial%20Work', { headers:{cookie:office} });
     assert.equal(zip.status, 200);
     const bytes = Buffer.from(await zip.arrayBuffer());
-    assert.equal(bytes.readUInt32LE(), 0x04034b50); assert.ok(bytes.includes(Buffer.from('Trial Work/Aadhaar Card/')));
+    assert.equal(bytes.readUInt32LE(), 0x04034b50);
+    const bundledNames=[];
+    for(let offset=0;bytes.readUInt32LE(offset)===0x04034b50;) {
+      const size=bytes.readUInt32LE(offset+18),nameLength=bytes.readUInt16LE(offset+26),extraLength=bytes.readUInt16LE(offset+28);
+      bundledNames.push(bytes.subarray(offset+30,offset+30+nameLength).toString('utf8'));
+      offset+=30+nameLength+extraLength+size;
+    }
+    assert.deepEqual(bundledNames.sort(),item.documents.map(doc=>'Trial Work/'+doc.file_name).sort());
+    assert.ok(bundledNames.every(name=>name.split('/').length===2),'Documents sit directly in the main case folder');
     assert.equal(bytes.readUInt16LE(bytes.length - 12), 5);
 
     assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 200);

@@ -1825,7 +1825,7 @@ async function sendCaseQuote(event,caseId) {
   event.preventDefault();if(drawerBusy) return;
   const form=event.target,amount=Math.round(Number(form.elements.amount.value)*100),reason=form.elements.reason.value.trim();
   setDrawerBusy('Sending quote…');
-  try {const result=await api(`/api/cases/${caseId}/set-quote`,{method:'POST',body:{amount,reason}});setDrawerBusy();renderSavedCase(result);void refreshCaseUpdates();toast('Quote and payment request sent to sales.');} catch(error) {toast(error.message);} finally {setDrawerBusy();}
+  try {const result=await api(`/api/cases/${caseId}/set-quote`,{method:'POST',body:{amount,reason}});form.reset();setDrawerBusy();renderSavedCase(result);void refreshCaseUpdates();toast('Quote and payment request sent to sales.');} catch(error) {toast(error.message);} finally {setDrawerBusy();}
 }
 Object.assign(window,{submitQuoteReview,sendCaseQuote});
 function casePaymentCard(item) {

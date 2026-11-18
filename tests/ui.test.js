@@ -46,6 +46,47 @@ test('case chat aligns by author, escapes messages and allows sales replies',()=
   assert.match(run('backofficeRemarks(chatCase,chatNotes)'),/chat-outgoing"><strong data-language-preserve>Office/);
 });
 
+test('quote submission clears price and remarks only after the request succeeds',async()=>{
+  const {run}=client();
+  run(`
+    const quoteForm={elements:{amount:{value:'100'},reason:{value:'Reviewed documents'}},reset(){this.elements.amount.value='';this.elements.reason.value='';}};
+    const quoteEvent={preventDefault(){},target:quoteForm};
+    let rejectQuote=false,sentQuote;
+    setDrawerBusy=message=>{drawerBusy=!!message;};
+    api=async(path,options)=>{sentQuote=options.body;if(rejectQuote)throw Error('Could not send quote');return {};};
+    renderSavedCase=()=>{};refreshCaseUpdates=async()=>{};
+  `);
+  await run("sendCaseQuote(quoteEvent,'case')");
+  assert.equal(run('sentQuote.amount'),10000);
+  assert.equal(run('sentQuote.reason'),'Reviewed documents');
+  assert.equal(run('quoteForm.elements.amount.value'),'');
+  assert.equal(run('quoteForm.elements.reason.value'),'');
+  run("quoteForm.elements.amount.value='200';quoteForm.elements.reason.value='Retry this quote';rejectQuote=true;");
+  await run("sendCaseQuote(quoteEvent,'case')");
+  assert.equal(run('quoteForm.elements.amount.value'),'200');
+  assert.equal(run('quoteForm.elements.reason.value'),'Retry this quote');
+});
+
+test('case messages clear after sending and preserve the text on failure',async()=>{
+  const {run}=client();
+  run(`
+    me={id:'office',role:'backoffice'};selectedCase={case:{id:'case'},notes:[]};
+    const chatInput={value:'Please confirm',readOnly:false},chatButton={disabled:false},chatResult={textContent:''};
+    const chatForm={elements:{remark:chatInput},querySelector:selector=>selector==='button'?chatButton:chatResult};
+    const chatEvent={preventDefault(){},target:chatForm};
+    let rejectMessage=false;
+    api=async()=>{if(rejectMessage)throw Error('Could not send message');return {note:{id:'sent',note:chatInput.value}};};
+    updateChatMessages=()=>{};
+  `);
+  await run("saveBackofficeRemark(chatEvent,'case')");
+  assert.equal(run('chatInput.value'),'');
+  assert.equal(run('selectedCase.notes.length'),1);
+  run("chatInput.value='Keep this message';rejectMessage=true;");
+  await run("saveBackofficeRemark(chatEvent,'case')");
+  assert.equal(run('chatInput.value'),'Keep this message');
+  assert.equal(run('chatButton.disabled'),false);
+});
+
 test('staff language control translates labels while preserving stored option values',()=>{
   const {run}=client();
   for(const role of ['admin','backoffice','sales']) {

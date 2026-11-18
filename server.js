@@ -837,8 +837,14 @@ async function routeApi(req, res, url) {
       if (documents.reduce((total, d) => total + d.size, 0) > bundleLimit) return send(res, 413, { error: `Case bundle exceeds ${bundleLimit / 1000000} MB; download files individually` });
       const item = (await caseRow(c));
       const folder = safeFileName(url.searchParams.get('folder') || `${c.ref} - ${item.customer.name} - ${item.service.name}`);
-      const entries = [];
-      for (const document of documents) entries.push({ name: `${folder}/${safeFileName(document.doc_type)}/${safeFileName(document.file_name)}`, data: await readDocument(document) });
+      const entries = [], usedNames = new Set();
+      for (const document of documents) {
+        const original = safeFileName(document.file_name), extension = extname(original), stem = original.slice(0, original.length - extension.length);
+        let name = original, suffix = 2;
+        while (usedNames.has(name.toLowerCase())) name = `${stem} (${suffix++})${extension}`;
+        usedNames.add(name.toLowerCase());
+        entries.push({ name: `${folder}/${name}`, data: await readDocument(document) });
+      }
       const content = createZip(entries);
       if (storageEnabled()) {
         const path = `downloads/${randomUUID()}/${folder}.zip`;
