@@ -1,3 +1,4 @@
+import {testPort} from './test-port.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac,createHash} from 'node:crypto';
@@ -62,7 +63,7 @@ test('QR and PhonePe owner alerts and app-independent VPA handles parse exact pa
 });
 
 test('signed SMS pilot detects submitted references but never verifies or releases a payment',{timeout:30000},async()=>{
-  const root=mkdtempSync(join(tmpdir(),'sms-pilot-')),port=47000+Math.floor(Math.random()*2000),origin=`http://localhost:${port}`,key='a1'.repeat(32);
+  const root=mkdtempSync(join(tmpdir(),'sms-pilot-')),port=await testPort(),origin=`http://localhost:${port}`,key='a1'.repeat(32);
   const token='c3'.repeat(32),enrollment={tokenHash:createHash('sha256').update(token).digest('hex'),deviceId:'merchant-phone',expiresAt:new Date(Date.now()+3600000).toISOString()};
   const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),DATABASE_PATH:join(root,'pilot.sqlite'),STORAGE_PATH:join(root,'files'),SHEETS_MODE:'demo',TEST_PRICING_MODE:'true',SESSION_SECRET:'isolated-sms-pilot-test-secret',APP_ORIGIN:origin,SMS_AUTO_CONFIRM:'false',SMS_OBSERVER_ENABLED:'true',SMS_OBSERVER_ENROLLMENT:JSON.stringify(enrollment),SMS_OBSERVER_KEYS:JSON.stringify({'test-phone':key}),SMS_OBSERVER_TERMINAL:terminal},stdio:['ignore','pipe','pipe']});
   let output='';child.stderr.on('data',d=>output+=d);

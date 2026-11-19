@@ -1,3 +1,4 @@
+import {testPort} from './test-port.js';
 import {pfDetails} from './pf-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +9,7 @@ import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 
 test('combined checkout allocates one verified transfer across cases and protects ownership, totals and duplicate UTRs',{timeout:30000},async()=>{
-  const root=mkdtempSync(join(tmpdir(),'batch-payments-')),port=32000+Math.floor(Math.random()*3000),origin=`http://localhost:${port}`,dbPath=join(root,'test.sqlite');
+  const root=mkdtempSync(join(tmpdir(),'batch-payments-')),port=await testPort(),origin=`http://localhost:${port}`,dbPath=join(root,'test.sqlite');
   const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),DATABASE_PATH:dbPath,STORAGE_PATH:join(root,'files'),SHEETS_MODE:'demo',TEST_PRICING_MODE:'true',SESSION_SECRET:'test-only-combined-payment-session',APP_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
   let errors='';child.stderr.on('data',c=>errors+=c);
   try {

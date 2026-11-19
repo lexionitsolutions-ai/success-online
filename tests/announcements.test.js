@@ -1,3 +1,4 @@
+import {testPort} from './test-port.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -7,7 +8,7 @@ import {join} from 'node:path';
 
 test('announcements persist text and private pictures, enforce admin permissions, and remove safely',async()=>{
   const root=mkdtempSync(join(tmpdir(),'announcements-test-'));
-  const port=39000+Math.floor(Math.random()*2000),origin=`http://localhost:${port}`;
+  const port=await testPort(),origin=`http://localhost:${port}`;
   let child;
   async function start() {
     child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),APP_ORIGIN:origin,DATABASE_PATH:join(root,'test.sqlite'),STORAGE_PATH:join(root,'files'),SHEETS_MODE:'demo',SESSION_SECRET:'isolated-announcements-test-secret'},stdio:['ignore','pipe','pipe']});

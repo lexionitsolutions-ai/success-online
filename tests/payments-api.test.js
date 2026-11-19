@@ -1,3 +1,4 @@
+import {testPort} from './test-port.js';
 import {pfDetails} from './pf-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {confirmations} from './payment-fixture.js';
 
 test('direct UPI security, attempts, expiry, manual verification, prices, refunds and receipts',{timeout:30000},async()=>{
-  const root=mkdtempSync(join(tmpdir(),'upi-test-')),port=45000+Math.floor(Math.random()*5000),origin=`http://localhost:${port}`,path=join(root,'test.sqlite');
+  const root=mkdtempSync(join(tmpdir(),'upi-test-')),port=await testPort(),origin=`http://localhost:${port}`,path=join(root,'test.sqlite');
   const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),DATABASE_PATH:path,STORAGE_PATH:join(root,'files'),SHEETS_MODE:'demo',TEST_PRICING_MODE:'true',SESSION_SECRET:'test-secret-for-isolated-payment-db-only',APP_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
   let output='';child.stderr.on('data',c=>output+=c);
   try {

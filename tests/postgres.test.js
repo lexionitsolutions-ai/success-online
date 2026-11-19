@@ -1,3 +1,4 @@
+import {testPort} from './test-port.js';
 import {pfDetails} from './pf-fixture.js';
 import {confirmTestReceiver,verifyTestOrder,confirmations} from './payment-fixture.js';
 import test from 'node:test';
@@ -51,7 +52,7 @@ test('PostgreSQL bindings preserve literals and reuse named parameter positions'
 });
 
 test('PostgreSQL API and signed cloud uploads: access, large files, retries, analytics and completion', {timeout:60000}, async () => {
-  const port = 22000 + Math.floor(Math.random()*5000)*2, origin = `http://localhost:${port}`;
+  const port = await testPort({adjacentPorts:1}), origin = `http://localhost:${port}`;
   const child = spawn(process.execPath,['tests/postgres-server.mjs'],{env:{...process.env,NODE_ENV:'test',PORT:String(port),APP_ORIGIN:origin,VERCEL:'1',DATABASE_URL:'postgresql://test:test@localhost/test',INITIAL_ADMIN_USERNAME:'admin',INITIAL_ADMIN_PASSWORD:'AdminPassword123',SESSION_SECRET:'cloud-test-private-session-secret-12345',SHEETS_MODE:'demo',PAYMENT_MODE:'demo',TEST_GOOGLE_REVOKED:'1',TEST_GOOGLE_DELAY_MS:'2000',GOOGLE_OAUTH_CLIENT_ID:'mock',GOOGLE_OAUTH_CLIENT_SECRET:'mock',GOOGLE_OAUTH_REFRESH_TOKEN:'mock',GOOGLE_ROOT_FOLDER_ID:'root'},stdio:['ignore','pipe','pipe']});
   let output = '';
   child.stderr.on('data',chunk => output += chunk);
@@ -218,7 +219,7 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
 });
 test('cloud payments commit before delayed Sheets work and preserve retryable jobs', {timeout:60000}, async()=>{
   const root=mkdtempSync(join(tmpdir(),'payment-cloud-sync-'));
-  const port=34000+Math.floor(Math.random()*4000)*2, origin=`http://localhost:${port}`;
+  const port=await testPort({adjacentPorts:1}), origin=`http://localhost:${port}`;
   const failure=join(root,'google-failure'), workbookFile=join(root,'sheets.json');
   const child=spawn(process.execPath,['--import','./tests/google-mock.mjs','tests/postgres-server.mjs'],{env:{...process.env,NODE_ENV:'test',PORT:String(port),APP_ORIGIN:origin,VERCEL:'1',DATABASE_URL:'postgresql://test:test@localhost/test',INITIAL_ADMIN_USERNAME:'admin',INITIAL_ADMIN_PASSWORD:'AdminPassword123',SESSION_SECRET:'cloud-payment-test-private-session-secret',GOOGLE_ROOT_FOLDER_ID:'root',SHEETS_MODE:'live',TEST_GOOGLE_REVOKED:'0',GOOGLE_OAUTH_CLIENT_ID:'mock',GOOGLE_OAUTH_CLIENT_SECRET:'mock',GOOGLE_OAUTH_REFRESH_TOKEN:'mock',GOOGLE_OPERATIONS_SPREADSHEET_ID:'workbook',GOOGLE_MOCK_FAILURE_FILE:failure,GOOGLE_MOCK_SHEETS_FILE:workbookFile},stdio:['ignore','pipe','pipe']});
   let errors='';child.stderr.on('data',chunk=>errors+=chunk);

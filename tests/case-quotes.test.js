@@ -1,3 +1,4 @@
+import {testPort} from './test-port.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -12,7 +13,7 @@ import {cashAccount,CASH_SALES_ID} from '../cash-payments.js';
 import '../public/intake-rules.js';
 
 test('review before payment, exact quotes, independent option pricing, and one-time branch rename',{timeout:60000},async()=>{
-  const root=mkdtempSync(join(tmpdir(),'case-quotes-')),path=join(root,'test.sqlite'),port=34000+Math.floor(Math.random()*8000),origin=`http://localhost:${port}`;
+  const root=mkdtempSync(join(tmpdir(),'case-quotes-')),path=join(root,'test.sqlite'),port=await testPort(),origin=`http://localhost:${port}`;
   const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),DATABASE_PATH:path,STORAGE_PATH:join(root,'files'),SHEETS_MODE:'demo',TEST_PRICING_MODE:'true',SESSION_SECRET:'case-quote-test-secret-32-characters',APP_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
   let errors='';child.stderr.on('data',d=>errors+=d);
   try {
