@@ -12,7 +12,7 @@ try {
   await page.addScriptTag({type:'module',content:readFileSync('public/script.js','utf8').replace(/boot\(\);\s*$/,'')+`
     window.setupPricing=()=>{
       me={id:'admin',name:'Admin',role:'admin'};view='pricing';
-      pricingData={testPricingMode:true,salespeople:[{id:'one',name:'Sales One',username:'sales01',active:1},{id:'two',name:'Sales Two',username:'sales02',active:1},{id:'three',name:'Sales Three',username:'sales03',active:1}],prices:[{variant_id:'ews',service_name:'EWS Certificate',variant_name:'Standard',price:30000},{variant_id:'caste',service_name:'Caste Certificate',variant_name:'Standard',price:40000}],overrides:[{sales_user_id:'one',variant_id:'ews',price:20000},{sales_user_id:'two',variant_id:'ews',price:25000},{sales_user_id:'three',variant_id:'ews',price:17000}]};
+      pricingData={testPricingMode:true,salespeople:[{id:'one',name:'Sales One',username:'sales01',active:1},{id:'two',name:'Sales Two',username:'sales02',active:1},{id:'three',name:'Sales Three',username:'sales03',active:1}],prices:[{variant_id:'ews',service_name:'EWS Certificate',variant_name:'Standard',price:30000},{variant_id:'caste',service_name:'Caste Certificate',variant_name:'Standard',price:40000},{variant_id:'gazette-with',service_name:'Gazette',variant_name:'With affidavit charges',price:70000},{variant_id:'gazette-without',service_name:'Gazette',variant_name:'Without affidavit charges',price:50000}],overrides:[{sales_user_id:'one',variant_id:'ews',price:20000},{sales_user_id:'two',variant_id:'ews',price:25000},{sales_user_id:'three',variant_id:'ews',price:17000}]};
       render=()=>{app.innerHTML=renderPricing();};render();
       window.pricingFixture=structuredClone(pricingData);
       window.saves=[];api=async(path,options)=>{window.saves.push(options.body);if(window.failSave) throw Error('Could not save price');return {ok:true};};
@@ -55,6 +55,18 @@ try {
   assert.equal(await page.getByRole('spinbutton',{name:'EWS Certificate price',exact:true}).inputValue(),'250.00');
   await page.locator('#pricingSalesperson').selectOption('one');
   assert.equal(await page.getByRole('spinbutton',{name:'EWS Certificate price',exact:true}).inputValue(),'210.50');
+  const gazette=()=>page.locator('.pricing-card').filter({has:page.getByRole('heading',{name:'Gazette',exact:true})});
+  assert.deepEqual(await gazette().locator('select option').allTextContents(),['With affidavit charges','Without affidavit charges']);
+  await gazette().locator('select').selectOption('gazette-without');
+  assert.equal(await gazette().locator('input[name="price"]').inputValue(),'500.00');
+  await gazette().locator('input[name="price"]').fill('550');
+  await gazette().getByRole('button',{name:'Update price',exact:true}).click();
+  await page.waitForFunction(()=>window.saves.at(-1)?.variantId==='gazette-without');
+  assert.deepEqual(await page.evaluate(()=>window.saves.at(-1)),{salesUserId:'one',variantId:'gazette-without',price:55000});
+  await gazette().locator('select').selectOption('gazette-with');
+  assert.equal(await gazette().locator('input[name="price"]').inputValue(),'700.00');
+  await gazette().locator('select').selectOption('gazette-without');
+  assert.equal(await gazette().locator('input[name="price"]').inputValue(),'550.00');
   await page.evaluate(()=>window.failSave=true);
   await page.getByRole('spinbutton',{name:'EWS Certificate price',exact:true}).fill('220');
   await ews().getByRole('button',{name:'Update price',exact:true}).click();

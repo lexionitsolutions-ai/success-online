@@ -72,13 +72,14 @@ export const serviceCatalog = [
     fields: [
       { ...field('Gazette language', 'select', ['English', 'Marathi']), displayLabel: 'Would you like your Gazette in English or Marathi? / आपल्याला गॅझेट इंग्रजीत हवे आहे की मराठीत?', optionLabels: { English: 'English / इंग्रजी', Marathi: 'Marathi / मराठी' } },
       { ...field('Reason for name change', 'select', ['Marriage', 'Correction of incorrect name', 'Other name change']), displayLabel: 'Why are you changing your name? / आपण नाव का बदलत आहात?', optionLabels: { Marriage: 'Marriage / विवाहामुळे', 'Correction of incorrect name': 'Correction of incorrect name / चुकीच्या नावाची दुरुस्ती', 'Other name change': 'Other name change / इतर कारणाने नाव बदल' } },
-      ...gazetteNameFields('English'), ...gazetteNameFields('Marathi')
+      ...gazetteNameFields('English'), ...gazetteNameFields('Marathi'),
+      { ...field('Do you have any evidence of the new name?', 'select', ['Yes', 'No']), required: true, fullWidth: true, section: gazetteNameFields('English')[1].section, when: { any: [{field:'Gazette language',equals:'English'},{field:'Gazette language',equals:'Marathi'}] }, note: 'If No, affidavit charges will increase the total payable.' }
     ],
     documents: [
       doc('Aadhaar Card'), doc('PAN Card'), doc('School Leaving Certificate'), doc('Photo'),
       doc('Wedding Invitation / Marriage Registration Certificate', 'Upload either a wedding invitation or a marriage registration certificate for a name change due to marriage.', { field: 'Reason for name change', equals: 'Marriage' }),
       doc('Husband Aadhaar Card', 'Required for a name change due to marriage.', { field: 'Reason for name change', equals: 'Marriage' }),
-      doc('Correct Name Proof / Affidavit', 'Upload either proof of the correct name or an affidavit for correction of an incorrect name.', { field: 'Reason for name change', equals: 'Correction of incorrect name' })
+      { ...doc('Affidavit / Evidence of New Name', 'Upload an affidavit or evidence of the new name.', { field: 'Do you have any evidence of the new name?', equals: 'Yes' }), marathiLabel: '\u0928\u0935\u0940\u0928 \u0928\u093e\u0935\u093e\u091a\u093e \u092a\u0941\u0930\u093e\u0935\u093e / \u092a\u094d\u0930\u0924\u093f\u091c\u094d\u091e\u093e\u092a\u0924\u094d\u0930' }
     ]
   },
   {
@@ -249,7 +250,7 @@ export const serviceCatalog = [
     documents: [
       { ...rationProof('Ration Card', 'रेशन कार्ड', 'Upload all pages of the existing ration card. / सध्याच्या रेशन कार्डची सर्व पाने अपलोड करा.'), multiple: true },
       { ...rationProof('All Members Aadhaar Cards', 'रेशन कार्डमधील सर्व सदस्यांची आधार कार्डे', 'Upload Aadhaar cards for EVERY member of the ration card. Add separate files or a combined PDF. / रेशन कार्डमधील प्रत्येक सदस्याचे आधार कार्ड स्वतंत्र फाइल किंवा एकत्रित PDF मध्ये अपलोड करा.'), multiple: true },
-      { ...rationProof('All Members PAN Cards', 'रेशन कार्डमधील सर्व सदस्यांची पॅन कार्डे', 'Upload PAN cards for EVERY member of the ration card. / रेशन कार्डमधील प्रत्येक सदस्याचे पॅन कार्ड अपलोड करा.'), multiple: true },
+      rationProof('PAN Card of Head of Family ( Female )', '\u0915\u0941\u091f\u0941\u0902\u092c \u092a\u094d\u0930\u092e\u0941\u0916 \u092e\u0939\u093f\u0932\u0947\u091a\u0947 \u092a\u0945\u0928 \u0915\u093e\u0930\u094d\u0921', 'Upload the PAN card of the female head of family named on the ration card.'),
       { ...rationProof('All Members Photos', 'रेशन कार्डमधील सर्व सदस्यांचे फोटो', 'Upload a clear photo of EVERY member of the ration card. / रेशन कार्डमधील प्रत्येक सदस्याचा स्पष्ट फोटो अपलोड करा.'), multiple: true },
       rationProof('Electricity Bill', 'लाईट बिल', 'Upload the electricity bill for the residence. / राहत्या घराचे लाईट बिल अपलोड करा.', { field: 'Change ration card address?', equals: 'No', defaultValue: 'No' }),
       rationProof('Consent Letter / Rent Agreement', 'संमती पत्र / भाडेकरार', 'For a rented home, upload any ONE: the owner’s consent letter or the rent agreement. / भाड्याच्या घरासाठी घरमालकाचे संमती पत्र किंवा भाडेकरार यापैकी कोणताही एक पुरावा अपलोड करा.', { field: 'Ration card residence', equals: 'Rented', defaultValue: 'Owned' }),

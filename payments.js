@@ -1,3 +1,4 @@
+import {discountedAmounts} from './case-discounts.js';
 import {caseQuote,quoteAmounts} from './case-quotes.js';
 import './public/intake-rules.js';
 import { randomUUID } from 'node:crypto';
@@ -111,7 +112,8 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
     const variant = await one('SELECT v.*,s.price configured_price,s.original_config FROM variants v LEFT JOIN service_prices s ON s.variant_id=v.id WHERE v.id=$id',{$id:c.variant_id});
     const custom = await one('SELECT price FROM salesperson_prices WHERE sales_user_id=$sales AND variant_id=$variant',{$sales:c.sales_user_id,$variant:c.variant_id});
     const base = priceAmounts(variant,variant.configured_price,variant.original_config ? JSON.parse(variant.original_config) : undefined,custom?.price);
-    const a = quote ? quoteAmounts(quote) : JSON.parse(variant.fields_json || '[]').some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base, JSON.parse(c.details_json || '{}')) : base;
+    const undiscounted = quote ? quoteAmounts(quote) : JSON.parse(variant.fields_json || '[]').some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base, JSON.parse(c.details_json || '{}')) : base;
+    const a=discountedAmounts(undiscounted,JSON.parse(c.details_json || '{}'));
     if (!Number.isSafeInteger(a.total) || a.total <= 0) fail(409,'Configure a positive service price first');
     const service = await one('SELECT name FROM services WHERE id=$id',{$id:c.service_id});
     const config = paymentConfig(), pid = `pay_${randomUUID()}`, order = `SO-P-${new Date().getUTCFullYear()}-${randomUUID()}`, stamp = at();

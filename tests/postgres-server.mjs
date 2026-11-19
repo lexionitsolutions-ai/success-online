@@ -60,6 +60,15 @@ if(process.env.TEST_GOOGLE_REVOKED==='1') {
 }
 const {initialize,handler} = await import('../server.js');
 await initialize({setup:true});
+// Simulate an existing cloud database still exposing Gazette / Application.
+await postgres.exec(`
+  DELETE FROM service_prices WHERE variant_id IN (SELECT v.id FROM variants v JOIN services s ON s.id=v.service_id WHERE s.slug='gazette' AND v.name!='Application');
+  DELETE FROM variants WHERE service_id IN (SELECT id FROM services WHERE slug='gazette') AND name!='Application';
+  UPDATE variants SET active=1 WHERE service_id IN (SELECT id FROM services WHERE slug='gazette') AND name='Application';
+`);
+await initialize();
+const gazetteOptions=await postgres.query("SELECT v.name FROM variants v JOIN services s ON s.id=v.service_id JOIN service_prices p ON p.variant_id=v.id WHERE s.slug='gazette' AND v.active=1 ORDER BY v.name");
+if(JSON.stringify(gazetteOptions.rows.map(v=>v.name))!==JSON.stringify(['With affidavit charges','Without affidavit charges'])) throw new Error('Existing cloud Gazette pricing did not upgrade on startup');
 const tableState = await postgres.query("SELECT relname,relrowsecurity FROM pg_class WHERE relname IN ('users','cases','documents','upload_intents')");
 if (tableState.rows.some(row => !row.relrowsecurity)) throw new Error('RLS is missing');
 await postgres.exec('SET ROLE anon');

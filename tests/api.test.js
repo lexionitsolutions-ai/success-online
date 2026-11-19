@@ -183,7 +183,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.deepEqual(gazetteAfterOverwrite.documents,gazette.documents,'Upload requirements use the same running form version');
     const gazettePayload={variantId:gazette.id,customer:{name:'Gazette Trial',mobile:'9876543210'},consent:true};
     assert.equal((await request('/api/cases',{cookie:sales,body:{...gazettePayload,details:{'Gazette language':'English'}}})).status,400);
-    const marathiDetails={'Gazette language':'Marathi','Reason for name change':'Marriage',...Object.fromEntries(gazette.fields.filter(f=>f.marathiInput).map(f=>[f.label,'राम']))};
+    const marathiDetails={'Do you have any evidence of the new name?':'Yes','Gazette language':'Marathi','Reason for name change':'Marriage',...Object.fromEntries(gazette.fields.filter(f=>f.marathiInput).map(f=>[f.label,'राम']))};
     for(const value of ['Ram','123','राम 123','Ελληνικά','राम Ελληνικά']) {
       const invalidMarathi={...marathiDetails,'Old full name (Marathi)':value};
       assert.equal((await request('/api/cases',{cookie:sales,body:{...gazettePayload,details:invalidMarathi}})).status,400);

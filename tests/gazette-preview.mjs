@@ -12,8 +12,9 @@ try {
   for(const file of ['styles.css','mobile.css','dashboard.css']) await page.addStyleTag({content:readFileSync(`public/${file}`,'utf8')});
   for(const file of ['intake-rules.js','vendor/sanscript.js','marathi-input.js']) await page.addScriptTag({content:readFileSync(`public/${file}`,'utf8')});
   await page.addScriptTag({type:'module',content:readFileSync('public/app.js','utf8').replace(/boot\(\);\s*$/,'')+`
+    window.gazetteSelection=()=>({variantId:draft.variantId,details:draft.details});
     window.setupGazette=(catalog,slug,step=2)=>{
-      closeDrawer();services=catalog.map(s=>({...s,id:s.slug,variants:[{...s,id:s.slug,amounts:{serviceCharge:s.serviceCharge||100,officialFee:0,tax:0,total:s.serviceCharge||100}}]}));
+      closeDrawer();me={id:'sales',role:'sales'};services=catalog.map(s=>({...s,id:s.slug,variants:s.slug==='gazette'?['Without affidavit charges','With affidavit charges'].map((name,index)=>({...s,name,id:s.slug+'-'+index,amounts:{serviceCharge:40000+index*20000,officialFee:0,tax:0,total:40000+index*20000}})):[{...s,id:s.slug,amounts:{serviceCharge:s.serviceCharge||100,officialFee:0,tax:0,total:s.serviceCharge||100}}]}));
       draft={step,serviceId:slug,variantId:slug,customer:{name:'Test Customer',mobile:'9876543210'},details:{'Applicant under 18?':'Yes'},docs:{}};drawWizard();
     };
   `});
@@ -32,6 +33,8 @@ try {
     assert.equal(await page.locator('.intake-field-section').count(),0);
     await field('Gazette language').selectOption('English');
     await field('Reason for name change').selectOption('Marriage');
+    await field('Do you have any evidence of the new name?').selectOption('Yes');
+    assert.equal((await page.evaluate(()=>window.gazetteSelection())).variantId,'gazette-0');
     assert.deepEqual(await page.locator('legend').allTextContents(),['Old name','New name']);
     assert.equal(await page.locator('#serviceFields input').count(),2);
     await page.getByRole('button',{name:'Continue',exact:true}).click();
@@ -68,7 +71,7 @@ try {
     await field('Gazette language').selectOption('English');
     assert.equal(await field('Old full name (English)').inputValue(),'');
     for(const input of await page.locator('#serviceFields input').all()) await input.fill('Test');
-    for(const [reason,count] of [['Marriage',6],['Correction of incorrect name',5],['Other name change',4]]) {
+    for(const [reason,count] of [['Marriage',7],['Correction of incorrect name',5],['Other name change',5]]) {
       await field('Reason for name change').selectOption(reason);
       await page.getByRole('button',{name:'Continue',exact:true}).click();
       assert.equal(await page.locator('.doc').count(),count);
@@ -77,11 +80,16 @@ try {
       assert.ok(documents.includes('Live Photo'));
       assert.equal(documents.includes('Husband Aadhaar Card'),reason==='Marriage');
       assert.equal(documents.includes('Wedding Invitation / Marriage Registration Certificate'),reason==='Marriage');
-      assert.equal(documents.includes('Correct Name Proof / Affidavit'),reason==='Correction of incorrect name');
+      assert.equal(documents.includes('Affidavit / Evidence of New Name'),true);
       assert.equal(documents.includes('Ration Card'),false);
       assert.equal(await page.locator('.form-actions .primary').isDisabled(),true);
       await page.getByRole('button',{name:'Back',exact:true}).click();
     }
+    await field('Do you have any evidence of the new name?').selectOption('No');
+    assert.equal((await page.evaluate(()=>window.gazetteSelection())).variantId,'gazette-1');
+    assert.match(await page.locator('#svcInfo').textContent(),/Affidavit charges will increase/);
+    await page.getByRole('button',{name:'Continue',exact:true}).click();
+    assert.equal(await page.getByText('Affidavit / Evidence of New Name',{exact:true}).count(),0);
     await page.evaluate(catalog=>window.setupGazette(catalog,'caste-certificate',3),serviceCatalog);
     const other=page.locator('.caste-document-section').last();
     assert.doesNotMatch(await other.textContent(),/Income Certificate/);

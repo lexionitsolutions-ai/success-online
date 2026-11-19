@@ -8,7 +8,7 @@ export function paymentBlocksDeletion(c,payments) {
 // access and invalidate every unpaid checkout before removing it from lists.
 export async function deleteUnpaidCase({db,c,user,recomputeCase}) {
   const {all,run}=db;
-  if(user.role!=='sales' || c.sales_user_id!==user.id) throw Object.assign(new Error('Only the salesperson who created an unpaid case can delete it.'),{status:403});
+  if(!['sales','admin'].includes(user.role) || c.sales_user_id!==user.id) throw Object.assign(new Error('Only the sales or admin user who created an unpaid case can delete it.'),{status:403});
   const payments=await all('SELECT status,verified_at FROM payments WHERE case_id=$id',{$id:c.id});
   if(paymentBlocksDeletion(c,payments)) throw Object.assign(new Error('This case cannot be deleted because a payment has been recorded or is awaiting verification. Paid cases cannot be deleted, including partial payments and refunds.'),{status:409});
   const batches=await all('SELECT DISTINCT b.id,b.status,b.verified_at FROM payment_batches b JOIN payment_batch_items i ON i.batch_id=b.id JOIN payments p ON p.id=i.payment_id WHERE p.case_id=$id',{$id:c.id});
@@ -29,6 +29,6 @@ export async function deleteUnpaidCase({db,c,user,recomputeCase}) {
     let body;try {body=JSON.parse(notice.body);}catch {continue;}
     if(body.caseId===c.id) await run('DELETE FROM notifications WHERE id=$id',{$id:notice.id});
   }
-  await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:'aud_'+randomUUID(),$actor:user.id,$action:'case.delete_unpaid',$type:'case',$entity:c.id,$reason:`Unpaid case ${c.ref} deleted by its salesperson; payment history retained for reconciliation.`,$at:stamp});
+  await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:'aud_'+randomUUID(),$actor:user.id,$action:'case.delete_unpaid',$type:'case',$entity:c.id,$reason:`Unpaid case ${c.ref} deleted by its creator; payment history retained for reconciliation.`,$at:stamp});
   return {ok:true,caseId:c.id};
 }

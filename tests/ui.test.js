@@ -867,7 +867,7 @@ test('sales deletion is the final table column, blocks paid rows and stops uploa
   assert.match(markup,/onclick="deleteSalesCase\('unpaid',this\)"\s+aria-label/);
   run('cases[0].deletionAllowed=false');
   assert.match(run('caseTable(cases)'),/disabled title="Cases with recorded payments cannot be deleted"/);
-  run("me.role='admin'");assert.doesNotMatch(run('caseTable(cases)'),/Delete case/);
+  run("me.role='admin'");assert.match(run('caseTable(cases)'),/Delete case/);
   run(`me.role='sales';cases[0].deletionAllowed=true;window.confirm=()=>false;const deletions=[];api=async(path,options)=>{deletions.push({path,method:options.method});return {ok:true}};`);
   await run("deleteSalesCase('unpaid')");assert.equal(run('deletions.length'),0);
   run(`window.confirm=()=>true;render=()=>{};renderBackgroundUploads=()=>{};uploadJobStorage=async()=>{};const oldJob={id:'unpaid'};uploadJobs.set('unpaid',oldJob);`);
@@ -974,4 +974,29 @@ test('staff management exposes admin account controls and quote recovery explain
   assert.match(recovery,/3 of 5/);assert.match(recovery,/Bank Passbook/);assert.match(recovery,/resumeCaseUpload/);
   assert.equal(run("isQuoteService({service:{slug:'pan',name:'PAN Card'}})"),false);
   assert.equal(run("isQuoteService({service:{slug:'pf-assistance'}})"),true);
+});
+
+
+test('main branch discount controls show the reduced payable total and stay hidden for other users',()=>{
+  const {run}=client();
+  run(`me={id:'branch',role:'sales',discountsAllowed:true};draft={step:4,details:{},customer:{name:'Test',mobile:'9876543210'},docs:{},discount:'100'};const service={name:'PAN',slug:'pan'},variant={amounts:{serviceCharge:60000,officialFee:0,tax:0,total:60000}};`);
+  assert.match(run('wizardBody(service,variant)'),/id="reviewDiscount"/);
+  assert.match(run('wizardBody(service,variant)'),/500.00/);
+  run('me.discountsAllowed=false');assert.doesNotMatch(run('wizardBody(service,variant)'),/id="reviewDiscount"/);
+  run(`me={id:'admin',role:'admin'};cases=[{id:'c',ref:'SO',customer:{name:'Test',mobile:'9876543210'},service:{name:'PAN'},variant:{name:'Application'},sales:{id:'admin',username:'admin01'},payment_state:'unpaid',status:'Draft',amounts:{total:100},deletionAllowed:true}];`);
+  assert.match(run('caseTable(cases)'),/<th>Owner<\/th><th>Salesperson username<\/th>/);
+  assert.match(run('caseTable(cases)'),/data-language-preserve>admin01/);
+  assert.match(run('caseTable(cases)'),/onclick="deleteSalesCase\('c',this\)"\s+aria-label/);
+});
+
+
+test('Gazette pricing dropdown offers exactly with and without affidavit charges',()=>{
+  const {run}=client();
+  run(`me={id:'admin',role:'admin'};pricingSalesId='sales';pricingData={salespeople:[{id:'sales',name:'Sales',username:'sales',active:true}],overrides:[],prices:['With affidavit charges','Without affidavit charges'].map((name,index)=>({variant_id:'gazette-'+index,service_name:'Gazette',variant_name:name,price:50000+index*10000}))};`);
+  let html=run('renderPricing()');
+  assert.equal((html.match(/class="analytics-panel pricing-card"/g)||[]).length,1);
+  for(const name of ['With affidavit charges','Without affidavit charges']) assert.ok(html.includes('>'+name+'</option>'));
+  assert.doesNotMatch(html,/>Application<\/option>/);
+  run("pricingVariants.set('Gazette','gazette-1')");html=run('renderPricing()');
+  assert.match(html,/saveSalespersonPrice\(event,'gazette-1'\)/);assert.match(html,/value="600.00"/);
 });

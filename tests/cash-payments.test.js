@@ -33,6 +33,25 @@ test('Mahalaxmi cash instalments forward partial cases but only admin-confirmed 
     const payload={variantId:variant.id,details:pfDetails,customer:{name:'Cash Trial',mobile:'9876543210'},consent:true};
     for(const cookie of [other,admin]) assert.equal((await request('/api/cases',{cookie,body:{...payload,cashPayment:{amount:10000}}})).status,403);
     for(const amount of [0,-1,60001,1.5,'10000']) assert.equal((await request('/api/cases',{cookie:sales,body:{...payload,cashPayment:{amount}}})).status,400);
+    // Discounts are restricted by the stable main-branch account ID and change real checkout amounts.
+    assert.equal((await request('/api/me',{cookie:sales})).data.user.discountsAllowed,true);
+    assert.equal((await request('/api/me',{cookie:other})).data.user.discountsAllowed,false);
+    for(const cookie of [other,admin]) assert.equal((await request('/api/cases',{cookie,body:{...payload,discount:1000}})).status,403);
+    for(const discount of [-1,60000,60001,1.5,'10000']) assert.equal((await request('/api/cases',{cookie:sales,body:{...payload,discount}})).status,400);
+    const discounted=(await request('/api/cases',{cookie:sales,body:{...payload,discount:10000}})).data.case;
+    assert.equal(discounted.amounts.total,50000);assert.equal(discounted.payment.amount,50000);assert.equal(discounted.discount,10000);
+    assert.equal(discounted.details._intakeDiscount,undefined);
+    const discountPath=`/api/cases/${discounted.id}/discount`;
+    for(const cookie of [other,admin,office]) assert.equal((await request(discountPath,{cookie,body:{discount:20000}})).status,403);
+    const reduced=await request(discountPath,{cookie:sales,body:{discount:20000}});
+    assert.equal(reduced.status,200,JSON.stringify(reduced.data));assert.equal(reduced.data.case.amounts.total,40000);
+    await request('/api/payment-settings',{cookie:admin,body:{action:'enable-receiver',ownerConfirmed:true}});
+    const discountedOrder=(await request(`/api/cases/${discounted.id}/payment-order`,{cookie:sales,body:{individual:true}})).data;
+    assert.equal(discountedOrder.amount,40000);assert.equal(new URL(discountedOrder.upiIntent).searchParams.get('am'),'400.00');
+    assert.equal((await request(discountPath,{cookie:sales,body:{discount:0}})).data.case.amounts.total,60000);
+    const discountedCash=(await request('/api/cases',{cookie:sales,body:{...payload,discount:10000,cashPayment:{amount:10000}}})).data.case;
+    assert.equal(discountedCash.cashPayment.total,50000);assert.equal(discountedCash.cashPayment.amountToPay,40000);
+    assert.equal((await request(`/api/cases/${discountedCash.id}/discount`,{cookie:sales,body:{discount:20000}})).status,409);
     const pdf=Buffer.from('%PDF-1.4\ncash fixture\n%%EOF');
     const upload=(id,docType,cookie=sales)=>request(`/api/cases/${id}/documents`,{cookie,body:{docType,fileName:'fixture.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')}});
     async function create(initial=10000) {

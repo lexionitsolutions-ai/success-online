@@ -1,7 +1,8 @@
+import {DISCOUNT_KEY,validateDiscount,discountedAmounts} from './case-discounts.js';
 import {ACCEPTANCE_KEY,validAcceptanceToken,isAcceptanceCase} from './acceptance-tests.js';
 import {createStaffAccounts} from './staff-accounts.js';
 import {QUOTE_KEY,caseQuote,quoteVisible,quoteAmounts,quotedServices} from './case-quotes.js';
-import {syncServiceOptions} from './service-options.js';
+import {syncServiceOptions,ensureGazettePricingOptions} from './service-options.js';
 import './public/intake-rules.js';
 const { matches: matchesIntake } = globalThis.IntakeRules;
 import http from 'node:http';
@@ -104,7 +105,7 @@ function verifyPassword(password, stored) {
   return timingSafeEqual(Buffer.from(hash, 'hex'), scryptSync(password, salt, 32));
 }
 function json(row, key, fallback) { try { return JSON.parse(row?.[key] || ''); } catch { return fallback; } }
-function publicUser(u) { return u && { id: u.id, username: u.username, name: u.name, role: u.role,cashPaymentsAllowed:cashAccount(u) }; }
+function publicUser(u) { return u && { id: u.id, username: u.username, name: u.name, role: u.role,cashPaymentsAllowed:cashAccount(u),discountsAllowed:cashAccount(u) }; }
 
 async function seed() {
   if ((await one('SELECT id FROM users LIMIT 1'))) return;
@@ -431,7 +432,7 @@ async function caseRows(rows) {
     const cashPlan=cashAccounts.find(a=>a.case_id===c.id);
     const cashPayment=cashSummary(cashPlan,payments.filter(p=>p.case_id===c.id));
     const pendingUploads=(rawDetails[INTAKE_UPLOADS]?.finalized===false ? rawDetails[INTAKE_UPLOADS].files.filter(file=>!file.documentId || !documents.some(doc=>doc.id===file.documentId)) : []).map(({key,docType,fileName})=>({key,docType,fileName}));
-    return {...c,syntheticTest:isAcceptanceCase(c,SESSION_SECRET),pendingUploads,quote:quotedServices.includes(serviceMap.get(c.service_id)?.slug) ? caseQuote(c) : null,deletionAllowed:c.status!=='Deleted' && !paymentBlocksDeletion(c,paymentHistory.filter(p=>p.case_id===c.id)),uploads,cashPayment,cashReceipts:cashPayment?payments.filter(p=>p.case_id===c.id && ['cash','balance_upi'].includes(p.gateway)).map(p=>({id:p.id,amount:p.amount,method:p.gateway==='cash'?'Cash':'UPI',status:p.status,created_at:p.created_at,verified_at:p.verified_at,utr:p.transaction_id})):[],details_json:JSON.stringify(details),payment_state:cashPayment ? cashPayment.releaseAllowed?'paid':cashPayment.processingAllowed?'partially_paid':'unpaid' : payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received && (!cashPayment || cashPayment.releaseAllowed) ? publicDocument(received) : null,amounts:cashPlan?{serviceCharge:cashPlan.service_charge,officialFee:cashPlan.official_fee,tax:cashPlan.tax,total:cashPlan.total}:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : caseQuote(c) ? quoteAmounts(caseQuote(c)) : amounts(variant,details,customPriceMap.get(c.sales_user_id + ':' + c.variant_id)),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
+    return {...c,discount:JSON.parse(c.details_json || '{}')[DISCOUNT_KEY]?.amount || 0,syntheticTest:isAcceptanceCase(c,SESSION_SECRET),pendingUploads,quote:quotedServices.includes(serviceMap.get(c.service_id)?.slug) ? caseQuote(c) : null,deletionAllowed:c.status!=='Deleted' && !paymentBlocksDeletion(c,paymentHistory.filter(p=>p.case_id===c.id)),uploads,cashPayment,cashReceipts:cashPayment?payments.filter(p=>p.case_id===c.id && ['cash','balance_upi'].includes(p.gateway)).map(p=>({id:p.id,amount:p.amount,method:p.gateway==='cash'?'Cash':'UPI',status:p.status,created_at:p.created_at,verified_at:p.verified_at,utr:p.transaction_id})):[],details_json:JSON.stringify(details),payment_state:cashPayment ? cashPayment.releaseAllowed?'paid':cashPayment.processingAllowed?'partially_paid':'unpaid' : payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received && (!cashPayment || cashPayment.releaseAllowed) ? publicDocument(received) : null,amounts:cashPlan?{serviceCharge:cashPlan.service_charge,officialFee:cashPlan.official_fee,tax:cashPlan.tax,total:cashPlan.total}:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : discountedAmounts(caseQuote(c) ? quoteAmounts(caseQuote(c)) : amounts(variant,details,customPriceMap.get(c.sales_user_id + ':' + c.variant_id)),JSON.parse(c.details_json || '{}')),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
   });
 }
 function amounts(v, details = {}, override) { const p=servicePrices.get(v.id);const base=priceAmounts(v,p?.price,p?.original,override);return json(v,'fields_json',[]).some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base,details) : base; }
@@ -703,10 +704,10 @@ async function routeApi(req, res, url) {
   }
   if (req.method === 'GET' && url.pathname === '/api/cases') {
     const reviewSQL="status IN ('Awaiting Back Office Review','Awaiting Quoted Payment','Correction Required','Awaiting Documents','Awaiting Payment') AND details_json LIKE '%\"_intakeQuote\"%'";
-    const where = user.role === 'sales' ? "WHERE sales_user_id=$uid AND status!='Deleted'" : user.role === 'backoffice' ? `WHERE status!='Draft' AND (${paidCaseSQL('cases',true)} OR (${reviewSQL})) AND (backoffice_user_id=$uid OR backoffice_user_id IS NULL)` : `WHERE ${paidCaseSQL('cases',true)} OR (${reviewSQL})`;
-    const params = user.role === 'admin' ? {} : { $uid: user.id };
+    const where = user.role === 'sales' ? "WHERE sales_user_id=$uid AND status!='Deleted'" : user.role === 'backoffice' ? `WHERE status!='Draft' AND (${paidCaseSQL('cases',true)} OR (${reviewSQL})) AND (backoffice_user_id=$uid OR backoffice_user_id IS NULL)` : `WHERE (sales_user_id=$uid AND status!='Deleted') OR ${paidCaseSQL('cases',true)} OR (${reviewSQL})`;
+    const params = { $uid: user.id };
     const listed = await caseRows(await all(`SELECT * FROM cases ${where} ORDER BY updated_at DESC`, params));
-    return send(res, 200, { cases: user.role === 'sales' ? listed : listed.filter(item => item.quote?.submittedAt || (item.payment_state === 'paid' || item.cashPayment?.processingAllowed) && item.document_state === 'complete' && (!item.uploads || item.uploads.complete)) });
+    return send(res, 200, { cases: user.role === 'sales' ? listed : listed.filter(item => user.role==='admin' && item.sales?.id===user.id || item.quote?.submittedAt || (item.payment_state === 'paid' || item.cashPayment?.processingAllowed) && item.document_state === 'complete' && (!item.uploads || item.uploads.complete)) });
   }
   if (req.method === 'POST' && url.pathname === '/api/cases') return body(req).then(async b => {
     if (user.role !== 'sales' && user.role !== 'admin') return send(res, 403, { error: 'Only sales or admin can create cases' });
@@ -749,19 +750,25 @@ async function routeApi(req, res, url) {
       if (value && field.type === 'number' && ((field.min !== undefined && Number(value) < field.min) || (field.step === '1' && !Number.isInteger(Number(value))))) return send(res, 400, { error: `Invalid ${field.label}` });
     }
     const batch = createUploadBatch(b.uploadManifest, json(variant,'documents_json',[]),b.details,matchesIntake);
+    const allowedFields = new Set(fields.filter(field => matchesIntake(field.when, b.details) || (field.defaultWhen && b.details?.[field.defaultWhen.field] === field.defaultWhen.equals)).map(field => field.label).filter(label => !/password/i.test(label)));
+    const details = Object.fromEntries(Object.entries(b.details || {}).filter(([key, value]) => allowedFields.has(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')).map(([key, value]) => [key, String(value).slice(0, 500)]));
+    if (batch) details[INTAKE_UPLOADS] = batch;
+    if(b.acceptanceTestToken) details[ACCEPTANCE_KEY]=b.acceptanceTestToken;
+    if(requiresQuote) details[QUOTE_KEY]={state:'draft'};
+    if(b.discount !== undefined) {
+      if(requiresQuote) return send(res,400,{error:'Apply a discount after back office has set the price.'});
+      const custom=await one('SELECT price FROM salesperson_prices WHERE sales_user_id=$sales AND variant_id=$variant',{$sales:user.id,$variant:variant.id});
+      details[DISCOUNT_KEY]={amount:validateDiscount(user,b.discount,amounts(variant,details,custom?.price)),by:user.id,at:now()};
+    }
+    if(service?.slug==='gazette' && variant.name !== (details['Do you have any evidence of the new name?']==='No' ? 'With affidavit charges' : 'Without affidavit charges')) return send(res,400,{error:'Choose the Gazette price matching the new name evidence answer.'});
+    const passwordField = fields.find(field => field.sensitive && field.type === 'password');
+    if (passwordField && b.details[passwordField.label]) details[PF_PASSWORD_KEY] = encryptPFPassword(String(b.details[passwordField.label]), SESSION_SECRET, caseId);
     // Supabase is the primary store; Google availability must not block intake.
     let customerId = b.customerId;
     if (!customerId) {
       customerId = id('cus');
       (await run('INSERT INTO customers VALUES ($id,$name,$mobile,$email,$address,$created_by,$created_at)', { $id: customerId, $name: b.customer.name, $mobile: b.customer.mobile, $email: b.customer.email || '', $address: b.customer.address || '', $created_by: user.id, $created_at: now() }));
     }
-    const allowedFields = new Set(fields.filter(field => matchesIntake(field.when, b.details) || (field.defaultWhen && b.details?.[field.defaultWhen.field] === field.defaultWhen.equals)).map(field => field.label).filter(label => !/password/i.test(label)));
-    const details = Object.fromEntries(Object.entries(b.details || {}).filter(([key, value]) => allowedFields.has(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')).map(([key, value]) => [key, String(value).slice(0, 500)]));
-    if (batch) details[INTAKE_UPLOADS] = batch;
-    if(b.acceptanceTestToken) details[ACCEPTANCE_KEY]=b.acceptanceTestToken;
-    if(requiresQuote) details[QUOTE_KEY]={state:'draft'};
-    const passwordField = fields.find(field => field.sensitive && field.type === 'password');
-    if (passwordField && b.details[passwordField.label]) details[PF_PASSWORD_KEY] = encryptPFPassword(String(b.details[passwordField.label]), SESSION_SECRET, caseId);
     (await run(`INSERT INTO cases VALUES ($id,$ref,$customer_id,$service_id,$variant_id,$sales_user_id,NULL,'Draft','Normal',NULL,'SO-CONSENT-2026-01',$consent_at,$details,NULL,NULL,'missing','unpaid',NULL,NULL,$created_at,$updated_at,NULL,NULL)`,
       { $id: caseId, $ref: (await nextCaseRef()), $customer_id: customerId, $service_id: variant.service_id, $variant_id: variant.id, $sales_user_id: user.id, $consent_at: b.consent ? now() : null, $details: JSON.stringify(details), $created_at: now(), $updated_at: now() }));
     const savedCase=await one('SELECT * FROM cases WHERE id=$id',{$id:caseId});
@@ -776,6 +783,26 @@ async function routeApi(req, res, url) {
     const c = (await one('SELECT * FROM cases WHERE id=$id OR ref=$id' + (db.cloud && ['POST','DELETE'].includes(req.method) && caseMatch[2]!=='upload-url' ? ' FOR UPDATE' : ''), { $id: caseMatch[1] }));
     if(c?.status==='Deleted') return send(res,404,{error:'Case not found'});
     if (!c || c.status==='Deleted' || !canSee(user, c)) return send(res, c && c.status!=='Deleted' ? 403 : 404, { error: c && c.status!=='Deleted' ? 'Not allowed' : 'Not found' });
+    if(req.method==='POST' && caseMatch[2]==='discount') {
+      const b=await body(req);
+      if(!cashAccount(user) || c.sales_user_id!==user.id) return send(res,403,{error:'Only Success Online Main Branch sales can discount their own cases.'});
+      const history=await all('SELECT status,verified_at FROM payments WHERE case_id=$id',{$id:c.id});
+      if(paymentBlocksDeletion(c,history) || await paymentSystem.cash.account(c.id) || ['Deleted','Cancelled','Closed','Delivered'].includes(c.status)) return send(res,409,{error:'A discount cannot be changed after payment is recorded or submitted.'});
+      const grouped=await one('SELECT i.batch_id FROM payment_batch_items i JOIN payments p ON p.id=i.payment_id WHERE p.case_id=$id',{$id:c.id});
+      if(grouped) return send(res,409,{error:'A combined checkout already exists for this case. Apply discounts before selecting combined payment.'});
+      const row=await caseRow(c),details=JSON.parse(c.details_json || '{}');
+      if(row.quote && !row.quote.amount) return send(res,409,{error:'Wait for the back-office quote before applying a discount.'});
+      const previous=details[DISCOUNT_KEY]?.amount || 0;
+      const value=validateDiscount(user,b.discount,{serviceCharge:row.amounts.serviceCharge+previous,total:row.amounts.total+previous});
+      details[DISCOUNT_KEY]={amount:value,by:user.id,at:now()};
+      await run('UPDATE cases SET details_json=$details,updated_at=$at WHERE id=$id',{$id:c.id,$details:JSON.stringify(details),$at:now()});
+      await run("UPDATE payments SET status='CANCELLED' WHERE case_id=$id AND status IN ('PENDING','INITIATED','EXPIRED')",{$id:c.id});
+      await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:id('aud'),$actor:user.id,$action:'case.discount',$type:'case',$entity:c.id,$reason:`Discount changed from ${previous} to ${value} paise`,$at:now()});
+      const updated=await one('SELECT * FROM cases WHERE id=$id',{$id:c.id});
+      await paymentSystem.createOrder(updated,user);
+      await recomputeCase(c.id);
+      return send(res,200,{case:await caseRow(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}))});
+    }
     if(req.method==='DELETE' && !caseMatch[2]) return send(res,200,await deleteUnpaidCase({db,c,user,recomputeCase}));
     if (req.method === 'GET' && !(await staffCanReadCase(user,c))) return send(res,403,{error:'Payment must be confirmed before this case is visible to back office or admin.'});
     if(req.method==='GET' && caseMatch[2]==='messages') {
@@ -1244,12 +1271,14 @@ export async function initialize({setup = false} = {}) {
       await seed();
       await preserveServicePrices();
       await seedServiceCatalog();
+      await ensureGazettePricingOptions(db);
       await syncServiceOptions(db);
       await preserveServicePrices();
       // Keep simulated history, but correct cached case payment state on upgrade.
       await run("UPDATE cases SET payment_state='unpaid',status=CASE WHEN status='Ready for Assignment' THEN 'Awaiting Payment' ELSE status END WHERE payment_state='paid' AND EXISTS (SELECT 1 FROM payments WHERE payments.case_id=cases.id AND gateway='demo') AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.case_id=cases.id AND status IN ('PAID','verified','offline_approved') AND gateway NOT IN ('demo','acceptance_test'))");
     });
   }
+  if(db.cloud) await ensureGazettePricingOptions(db);
   activeServiceForms = currentServiceForms(await db.all('SELECT v.id,v.name,s.slug FROM variants v JOIN services s ON s.id=v.service_id'));
   for (const setting of await all('SELECT name,value FROM integration_settings')) process.env[setting.name] = setting.value;
   servicePrices=new Map((await all('SELECT variant_id,price,original_config FROM service_prices')).map(p=>[p.variant_id,{price:p.price,original:JSON.parse(p.original_config)}]));
@@ -1276,7 +1305,7 @@ export async function handler(req, res) {
     const sheetsJobs = new Set(),caseMirrorJobs=new Set();
     const documentRequest = req.method==='POST' && (url.pathname==='/api/cases' || /\/api\/cases\/[^/]+\/(documents|finish-uploads)$/.test(url.pathname));
     const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|submit-received-document|request-reupload|submit-reupload|submit-review|set-quote|remark|resume-upload)$/.test(url.pathname);
-    const paymentRequest = url.pathname==='/api/sms-observer/events' || /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/(payment-order|cash-payment)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname);
+    const paymentRequest = url.pathname==='/api/sms-observer/events' || /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/(payment-order|cash-payment|discount)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname);
     const readOnly = (req.method === 'GET' && (
       ['/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments','/api/payments/cash-pending'].includes(url.pathname) ||
       /^\/api\/cases\/[^/]+(?:\/messages)?$/.test(url.pathname) || /^\/api\/documents\/[^/]+\/(download|preview|view)$/.test(url.pathname) || /^\/api\/announcements(?:\/[^/]+\/image)?$/.test(url.pathname)
@@ -1292,7 +1321,7 @@ export async function handler(req, res) {
         for (const setting of settings) process.env[setting.name] = setting.value;
         servicePrices=new Map(prices.map(p=>[p.variant_id,{price:p.price,original:JSON.parse(p.original_config)}]));
       }
-      if (db.cloud && url.pathname!=='/api/payments/cash-pending' && (url.pathname==='/api/sms-observer/events' || /^\/api\/payments\//.test(url.pathname) || /\/payment-order$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname))) await one('SELECT pg_advisory_xact_lock(73194204)');
+      if (db.cloud && url.pathname!=='/api/payments/cash-pending' && (url.pathname==='/api/sms-observer/events' || /^\/api\/payments\//.test(url.pathname) || /\/(payment-order|discount)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname))) await one('SELECT pg_advisory_xact_lock(73194204)');
       await routeApi(req, buffered, url);
     };
     await deferredCaseMirrors.run(caseMirrorJobs,()=>deferredSheets.run(sheetsJobs, () => readOnly && db.cloud ? route() : db.transaction(route)));

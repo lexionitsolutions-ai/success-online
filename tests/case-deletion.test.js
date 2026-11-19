@@ -28,6 +28,12 @@ test('sales can delete only their own unpaid cases; checkouts and uploads cannot
     const sales=await login('sales01'),other=await login('sales02'),admin=await login('admin01'),office=await login('backoffice01');
     const variant=(await request('/api/services',{cookie:sales})).data.services.find(s=>s.slug==='pan').variants[0];
     const payload={variantId:variant.id,details:pfDetails,customer:{name:'Deletion Trial',mobile:'9876543210'},consent:true};
+    const ownAdmin=(await request('/api/cases',{cookie:admin,body:payload})).data.case;
+    assert.ok((await request('/api/cases',{cookie:admin})).data.cases.some(row=>row.id===ownAdmin.id),'Admin sees own unpaid cases');
+    assert.equal((await request('/api/cases/'+ownAdmin.id,{cookie:admin,method:'DELETE'})).status,200);
+    const paidAdmin=(await request('/api/cases',{cookie:admin,body:payload})).data.case;
+    const adminDb=new DatabaseSync(path);adminDb.prepare("UPDATE payments SET status='PAID' WHERE id=?").run(paidAdmin.payment.id);adminDb.close();
+    assert.equal((await request('/api/cases/'+paidAdmin.id,{cookie:admin,method:'DELETE'})).status,409);
     const create=async extra=>(await request('/api/cases',{cookie:sales,body:{...payload,...extra}})).data.case;
     const clientRequestId=randomUUID(),c=await create({clientRequestId}),base='/api/cases/'+c.id;
     assert.equal(c.deletionAllowed,true);

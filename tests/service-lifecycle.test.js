@@ -52,7 +52,8 @@ test('all services and pricing variants finish their normal or quoted lifecycle 
     for(const service of services) for(const variant of service.variants) {
       await t.test(`${service.name} / ${variant.name}`,async()=>{
         const quoted=['passport','pf-assistance','ration-card'].includes(service.slug),details=detailsFor(variant);
-        if(['food-license','caste-validity'].includes(service.slug)) await ok('/api/admin/pricing',{cookie:admin,body:{salesUserId:salesUser.id,variantId:variant.id,price:15000+index*1000}});
+        if(service.slug==='gazette') details['Do you have any evidence of the new name?']=variant.name==='With affidavit charges'?'No':'Yes';
+        if(['food-license','caste-validity','gazette'].includes(service.slug)) await ok('/api/admin/pricing',{cookie:admin,body:{salesUserId:salesUser.id,variantId:variant.id,price:15000+index*1000}});
         const c=(await ok('/api/cases',{cookie:sales,body:{variantId:variant.id,details,customer:{name:'Synthetic Lifecycle Applicant',mobile:'9876543210'},consent:true}})).case,base='/api/cases/'+c.id;
         assert.equal((await request(base,{cookie:office})).status,403);
         const upload=docType=>ok(base+'/documents',{cookie:sales,body:{docType,fileName:'synthetic.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')}});
@@ -72,7 +73,8 @@ test('all services and pricing variants finish their normal or quoted lifecycle 
         }
         const order=await ok(base+'/payment-order',{cookie:sales,body:{}});
         if(quoted) assert.equal(order.amount,140000);
-        if(['food-license','caste-validity'].includes(service.slug)) assert.equal(order.amount,15000+index*1000);
+        if(service.slug==='gazette') details['Do you have any evidence of the new name?']=variant.name==='With affidavit charges'?'No':'Yes';
+        if(['food-license','caste-validity','gazette'].includes(service.slug)) assert.equal(order.amount,15000+index*1000);
         await verifyTestOrder(request,admin,sales,order.id,String(810000000000+index++));
         assert.ok((await ok('/api/cases',{cookie:office})).cases.some(row=>row.id===c.id));
         await ok(base+'/claim',{cookie:office,body:{}});
@@ -88,7 +90,7 @@ test('all services and pricing variants finish their normal or quoted lifecycle 
         assert.equal((await fetch(origin+base+'/download-all',{headers:{cookie:office}})).status,200);
       });
     }
-    assert.equal(index,22,'16 services plus 4 extra food durations and 2 extra validity purposes');
+    assert.equal(index,23,'16 services plus 4 extra food durations, 2 extra validity purposes and 1 extra Gazette option');
     await t.test('private payment simulation excludes synthetic cases from finance and Sheets',async()=>{
       const before=(await ok('/api/admin/dashboard?period=all',{cookie:admin})).metrics;
       const variant=services.find(s=>s.slug==='pan').variants[0];

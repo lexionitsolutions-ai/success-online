@@ -12,7 +12,7 @@ test('Ration Card supports every combination of five changes, housing, card colo
     const details = Object.fromEntries(changes.map((label, index) => [label, mask & (1 << index) ? 'Yes' : 'No']));
     Object.assign(details, { 'Ration card residence': home, 'Is the ration card white?': white, 'Reason for member removal': reason });
     const docs = visibleDocs(details), labels = docs.map(doc => doc.label);
-    for (const label of ['Ration Card', 'All Members Aadhaar Cards', 'All Members PAN Cards', 'All Members Photos', 'Gas Passbook', 'Ration Shop A.B.C. Certificate', 'Female Head Bank Passbook']) assert.ok(labels.includes(label), label);
+    for (const label of ['Ration Card', 'All Members Aadhaar Cards', 'PAN Card of Head of Family ( Female )', 'All Members Photos', 'Gas Passbook', 'Ration Shop A.B.C. Certificate', 'Female Head Bank Passbook']) assert.ok(labels.includes(label), label);
     assert.ok(docs.every(doc => doc.required));
     assert.equal(new Set(labels).size, labels.length, 'No duplicate upload slots');
     const expected = [
@@ -51,5 +51,5 @@ test('one answered Ration Card question is enough and unanswered questions add n
   assert.ok(docs.includes('Member Addition Aadhaar Card'));
   assert.ok(!docs.includes('ITR / Form 16 / Pension Statement'));
   assert.ok(!docs.includes('Consent Letter / Rent Agreement'));
-  assert.ok(ration.documents.slice(0, 4).every(doc => doc.multiple));
+  assert.ok(ration.documents.slice(0, 4).filter(doc=>doc.label!=='PAN Card of Head of Family ( Female )').every(doc => doc.multiple));
 });
