@@ -200,6 +200,19 @@ test('PostgreSQL API and signed cloud uploads: access, large files, retries, ana
     const reportPages=(await request(reportPath,{cookie:accounts.sales})).data.documents.filter(doc=>doc.doc_type==='Talathi Report' && doc.state==='uploaded');
     assert.equal(reportPages.length,4,'Every signed report-page upload stays active');
     assert.equal(new Set(reportPages.map(doc=>doc.file_name)).size,4);
+    const catalogue=await request('/api/admin/services',{cookie:admin});assert.equal(catalogue.status,200);
+    const panChecklist=catalogue.data.services.find(s=>s.slug==='pan').variants[0];
+    const checklistPath=`/api/admin/services/${panChecklist.id}/checklist`;
+    const edited=await request(checklistPath,{cookie:admin,method:'PUT',body:{revision:0,documents:[{label:'Cloud Evidence',note:'Cloud checklist test',required:true,multiple:true}]}});
+    assert.equal(edited.status,200,JSON.stringify(edited.data));
+    assert.equal((await request(checklistPath,{cookie:admin,method:'PUT',body:{revision:0,documents:[]}})).status,409);
+    const cloudForms=(await request('/api/services',{cookie:accounts.sales})).data.services;
+    assert.equal(cloudForms.find(s=>s.slug==='pan').variants[0].documents[0].label,'Cloud Evidence');
+    for(const cookie of [admin,accounts.sales,accounts.backoffice]) {
+      const files=await request('/api/workspace/documents',{cookie});assert.equal(files.status,200,JSON.stringify(files.data));
+      assert.ok(Number(files.data.summary.bytes)>=0);
+    }
+
 
   } finally {child.kill();}
 });

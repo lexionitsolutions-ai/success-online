@@ -138,7 +138,7 @@ test('Mahalaxmi cash instalments forward partial cases but only admin-confirmed 
     const pending=()=>request('/api/payments/cash-pending',{cookie:sales});
     const pendingRow=(await pending()).data.cases.find(row=>row.case_id===later.id);
     assert.equal(pendingRow.case_status,'Closed');assert.equal(pendingRow.pending_amount,20000);assert.equal(pendingRow.amount_to_pay,20000);
-    assert.ok(!(await request('/api/payments/cash-pending',{cookie:other})).data.cases.some(row=>row.case_id===later.id));
+    assert.equal((await request('/api/payments/cash-pending',{cookie:other})).status,403);
     assert.equal((await request('/api/payments/cash-pending',{cookie:office})).status,403);
     const upi200=(await request(`/api/cases/${later.id}/payment-order`,{cookie:sales,body:{individual:true}})).data;
     assert.equal(upi200.amount,20000);assert.equal(new URL(upi200.upiIntent).searchParams.get('am'),'200.00');

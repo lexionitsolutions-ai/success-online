@@ -24,7 +24,7 @@ try {
       if(!file.includes('..') && existsSync('public/'+file)) return route.fulfill({contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:readFileSync('public/'+file)});
       return route.abort();
     });
-    await page.goto('https://case-delete-preview.test');await page.getByRole('heading',{name:'Sales workspace'}).waitFor();
+    await page.goto('https://case-delete-preview.test');await page.getByRole('heading',{name:'Live Dashboard'}).waitFor();
     await page.locator('#recentUpdates summary').click();
     const unpaid=page.getByRole('button',{name:'Delete case SO-UNPAID',exact:true}),paid=page.getByRole('button',{name:'Delete case SO-PAID',exact:true});
     assert.equal(await unpaid.isEnabled(),true);assert.equal(await paid.isDisabled(),true);

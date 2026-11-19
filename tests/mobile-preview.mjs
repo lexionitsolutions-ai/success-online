@@ -65,8 +65,8 @@ try {
     assert.equal(await page.locator('#recentUpdates').evaluate(el=>el.open),true);
     await recentSummary.click();
     assert.equal(await page.locator('#recentUpdates .table-shell').isVisible(),false);
-    await page.getByRole('button',{name:'View completed cases',exact:true}).click();
-    await page.getByRole('heading',{name:'Completed Cases',exact:true}).waitFor();
+    await page.getByRole('button',{name:'View completed requests',exact:true}).click();
+    await page.getByRole('heading',{name:'Completed Requests',exact:true}).waitFor();
     await page.evaluate(()=>window.setView('dashboard'));
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Dashboard overflows at '+width);
     const profileBox=await page.locator('.profile-button').boundingBox();
@@ -86,7 +86,7 @@ try {
       const pendingNav=page.locator(width<=900?'.mobile-nav [data-view="pending"]':'.nav [data-view="pending"]');
       await pendingNav.locator('.nav-update-dot').waitFor({timeout:20000});
       await pendingNav.click();
-      await page.getByRole('heading',{name:'Pending Cases',exact:true}).waitFor();
+      await page.getByRole('heading',{name:'Pending Requests',exact:true}).waitFor();
       assert.equal(await page.locator('.case-table tbody tr').count(),1);
       assert.match(await page.locator('.case-table').innerText(),/Correction Required/);
       assert.equal(await pendingNav.locator('.nav-update-dot').count(),1);
@@ -163,21 +163,21 @@ try {
     if(role==='admin') {
       if(width<=900) {
         await page.locator('.mobile-more>summary').click();
-        await page.locator('.more-menu').getByRole('button',{name:'Employees',exact:true}).click();
-      } else await page.locator('.nav').getByRole('button',{name:'Employees',exact:true}).click();
+        await page.locator('.more-menu').getByRole('button',{name:'Staff',exact:true}).click();
+      } else await page.locator('.nav').getByRole('button',{name:'Staff',exact:true}).click();
       await page.locator('#employeePeriod').waitFor();
       if(width===390) await page.screenshot({path:join(root,'admin-employees.png'),fullPage:true});
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Employee page overflows');
       if(width===390) {
         await page.locator('.mobile-more>summary').click();
-        await page.locator('.more-menu').getByRole('button',{name:'Business analytics',exact:true}).click();
+        await page.locator('.more-menu').getByRole('button',{name:'Business Reports',exact:true}).click();
         await page.locator('.mini-row:not(.mini-head)').first().waitFor();
         assert.ok(await page.locator('.mini-row:not(.mini-head)').first().evaluate(el=>el.scrollWidth<=el.clientWidth+1),'Performance metrics overflow');
         await page.screenshot({path:join(root,'admin-analytics.png'),fullPage:true});
       }
     }
     if(role==='sales') {
-      await page.locator('.top-actions').getByRole('button',{name:'New case',exact:true}).click();
+      await page.locator('.top-actions').getByRole('button',{name:'New Case',exact:true}).click();
       if(width>900) assert.ok((await page.locator('#name').boundingBox()).x < (await page.locator('#mobile').boundingBox()).x);
       await page.locator('#mobile').fill('ddwea');
       assert.equal(await page.locator('#mobile').inputValue(),'');

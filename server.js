@@ -1,3 +1,4 @@
+import {CHECKLIST_KEY,caseChecklist,checklistOverrides,withChecklist,createChecklistAdmin} from './service-checklists.js';
 import {DISCOUNT_KEY,validateDiscount,discountedAmounts} from './case-discounts.js';
 import {ACCEPTANCE_KEY,validAcceptanceToken,isAcceptanceCase} from './acceptance-tests.js';
 import {createStaffAccounts} from './staff-accounts.js';
@@ -104,6 +105,7 @@ function verifyPassword(password, stored) {
   const [salt, hash] = stored.split(':');
   return timingSafeEqual(Buffer.from(hash, 'hex'), scryptSync(password, salt, 32));
 }
+const checklistAdmin=createChecklistAdmin({db:{one,all,run,cloud:db.cloud},send,body});
 function json(row, key, fallback) { try { return JSON.parse(row?.[key] || ''); } catch { return fallback; } }
 function publicUser(u) { return u && { id: u.id, username: u.username, name: u.name, role: u.role,cashPaymentsAllowed:cashAccount(u),discountsAllowed:cashAccount(u) }; }
 
@@ -426,7 +428,7 @@ async function caseRows(rows) {
     const variant=variantMap.get(c.variant_id),rawDetails=json(c,'details_json',{}),details=publicCaseDetails(rawDetails);
     const uploads=uploadBatchState(rawDetails,documents.filter(doc=>doc.case_id===c.id));
     const payment=payments.find(p=>p.case_id===c.id && ['PAID','verified','offline_approved'].includes(p.status)) || payments.find(p=>p.case_id===c.id);
-    const requirements=json(variant,'documents_json',[]);
+    const requirements=caseChecklist(c,variant);
     const received=documents.find(doc=>doc.case_id===c.id && doc.doc_type===RECEIVED_DOCUMENT_TYPE);
     const missing=(uploads && !uploads.complete) || requirements.some(d=>d.required && matchesIntake(d.when, details, true) && !have.get(c.id)?.has(d.label));
     const cashPlan=cashAccounts.find(a=>a.case_id===c.id);
@@ -467,7 +469,7 @@ async function recomputeCase(id, {sync=true} = {}) {
     all("SELECT * FROM payments WHERE case_id=$id AND gateway!='demo' ORDER BY created_at DESC",{$id:id}),
     one('SELECT * FROM cash_accounts WHERE case_id=$id',{$id:id})
   ]);
-  const docsReq=json(variant,'documents_json',[]);
+  const docsReq=caseChecklist(c,variant);
   const have = new Set(docs.map(d => d.doc_type));
   const details = json(c, 'details_json', {});
   const requiredDocs = docsReq.filter(d => d.required && matchesIntake(d.when, details, true));
@@ -531,7 +533,7 @@ async function readDocument(document) {
   return readFileSync(path);
 }
 async function missingDocuments(c) {
-  const requirements = json((await one('SELECT id,documents_json FROM variants WHERE id=$id', { $id: c.variant_id })), 'documents_json', []);
+  const requirements = caseChecklist(c,await one('SELECT id,documents_json FROM variants WHERE id=$id', { $id: c.variant_id }));
   const details = json(c, 'details_json', {});
   const have = new Set((await all("SELECT doc_type FROM documents WHERE case_id=$id AND state='uploaded'", { $id: c.id })).map(d => d.doc_type));
   return requirements.filter(d => d.required && matchesIntake(d.when, details, true) && !have.has(d.label)).map(d => d.label);
@@ -585,6 +587,7 @@ async function routeApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/logout') return send(res, 200, { ok: true }, { 'set-cookie': 'so_session=; Max-Age=0; Path=/' });
   const user = (await requireUser(req, res));
   if (!user) return;
+  if (await checklistAdmin.handle(req,res,url,user)) return;
   if (await announcementSystem.handle(req,res,url,user)) return;
   if (req.method === 'GET' && url.pathname === '/api/notifications') {
     const rows = await all('SELECT * FROM notifications WHERE user_id=$user AND read_at IS NULL ORDER BY created_at DESC LIMIT 500',{$user:user.id});
@@ -596,6 +599,28 @@ async function routeApi(req, res, url) {
     const ids = [...new Set(b.ids)];
     if (ids.length) await run(`UPDATE notifications SET read_at=$at WHERE user_id=$user AND read_at IS NULL AND id IN (${ids.map((_,index)=>`$notice${index}`).join(',')})`,{$at:now(),$user:user.id,...Object.fromEntries(ids.map((noticeId,index)=>[`$notice${index}`,noticeId]))});
     return send(res,200,{ok:true});
+  }
+  if(req.method==='GET' && url.pathname==='/api/workspace/documents') {
+    const page=Math.max(1,Math.min(100000,Number(url.searchParams.get('page')) || 1));
+    if(!Number.isInteger(page)) return send(res,400,{error:'Choose a valid page.'});
+    const q=String(url.searchParams.get('q') || '').trim().slice(0,140),kind=url.searchParams.get('kind') || '';
+    if(!['','pdf','image','other'].includes(kind)) return send(res,400,{error:'Choose a valid file type.'});
+    const review="(c.status NOT IN ('Deleted','Cancelled') AND c.details_json LIKE '%\"_intakeQuote\"%' AND c.details_json LIKE '%\"submittedAt\":%')";
+    const roleScope=user.role==='sales' ? 'c.sales_user_id=$user' : `(${paidCaseSQL('c',true)} OR ${review})${user.role==='backoffice' ? ' AND (c.backoffice_user_id=$user OR c.backoffice_user_id IS NULL)' : ''}`;
+    const released="(d.doc_type!='Received Document' OR ($sales=0 OR (c.status IN ('Closed','Delivered') AND NOT EXISTS (SELECT 1 FROM cash_accounts ca WHERE ca.case_id=c.id AND ca.total>(SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.case_id=c.id AND p.gateway!='demo' AND p.status IN ('PAID','verified','offline_approved'))))))";
+    const scope=`c.status!='Deleted' AND (${roleScope}) AND ${released}`;
+    const type=kind==='pdf' ? " AND d.mime_type='application/pdf'" : kind==='image' ? " AND d.mime_type LIKE 'image/%'" : kind==='other' ? " AND d.mime_type!='application/pdf' AND d.mime_type NOT LIKE 'image/%'" : '';
+    const search=q ? ' AND (LOWER(d.file_name) LIKE $q OR LOWER(d.doc_type) LIKE $q OR LOWER(c.ref) LIKE $q OR LOWER(cu.name) LIKE $q OR LOWER(s.name) LIKE $q)' : '';
+    const args={$sales:user.role==='sales'?1:0,...(user.role!=='admin'?{$user:user.id}:{}),...(q?{$q:'%'+q.toLowerCase()+'%'}:{})};
+    const joins='FROM documents d JOIN cases c ON c.id=d.case_id JOIN customers cu ON cu.id=c.customer_id JOIN services s ON s.id=c.service_id';
+    const active=`${scope} AND d.state!='replaced'${type}${search}`;
+    const [summary,types,count,rows]=await Promise.all([
+      one(`SELECT COUNT(*) files,COALESCE(SUM(d.size),0) bytes,COUNT(DISTINCT d.case_id) cases FROM documents d JOIN cases c ON c.id=d.case_id WHERE ${scope}`,Object.fromEntries(Object.entries(args).filter(([key])=>key!=='$q'))),
+      all(`SELECT CASE WHEN d.mime_type='application/pdf' THEN 'PDF' WHEN d.mime_type LIKE 'image/%' THEN 'Images' ELSE 'Other' END kind,COUNT(*) files,COALESCE(SUM(d.size),0) bytes FROM documents d JOIN cases c ON c.id=d.case_id WHERE ${scope} GROUP BY CASE WHEN d.mime_type='application/pdf' THEN 'PDF' WHEN d.mime_type LIKE 'image/%' THEN 'Images' ELSE 'Other' END`,Object.fromEntries(Object.entries(args).filter(([key])=>key!=='$q'))),
+      one(`SELECT COUNT(*) total ${joins} WHERE ${active}`,args),
+      all(`SELECT d.id,d.case_id,d.doc_type,d.file_name,d.mime_type,d.size,d.version,d.created_at,c.ref,cu.name customer_name,s.name service_name ${joins} WHERE ${active} ORDER BY d.created_at DESC,d.id DESC LIMIT 30 OFFSET $offset`,{...args,$offset:(page-1)*30})
+    ]);
+    return send(res,200,{summary,types,total:Number(count.total),page,documents:rows.map(d=>({...d,download_url:`/api/documents/${encodeURIComponent(d.id)}/download`}))});
   }
   const documentMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/(download|preview|view)$/);
   if (req.method === 'GET' && documentMatch) {
@@ -689,7 +714,8 @@ async function routeApi(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/services') {
     const [serviceRows,variants,customPrices]=await Promise.all([all('SELECT * FROM services WHERE active=1'),all('SELECT * FROM variants WHERE active=1'),all('SELECT variant_id,price FROM salesperson_prices WHERE sales_user_id=$id',{$id:user.id})]);
     const customPriceMap=new Map(customPrices.map(p=>[p.variant_id,p.price]));
-    return send(res,200,{demoPayments:false,directUPI:true,testPricingMode:paymentConfig().testPricingMode,cloudUploads:storageEnabled(),services:serviceRows.map(service=>({...service,name:serviceCatalog.find(current=>current.slug===service.slug)?.name || service.name,variants:variants.filter(v=>v.service_id===service.id).map(v=>({...v,fields:json(v,'fields_json',[]),documents:json(v,'documents_json',[]),amounts:quotedServices.includes(service.slug) ? quoteAmounts(null) : amounts(v,{},customPriceMap.get(v.id))}))}))});
+    const overrides=await checklistOverrides({all});
+    return send(res,200,{demoPayments:false,directUPI:true,testPricingMode:paymentConfig().testPricingMode,cloudUploads:storageEnabled(),services:serviceRows.map(service=>({...service,name:serviceCatalog.find(current=>current.slug===service.slug)?.name || service.name,variants:variants.filter(v=>v.service_id===service.id).map(v=>({...v,fields:json(v,'fields_json',[]),documents:json(withChecklist(v,overrides),'documents_json',[]),checklistRevision:overrides.get(v.id)?.revision || 0,amounts:quotedServices.includes(service.slug) ? quoteAmounts(null) : amounts(v,{},customPriceMap.get(v.id))}))}))});
   }
   if(req.method==='POST' && url.pathname==='/api/payments-sync') {
     if(user.role!=='admin') return send(res,403,{error:'Admin access required'});
@@ -721,8 +747,8 @@ async function routeApi(req, res, url) {
       if (existing?.status==='Deleted') return send(res,410,{error:'This case was deleted. Start a new case to submit a new application.'});
       if (existing) return existing.sales_user_id === user.id && existing.variant_id === b.variantId ? send(res,200,{case:await caseRow(existing)}) : send(res,409,{error:'Case request already exists.'});
     }
-    const variant = (await one('SELECT * FROM variants WHERE id=$id', { $id: b.variantId }));
-    if (!variant || !variant.active) return send(res, 400, { error: 'Choose an active service request type' });
+    const variant = withChecklist(await one('SELECT * FROM variants WHERE id=$id', { $id: b.variantId }) || {},await checklistOverrides({all}));
+    if (!variant.id || !variant.active) return send(res, 400, { error: 'Choose an active service request type' });
     if (b.consent !== true) return send(res, 400, { error: 'Customer consent is required' });
     if (!b.customerId && (!String(b.customer?.name || '').trim() || !/^[6-9]\d{9}$/.test(b.customer?.mobile || ''))) return send(res, 400, { error: 'Customer name and a valid 10-digit Indian mobile number are required' });
     if (!b.customerId && /\p{N}/u.test(b.customer?.name || '')) return send(res, 400, { error: 'Customer name cannot contain numbers' });
@@ -752,6 +778,7 @@ async function routeApi(req, res, url) {
     const batch = createUploadBatch(b.uploadManifest, json(variant,'documents_json',[]),b.details,matchesIntake);
     const allowedFields = new Set(fields.filter(field => matchesIntake(field.when, b.details) || (field.defaultWhen && b.details?.[field.defaultWhen.field] === field.defaultWhen.equals)).map(field => field.label).filter(label => !/password/i.test(label)));
     const details = Object.fromEntries(Object.entries(b.details || {}).filter(([key, value]) => allowedFields.has(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')).map(([key, value]) => [key, String(value).slice(0, 500)]));
+    details[CHECKLIST_KEY]={documents:json(variant,'documents_json',[]),revision:variant.checklist_revision};
     if (batch) details[INTAKE_UPLOADS] = batch;
     if(b.acceptanceTestToken) details[ACCEPTANCE_KEY]=b.acceptanceTestToken;
     if(requiresQuote) details[QUOTE_KEY]={state:'draft'};
@@ -907,7 +934,7 @@ async function routeApi(req, res, url) {
       if (!['backoffice','admin'].includes(user.role)) return send(res,403,{error:'Only back office or admin can request a reupload'});
       if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res,409,{error:'This case is closed for corrections'});
       const variant=await one('SELECT id,documents_json FROM variants WHERE id=$id',{$id:c.variant_id});
-      const allowed=json(variant,'documents_json',[]).map(doc=>doc.label);
+      const allowed=caseChecklist(c,variant).map(doc=>doc.label);
       if (!Array.isArray(b.documentTypes) || !b.documentTypes.length || b.documentTypes.some(type=>!allowed.includes(type))) return send(res,400,{error:'Select valid checklist documents to reupload'});
       const reason=String(b.reason || '').trim();
       if (!reason || reason.length>1000) return send(res,400,{error:'Enter reupload instructions, up to 1000 characters'});
@@ -979,7 +1006,7 @@ async function routeApi(req, res, url) {
       if (!storageEnabled()) return send(res,503,{error:'Private cloud document storage is not configured.'});
       if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res,409,{error:'This case is closed for uploads'});
       const variant = await one('SELECT id,documents_json FROM variants WHERE id=$id',{$id:c.variant_id});
-      if (b.docType === RECEIVED_DOCUMENT_TYPE ? !['backoffice','admin'].includes(user.role) || c.status !== 'Document Received' : !json(variant,'documents_json',[]).some(d => d.label === b.docType)) return send(res,403,{error:'Document type or role is not allowed for this case.'});
+      if (b.docType === RECEIVED_DOCUMENT_TYPE ? !['backoffice','admin'].includes(user.role) || c.status !== 'Document Received' : !caseChecklist(c,variant).some(d => d.label === b.docType)) return send(res,403,{error:'Document type or role is not allowed for this case.'});
       if (typeof b.fileName !== 'string' || !b.fileName || b.fileName.length > 255 || !['image/jpeg','image/png','application/pdf'].includes(b.mimeType) || !Number.isInteger(b.size) || b.size <= 0 || b.size > 10000000) return send(res,400,{error:'Choose JPG, PNG or PDF up to 10 MB.'});
       const uploadId = id('upload'), path = `staging/${c.id}/${randomUUID()}`;
       const {data,error} = await storage().createSignedUploadUrl(path);
@@ -1009,8 +1036,8 @@ async function routeApi(req, res, url) {
       }
       if (['Closed','Delivered','Cancelled'].includes(c.status)) return send(res, 409, { error: 'This case is closed for uploads' });
       const variant = (await one('SELECT id,documents_json FROM variants WHERE id=$id', { $id: c.variant_id }));
-      const allowed = json(variant, 'documents_json', []).map(d => d.label);
-      const multiple = json(variant, 'documents_json', []).some(d => d.label === b.docType && d.multiple);
+      const allowed = caseChecklist(c,variant).map(d => d.label);
+      const multiple = caseChecklist(c,variant).some(d => d.label === b.docType && d.multiple);
       const isReceivedDocument = b.docType === RECEIVED_DOCUMENT_TYPE;
       if (isReceivedDocument && (!['backoffice','admin'].includes(user.role) || c.status !== 'Document Received')) {
         return send(res, 403, { error: 'The received document can only be uploaded by back office when the status is Document Received' });
@@ -1280,7 +1307,7 @@ export async function initialize({setup = false} = {}) {
   }
   if(db.cloud) await ensureGazettePricingOptions(db);
   activeServiceForms = currentServiceForms(await db.all('SELECT v.id,v.name,s.slug FROM variants v JOIN services s ON s.id=v.service_id'));
-  for (const setting of await all('SELECT name,value FROM integration_settings')) process.env[setting.name] = setting.value;
+  for (const setting of await all('SELECT name,value FROM integration_settings')) if(!setting.name.startsWith('SERVICE_CHECKLIST_')) process.env[setting.name] = setting.value;
   servicePrices=new Map((await all('SELECT variant_id,price,original_config FROM service_prices')).map(p=>[p.variant_id,{price:p.price,original:JSON.parse(p.original_config)}]));
 }
 
@@ -1307,7 +1334,7 @@ export async function handler(req, res) {
     const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|submit-received-document|request-reupload|submit-reupload|submit-review|set-quote|remark|resume-upload)$/.test(url.pathname);
     const paymentRequest = url.pathname==='/api/sms-observer/events' || /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/(payment-order|cash-payment|discount)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname);
     const readOnly = (req.method === 'GET' && (
-      ['/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments','/api/payments/cash-pending'].includes(url.pathname) ||
+      ['/api/admin/services','/api/workspace/documents','/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments','/api/payments/cash-pending'].includes(url.pathname) ||
       /^\/api\/cases\/[^/]+(?:\/messages)?$/.test(url.pathname) || /^\/api\/documents\/[^/]+\/(download|preview|view)$/.test(url.pathname) || /^\/api\/announcements(?:\/[^/]+\/image)?$/.test(url.pathname)
     )) || (req.method === 'POST' && ['/api/login','/api/logout'].includes(url.pathname));
     const route = async () => {
@@ -1318,7 +1345,7 @@ export async function handler(req, res) {
           db.cloud ? all('SELECT name,value FROM integration_settings') : [],
           all('SELECT variant_id,price,original_config FROM service_prices')
         ]);
-        for (const setting of settings) process.env[setting.name] = setting.value;
+        for (const setting of settings) if(!setting.name.startsWith('SERVICE_CHECKLIST_')) process.env[setting.name] = setting.value;
         servicePrices=new Map(prices.map(p=>[p.variant_id,{price:p.price,original:JSON.parse(p.original_config)}]));
       }
       if (db.cloud && url.pathname!=='/api/payments/cash-pending' && (url.pathname==='/api/sms-observer/events' || /^\/api\/payments\//.test(url.pathname) || /\/(payment-order|discount)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname))) await one('SELECT pg_advisory_xact_lock(73194204)');

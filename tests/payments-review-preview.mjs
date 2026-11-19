@@ -30,7 +30,7 @@ try {
       if(!file.includes('..') && existsSync('public/'+file)) return route.fulfill({contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:readFileSync('public/'+file)});
       return route.abort();
     });
-    await page.goto('https://review-preview.test');await page.getByRole('heading',{name:'Operations workspace'}).waitFor();
+    await page.goto('https://review-preview.test');await page.getByRole('heading',{name:'Live Dashboard'}).waitFor();
     if(role==='admin') {
       if(width<901) await page.locator('.mobile-more summary').click();
       await page.locator(`${width<901?'.more-menu':'.side'} [data-view="payments"]`).click();

@@ -27,7 +27,7 @@ try {
       if(!file.includes('..') && existsSync('public/'+file)) return route.fulfill({contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:readFileSync('public/'+file)});
       return route.abort();
     });
-    await page.goto('https://cash-pending.test');await page.getByRole('heading',{name:role==='sales'?'Sales workspace':'Operations workspace'}).waitFor();
+    await page.goto('https://cash-pending.test');await page.getByRole('heading',{name:role==='sales'?'Live Dashboard':'Live Dashboard'}).waitFor();
     if(width<901) await page.locator('.mobile-more summary').click();
     await page.locator(`${width<901?'.more-menu':'.side'} [data-view="payments"]`).click();
     const pendingCard=page.getByRole('button',{name:'View cash pending amount',exact:true});

@@ -32,7 +32,7 @@ try {
     });
     const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
     await page.goto('http://performance.test');
-    await page.getByRole('heading',{name:'Operations workspace'}).waitFor();
+    await page.getByRole('heading',{name:'Live Dashboard'}).waitFor();
     for(const role of ['sales','backoffice']) {
       if(width<901) await page.locator('.mobile-more summary').click();
       await page.locator(`${width<901?'.more-menu':'.side'} [data-view="${role}Performance"]`).click();

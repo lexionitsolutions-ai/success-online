@@ -227,10 +227,10 @@ test('overview has collapsed Recent Updates and a completed-case navigation card
   ].map(row=>({...row,customer:{name:'Client',mobile:'9876543210'},service:{name:'Certificate'},variant:{name:'Application'},amounts:{total:20000}}));
   run("me={id:'admin',role:'admin'};cases=overviewRows;");
   const html=run('renderDashboard()');
-  assert.match(html,/<strong>Recent Updates<\/strong>/);
+  assert.match(html,/<strong>Recent Requests<\/strong>/);
   assert.doesNotMatch(html,/Needs attention/);
   assert.doesNotMatch(html,/<details id="recentUpdates"[^>]*\sopen(?:\s|>)/);
-  assert.match(html,/aria-label="View completed cases"><span>Completed cases<\/span><strong>1<\/strong>/);
+  assert.match(html,/aria-label="View completed requests"[\s\S]*?<strong>1<\/strong><span class="metric-label">Completed Requests<\/span>/);
   assert.ok(html.indexOf('NEWER-CASE')<html.indexOf('OLDER-CASE'),'Recent rows are ordered by update time');
   run("rememberRecentUpdates({isConnected:true,open:true})");
   assert.match(run('renderDashboard()'),/<details id="recentUpdates"[^>]*\sopen\s/);
@@ -811,9 +811,9 @@ test('performance tabs are admin-only, escape employee names and show meaningful
   const {run}=client();
   run("me={id:'admin',role:'admin',name:'Admin',username:'admin'}");
   assert.match(run("shell('')"),/Sales Performance/);
-  assert.match(run("shell('')"),/Backoffice Performance/);
+  assert.match(run("shell('')"),/Back Office Performance/);
   run("me.role='sales'");
-  assert.doesNotMatch(run("shell('')"),/Sales Performance|Backoffice Performance/);
+  assert.doesNotMatch(run("shell('')"),/Sales Performance|Back Office Performance/);
   assert.match(run("renderPerformance('sales')"),/Admin access required/);
   run(`me.role='admin';api=async()=>({employees:[{id:'s',name:'<script>test</script>',username:'sales',active:1}],report:{employee:{id:'s',name:'<script>test</script>',username:'sales',active:1},period:{start:'2026-11-01T00:00:00Z',end:'2026-11-03T00:00:00Z'},metrics:{cases:0,collected:0,serviceRevenue:0,averageSale:null,customers:0,completed:0,active:0,overdue:0,followUps:0,oldestActiveDays:null,cohortCompleted:0,completionRate:null,rejected:0,cancelled:0,tax:0,officialFees:0,correctionCases:0,turnaround:null},services:[],statuses:[],trend:[],cases:[]}});`);
   await run("loadPerformance('sales')");
@@ -863,11 +863,11 @@ test('sales deletion is the final table column, blocks paid rows and stops uploa
   const {run}=client();
   run(`me={id:'sales',role:'sales'};cases=[{id:'unpaid',ref:'SO1',customer:{name:'Test Client',mobile:'9876543210'},service:{name:'Income'},variant:{name:'Application'},sales:{id:'sales'},payment_state:'unpaid',status:'Awaiting Payment',amounts:{total:100},deletionAllowed:true}];`);
   const markup=run('caseTable(cases)');
-  assert.match(markup,/<th>Updated<\/th><th>Delete case<\/th>/);
+  assert.match(markup,/<th>Updated<\/th><th>Delete Request<\/th>/);
   assert.match(markup,/onclick="deleteSalesCase\('unpaid',this\)"\s+aria-label/);
   run('cases[0].deletionAllowed=false');
   assert.match(run('caseTable(cases)'),/disabled title="Cases with recorded payments cannot be deleted"/);
-  run("me.role='admin'");assert.match(run('caseTable(cases)'),/Delete case/);
+  run("me.role='admin'");assert.match(run('caseTable(cases)'),/Delete Request/);
   run(`me.role='sales';cases[0].deletionAllowed=true;window.confirm=()=>false;const deletions=[];api=async(path,options)=>{deletions.push({path,method:options.method});return {ok:true}};`);
   await run("deleteSalesCase('unpaid')");assert.equal(run('deletions.length'),0);
   run(`window.confirm=()=>true;render=()=>{};renderBackgroundUploads=()=>{};uploadJobStorage=async()=>{};const oldJob={id:'unpaid'};uploadJobs.set('unpaid',oldJob);`);
@@ -999,4 +999,50 @@ test('Gazette pricing dropdown offers exactly with and without affidavit charges
   assert.doesNotMatch(html,/>Application<\/option>/);
   run("pricingVariants.set('Gazette','gazette-1')");html=run('renderPricing()');
   assert.match(html,/saveSalespersonPrice\(event,'gazette-1'\)/);assert.match(html,/value="600.00"/);
+});
+
+
+test('sales and admin share clear dashboard names and semantic metric icons with real counts',()=>{
+  const {run}=client();
+  run(`cases=[
+    {id:'one',customer:{id:'customer-one',name:'Customer',mobile:'9876543210'},service:{name:'PAN'},variant:{name:'Application'},amounts:{total:100},status:'Document Review',payment_state:'paid',document_state:'complete'},
+    {id:'two',customer:{id:'customer-one',name:'Customer',mobile:'9876543210'},service:{name:'PAN'},variant:{name:'Application'},amounts:{total:100},status:'Awaiting Documents',payment_state:'unpaid',document_state:'missing'},
+    {id:'three',customer:{id:'customer-two',name:'Another Customer',mobile:'9876543211'},service:{name:'PAN'},variant:{name:'Application'},amounts:{total:100},status:'Closed',payment_state:'paid',document_state:'complete'}
+  ];`);
+  for(const role of ['sales','admin']) {
+    run(`me={id:'staff',role:'${role}',name:'Test Staff',username:'staff'};view='dashboard';`);
+    const html=run('renderDashboard()');assert.match(html,/<h1>Live Dashboard<\/h1>/);
+    for(const symbol of ['upload','eye','check','people','person']) assert.ok(html.includes('data-metric-icon="'+symbol+'"'),symbol);
+    for(const label of ['Active Requests','Pending Uploads','Under Review','Total Customers','Pending Payments','Completed Requests']) assert.ok(html.includes('>'+label+'</span>'),label);
+    assert.match(html,/<strong>2<\/strong><span class="metric-label">Total Customers<\/span>/);
+    assert.match(html,/<strong>1<\/strong><span class="metric-label">Under Review<\/span>/);
+    assert.match(run('shell("")'),/>Live Dashboard<\/span>/);assert.doesNotMatch(run('shell("")'),/>Overview</);
+  }
+  assert.equal(run("navLabels.employees"),'Staff');assert.equal(run("navLabels.pricing"),'Service Pricing');
+});
+
+
+test('sales cannot open Storage and cash balance options are restricted to the branch sales account',async()=>{
+  const {run}=client();
+  run("me={id:'other-sales',role:'sales',name:'Sales Staff',username:'sales02',cashPaymentsAllowed:false};paymentData={metrics:{},payments:[]};");
+  assert.doesNotMatch(run('shell("")'),/data-view="storage"/);
+  assert.match(run('shell("")'),/<span>New Case<\/span>/);
+  assert.doesNotMatch(run('shell("")'),/<span>New Request<\/span>/);
+  assert.equal(run('cashPendingMetricCard()'),'');assert.equal(run('paymentTabs()'),'');
+  assert.doesNotMatch(run('renderPayments()'),/Cash pending amount|Cash pending payments/);
+  await run("setView('storage')");assert.notEqual(run('view'),'storage');
+  run("me.cashPaymentsAllowed=true");assert.match(run('cashPendingMetricCard()'),/Cash pending amount/);assert.match(run('paymentTabs()'),/Cash pending payments/);
+  run("me={id:'admin',role:'admin',name:'Admin',username:'admin01'}");assert.match(run('shell("")'),/data-view="storage"/);assert.match(run('paymentTabs()'),/Cash pending payments/);
+});
+
+test('moving checklist documents retains their values and saved order overrides section grouping',()=>{
+  const {run}=client();
+  run("checklistEditor={documents:[{label:'First',note:'Keep this note',when:{field:'Choice',equals:'Yes'},section:'Group A'},{label:'Second',multiple:true,section:'Group B'},{label:'Third',section:'Group A'}]};refreshChecklistRows=()=>{};");
+  run('moveChecklistDocument(1,-1)');assert.equal(run('checklistEditor.documents[0].label'),'Second');
+  run('moveChecklistDocument(1,1)');assert.equal(run('checklistEditor.documents[2].label'),'First');
+  assert.equal(run('checklistEditor.documents[2].note'),'Keep this note');assert.equal(run('checklistEditor.documents[2].when.equals'),'Yes');assert.equal(run('checklistEditor.dirty'),true);
+  const order=run('JSON.stringify(checklistEditor.documents)');run('moveChecklistDocument(0,-1);moveChecklistDocument(2,1)');assert.equal(run('JSON.stringify(checklistEditor.documents)'),order);
+  run('checklistEditor.documents.forEach((d,index)=>d.checklistOrder=index)');
+  const markup=run('groupedDocumentCards(checklistEditor.documents,d=>`<p>${d.label}</p>`)');
+  assert.ok(markup.indexOf('>Second<')<markup.indexOf('>Third<'));assert.ok(markup.indexOf('>Third<')<markup.indexOf('>First<'));
 });

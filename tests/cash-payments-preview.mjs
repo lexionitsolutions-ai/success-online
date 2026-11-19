@@ -32,7 +32,7 @@ try {
       if(!file.includes('..') && existsSync('public/'+file)) return route.fulfill({contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:file==='script.js'?readFileSync('public/script.js','utf8')+injection:readFileSync('public/'+file)});
       return route.abort();
     });
-    await page.goto('https://cash-preview.test');await page.getByRole('heading',{name:'Sales workspace'}).waitFor();
+    await page.goto('https://cash-preview.test');await page.getByRole('heading',{name:'Live Dashboard'}).waitFor();
     await page.evaluate(()=>window.previewCash('checkout'));
     await page.getByRole('button',{name:'Pay in cash',exact:true}).click();
     await page.locator('#checkoutCashForm input').fill('200');

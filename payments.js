@@ -205,7 +205,7 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
       send(res,200,{ok:true});return true;
     }
     if(url.pathname==='/api/payments/cash-pending' && req.method==='GET') {
-      if(!['admin','sales'].includes(user.role)) fail(403,'Only sales or admin can view cash balances');
+      if(user.role!=='admin' && !cashAccount(user)) fail(403,'Cash balances are available only to admin and Success Online Main Branch sales.');
       const rows=await all(`SELECT ca.case_id,ca.total,c.ref,c.status case_status,c.sales_user_id,cu.name customer_name,cu.mobile customer_mobile,s.name service_name,u.name employee_name,
         COALESCE(t.paid,0) confirmed_paid,COALESCE(t.awaiting,0) awaiting_verification,
         (SELECT p.id FROM payments p WHERE p.case_id=c.id AND p.status='AWAITING_VERIFICATION' AND p.gateway!='demo' ORDER BY p.created_at DESC LIMIT 1) review_payment_id
