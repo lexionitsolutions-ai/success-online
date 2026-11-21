@@ -10,13 +10,13 @@ import {DatabaseSync} from 'node:sqlite';
 import {confirmTestReceiver,verifyTestOrder} from './payment-fixture.js';
 import {pfDetails} from './pf-fixture.js';
 
-test('a paid case remains hidden until every selected file and optional page is confirmed and finalized',async()=>{
+test('back office sees cases only after payment and uploads finish; admin can review pending cases',async()=>{
   const root=mkdtempSync(join(tmpdir(),'background-intake-')),port=await testPort(),origin=`http://localhost:${port}`,path=join(root,'test.sqlite');
   const child=spawn(process.execPath,['server.js'],{env:{...process.env,NODE_ENV:'test',VERCEL:'',DATABASE_URL:'',SUPABASE_URL:'',SUPABASE_SECRET_KEY:'',PORT:String(port),DATABASE_PATH:path,STORAGE_PATH:join(root,'docs'),SHEETS_MODE:'demo',SESSION_SECRET:'isolated-background-upload-secret-32-characters',APP_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
   let errors='';child.stderr.on('data',data=>errors+=data);
   try {
     await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(errors||'Startup timeout')),15000);child.stdout.on('data',data=>{if(String(data).includes('running')){clearTimeout(timer);resolve();}});child.on('exit',()=>{clearTimeout(timer);reject(Error(errors));});});
-    const request=async(url,{cookie,body,method=body?'POST':'GET'}={})=>{const response=await fetch(origin+url,{method,headers:{'content-type':'application/json',...(cookie?{cookie}:{})},body:body?JSON.stringify(body):undefined});return {response,status:response.status,data:await response.json()};};
+    const request=async(url,{cookie,body,method=body?'POST':'GET'}={})=>{const response=await fetch(origin+url,{method,headers:{'content-type':'application/json',...(cookie?{cookie}:{})},body:body?JSON.stringify(body):undefined});return {response,status:response.status,data:response.headers.get('content-type')?.includes('json') ? await response.json() : await response.arrayBuffer()};};
     const login=async username=>(await request('/api/login',{body:{username,password:'Demo@12345'}})).response.headers.get('set-cookie').split(';')[0];
     const sales=await login('sales01'),admin=await login('admin01'),office=await login('backoffice01');
     await confirmTestReceiver(request,admin);
@@ -36,10 +36,12 @@ test('a paid case remains hidden until every selected file and optional page is 
     c=(await request(`/api/cases/${c.id}`,{cookie:sales})).data.case;
     assert.equal((await request('/api/cases',{cookie:sales,body:payload})).data.case.id,c.id);
     const db=new DatabaseSync(path);assert.equal(db.prepare('SELECT COUNT(*) n FROM cases').get().n,1);db.close();
-    const assertHiddenUnpaid = async () => {
-      assert.equal((await request('/api/cases',{cookie:admin})).data.cases.length,0);
-      assert.equal((await request(`/api/cases/${c.id}`,{cookie:admin})).status,403);
-      assert.equal((await request(`/api/cases/${c.ref}`,{cookie:admin})).status,403);
+    const assertPendingVisibility = async () => {
+      assert.equal((await request('/api/cases',{cookie:office})).data.cases.length,0);
+      assert.equal((await request(`/api/cases/${c.id}`,{cookie:office})).status,403);
+      assert.equal((await request('/api/cases',{cookie:admin})).data.cases.length,1);
+      assert.equal((await request(`/api/cases/${c.id}`,{cookie:admin})).status,200);
+      assert.equal((await request(`/api/cases/${c.ref}`,{cookie:admin})).status,200);
       const report=(await request('/api/admin/dashboard?period=all',{cookie:admin})).data;
       assert.equal(report.metrics.newCases,0);
       assert.equal(report.operations.missingDocuments,0);
@@ -53,12 +55,12 @@ test('a paid case remains hidden until every selected file and optional page is 
       assert.equal(performance.report.metrics.cases,0);
       assert.equal(performance.report.metrics.collected,0);
     };
-    await assertHiddenUnpaid();
+    await assertPendingVisibility();
     assert.equal((await request('/api/payments',{cookie:admin})).data.payments.length,0,'Unsubmitted checkouts are hidden from admin');
     assert.equal((await request('/api/payments',{cookie:sales})).data.payments.length,1,'Sales can still collect payment');
     assert.equal((await request(`/api/payments/${c.payment.id}/submit`,{cookie:sales,body:{utr:'123456789012'}})).status,200);
     assert.equal((await request('/api/payments',{cookie:admin})).data.payments.length,1,'Admin can verify submitted references');
-    await assertHiddenUnpaid();
+    await assertPendingVisibility();
     await verifyTestOrder(request,admin,sales,c.payment.id);
     assert.equal((await request('/api/admin/dashboard?period=all',{cookie:admin})).data.metrics.newCases,1);
     for(const cookie of [sales,office]) assert.equal((await request('/api/admin/performance?role=sales',{cookie})).status,403);
@@ -70,7 +72,7 @@ test('a paid case remains hidden until every selected file and optional page is 
     assert.equal(performance.report.metrics.collected,c.payment.amount);
     assert.equal(performance.report.services[0].cases,1);
     assert.ok(!JSON.stringify(performance).includes(pfDetails.Password));
-    const hidden=async()=>{for(const cookie of [admin,office])assert.ok(!(await request('/api/cases',{cookie})).data.cases.some(item=>item.id===c.id));};
+    const hidden=async()=>{for(const cookie of [office])assert.ok(!(await request('/api/cases',{cookie})).data.cases.some(item=>item.id===c.id));};
     await hidden();
     assert.ok((await request('/api/cases',{cookie:sales})).data.cases.some(item=>item.id===c.id));
     const upload=entry=>request(`/api/cases/${c.id}/documents`,{cookie:sales,body:{...entry,uploadKey:entry.key,content:pdf.toString('base64'),deferMirrors:true}});
@@ -97,8 +99,8 @@ test('a paid case remains hidden until every selected file and optional page is 
     assert.equal((await request(`/api/cases/${c.id}/finish-uploads`,{cookie:sales,body:{}})).status,200,'Finalization can be retried safely');
     assert.equal((await request(`/api/cases/${c.id}`,{cookie:admin})).status,200);
     assert.equal((await request(`/api/payments/${c.payment.id}/refund`,{cookie:admin,body:{refundReceived:true,notes:'Synthetic refund fixture'}})).status,200);
-    await assertHiddenUnpaid();
-    assert.equal((await request(`/api/cases/${c.id}/download-all`,{cookie:admin})).status,403);
-    assert.equal((await request(`/api/documents/${last.data.documentId}/preview`,{cookie:admin})).status,403);
+    await assertPendingVisibility();
+    assert.equal((await request(`/api/cases/${c.id}/download-all`,{cookie:admin})).status,200);
+    assert.equal((await request(`/api/documents/${last.data.documentId}/preview`,{cookie:admin})).status,200);
   } finally {child.kill();}
 });

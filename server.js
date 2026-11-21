@@ -53,8 +53,13 @@ const paymentSystem = createPayments({db, recomputeCase, scheduleCaseSync, send,
 const announcementSystem = createAnnouncements({db, send, body});
 let servicePrices = new Map();
 
-const statuses = ['Draft','Awaiting Documents','Awaiting Payment','Ready for Assignment','Assigned','Document Review','Correction Required','Ready to Submit','Submitted to Official Portal','Under Government Review','Customer Action Required','Document Received','Approved','Rejected','Delivered','Closed','Cancelled'];
+const ADMIN_APPROVAL_KEY='_intakeAdminPaymentApproval';
+const ADMIN_PENDING_STATUS='Admin Approved Payment Pending';
+const adminApproved=c=>!!json(c,'details_json',{})[ADMIN_APPROVAL_KEY]?.by;
+const approvalSQL=(alias='cases')=>`${alias}.details_json LIKE '%"_intakeAdminPaymentApproval":%'`;
+const statuses = [ADMIN_PENDING_STATUS,'Draft','Awaiting Documents','Awaiting Payment','Ready for Assignment','Assigned','Document Review','Correction Required','Ready to Submit','Submitted to Official Portal','Under Government Review','Customer Action Required','Document Received','Approved','Rejected','Application Resubmitted','Delivered','Closed','Cancelled'];
 const transitions = {
+  [ADMIN_PENDING_STATUS]:['Assigned','Document Review','Cancelled'],
   'Draft': ['Awaiting Documents','Awaiting Payment','Ready for Assignment','Cancelled'],
   'Awaiting Documents': ['Awaiting Payment','Ready for Assignment','Correction Required','Cancelled'],
   'Awaiting Payment': ['Ready for Assignment','Cancelled'],
@@ -62,14 +67,15 @@ const transitions = {
   'Assigned': ['Document Review','Ready to Submit','Correction Required','Customer Action Required','Cancelled'],
   'Document Review': ['Ready to Submit','Correction Required','Customer Action Required','Cancelled'],
   'Correction Required': ['Awaiting Documents','Document Review','Ready to Submit','Cancelled'],
-  'Ready to Submit': ['Submitted to Official Portal','Correction Required','Customer Action Required','Cancelled'],
-  'Submitted to Official Portal': ['Under Government Review','Customer Action Required','Document Received','Rejected','Cancelled'],
-  'Under Government Review': ['Customer Action Required','Document Received','Rejected','Cancelled'],
+  'Ready to Submit': ['Submitted to Official Portal','Application Resubmitted','Correction Required','Customer Action Required','Cancelled'],
+  'Submitted to Official Portal': ['Under Government Review','Customer Action Required','Document Received','Rejected','Correction Required','Cancelled'],
+  'Under Government Review': ['Customer Action Required','Document Received','Rejected','Correction Required','Cancelled'],
   'Customer Action Required': ['Document Review','Ready to Submit','Under Government Review','Correction Required','Cancelled'],
-  'Document Received': ['Correction Required','Cancelled'],
+  'Document Received': ['Correction Required','Rejected','Cancelled'],
   'Approved': ['Document Received','Delivered','Closed'],
   'Delivered': ['Closed','Customer Action Required'],
-  'Rejected': ['Correction Required','Closed'],
+  'Rejected': ['Application Resubmitted','Correction Required'],
+  'Application Resubmitted': ['Document Received','Rejected','Correction Required','Cancelled'],
   'Closed': [],
   'Cancelled': []
 };
@@ -434,7 +440,7 @@ async function caseRows(rows) {
     const cashPlan=cashAccounts.find(a=>a.case_id===c.id);
     const cashPayment=cashSummary(cashPlan,payments.filter(p=>p.case_id===c.id));
     const pendingUploads=(rawDetails[INTAKE_UPLOADS]?.finalized===false ? rawDetails[INTAKE_UPLOADS].files.filter(file=>!file.documentId || !documents.some(doc=>doc.id===file.documentId)) : []).map(({key,docType,fileName})=>({key,docType,fileName}));
-    return {...c,discount:JSON.parse(c.details_json || '{}')[DISCOUNT_KEY]?.amount || 0,syntheticTest:isAcceptanceCase(c,SESSION_SECRET),pendingUploads,quote:quotedServices.includes(serviceMap.get(c.service_id)?.slug) ? caseQuote(c) : null,deletionAllowed:c.status!=='Deleted' && !paymentBlocksDeletion(c,paymentHistory.filter(p=>p.case_id===c.id)),uploads,cashPayment,cashReceipts:cashPayment?payments.filter(p=>p.case_id===c.id && ['cash','balance_upi'].includes(p.gateway)).map(p=>({id:p.id,amount:p.amount,method:p.gateway==='cash'?'Cash':'UPI',status:p.status,created_at:p.created_at,verified_at:p.verified_at,utr:p.transaction_id})):[],details_json:JSON.stringify(details),payment_state:cashPayment ? cashPayment.releaseAllowed?'paid':cashPayment.processingAllowed?'partially_paid':'unpaid' : payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received && (!cashPayment || cashPayment.releaseAllowed) ? publicDocument(received) : null,amounts:cashPlan?{serviceCharge:cashPlan.service_charge,officialFee:cashPlan.official_fee,tax:cashPlan.tax,total:cashPlan.total}:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : discountedAmounts(caseQuote(c) ? quoteAmounts(caseQuote(c)) : amounts(variant,details,customPriceMap.get(c.sales_user_id + ':' + c.variant_id)),JSON.parse(c.details_json || '{}')),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
+    return {...c,adminPaymentApproval:rawDetails[ADMIN_APPROVAL_KEY] || null,discount:JSON.parse(c.details_json || '{}')[DISCOUNT_KEY]?.amount || 0,syntheticTest:isAcceptanceCase(c,SESSION_SECRET),pendingUploads,quote:quotedServices.includes(serviceMap.get(c.service_id)?.slug) ? caseQuote(c) : null,deletionAllowed:c.status!=='Deleted' && !paymentBlocksDeletion(c,paymentHistory.filter(p=>p.case_id===c.id)),uploads,cashPayment,cashReceipts:cashPayment?payments.filter(p=>p.case_id===c.id && ['cash','balance_upi'].includes(p.gateway)).map(p=>({id:p.id,amount:p.amount,method:p.gateway==='cash'?'Cash':'UPI',status:p.status,created_at:p.created_at,verified_at:p.verified_at,utr:p.transaction_id})):[],details_json:JSON.stringify(details),payment_state:cashPayment ? cashPayment.releaseAllowed?'paid':cashPayment.processingAllowed?'partially_paid':'unpaid' : payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received && (!cashPayment || cashPayment.releaseAllowed) ? publicDocument(received) : null,amounts:cashPlan?{serviceCharge:cashPlan.service_charge,officialFee:cashPlan.official_fee,tax:cashPlan.tax,total:cashPlan.total}:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : discountedAmounts(caseQuote(c) ? quoteAmounts(caseQuote(c)) : amounts(variant,details,customPriceMap.get(c.sales_user_id + ':' + c.variant_id)),JSON.parse(c.details_json || '{}')),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
   });
 }
 function amounts(v, details = {}, override) { const p=servicePrices.get(v.id);const base=priceAmounts(v,p?.price,p?.original,override);return json(v,'fields_json',[]).some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base,details) : base; }
@@ -481,9 +487,9 @@ async function recomputeCase(id, {sync=true} = {}) {
   const paymentState = cashState ? cashState.releaseAllowed?'paid':cashState.processingAllowed?'partially_paid':'unpaid' : paid ? 'paid' : latest?.status || 'unpaid';
   let status = c.status;
   const quote=caseQuote(c);
-  if(quote && !quote.amount && !['Cancelled','Deleted','Correction Required'].includes(status)) status=quote.submittedAt ? 'Awaiting Back Office Review' : 'Awaiting Documents';
-  if (!(quote && !quote.amount) && !['Assigned','Document Review','Correction Required','Ready to Submit','Submitted to Official Portal','Under Government Review','Customer Action Required','Document Received','Approved','Rejected','Delivered','Closed','Cancelled'].includes(status)) {
-    status = documentState === 'complete' && (paymentState === 'paid' || cashState?.processingAllowed) ? 'Ready for Assignment' : documentState === 'missing' ? 'Awaiting Documents' : quote?.amount ? 'Awaiting Quoted Payment' : 'Awaiting Payment';
+  if(!adminApproved(c) && quote && !quote.amount && !['Cancelled','Deleted','Correction Required'].includes(status)) status=quote.submittedAt ? 'Awaiting Back Office Review' : 'Awaiting Documents';
+  if (!(quote && !quote.amount && !adminApproved(c)) && !['Assigned','Document Review','Correction Required','Ready to Submit','Submitted to Official Portal','Under Government Review','Customer Action Required','Document Received','Approved','Rejected','Application Resubmitted','Delivered','Closed','Cancelled'].includes(status)) {
+    status = adminApproved(c) && paymentState!=='paid' ? ADMIN_PENDING_STATUS : documentState === 'complete' && (paymentState === 'paid' || cashState?.processingAllowed) ? 'Ready for Assignment' : documentState === 'missing' ? 'Awaiting Documents' : quote?.amount ? 'Awaiting Quoted Payment' : 'Awaiting Payment';
   }
   (await run('UPDATE cases SET document_state=$d,payment_state=$p,status=$s,updated_at=$u WHERE id=$id', { $d: documentState, $p: paymentState, $s: status, $u: now(), $id: id }));
   if (sync) await syncCase(id);
@@ -492,10 +498,10 @@ function canSee(user, c) { return c.status!=='Deleted' && (user.role === 'admin'
 // Check payment records rather than the cached case state, including after refunds.
 const paidCaseSQL = (alias = 'cases',includeAcceptance=false) => `(EXISTS (SELECT 1 FROM payments paid WHERE paid.case_id=${alias}.id AND paid.status IN ('PAID','verified','offline_approved') AND ${includeAcceptance ? "paid.gateway!='demo'" : "paid.gateway NOT IN ('demo','acceptance_test')"}) OR (${alias}.sales_user_id='${CASH_SALES_ID}' AND EXISTS (SELECT 1 FROM cash_accounts ca JOIN users cu ON cu.id=${alias}.sales_user_id WHERE ca.case_id=${alias}.id AND cu.role='sales') AND EXISTS (SELECT 1 FROM payments cp WHERE cp.case_id=${alias}.id AND cp.gateway='cash' AND cp.status='AWAITING_VERIFICATION' AND cp.amount>0)))`;
 async function staffCanReadCase(user, c) {
-  return quoteVisible(c) || user.role === 'sales' || !!(await one(`SELECT id FROM cases WHERE id=$id AND ${paidCaseSQL('cases',true)}`, {$id:c.id}));
+  return user.role === 'admin' || adminApproved(c) || quoteVisible(c) || user.role === 'sales' || !!(await one(`SELECT id FROM cases WHERE id=$id AND ${paidCaseSQL('cases',true)}`, {$id:c.id}));
 }
 async function notifyCaseUpdate(c, actor, title, status = c.status) {
-  const recipients = await all("SELECT id FROM users WHERE active=1 AND id!=$actor AND (id=$sales OR ($visible=1 AND (role='admin' OR id=$backoffice OR (role='backoffice' AND $unassigned=1 AND $ready=1))))",{$visible:(quoteVisible(c) || ['paid','partially_paid'].includes(c.payment_state) && c.document_state === 'complete') ? 1 : 0,$actor:actor.id,$sales:c.sales_user_id,$backoffice:c.backoffice_user_id || '',$unassigned:c.backoffice_user_id ? 0 : 1,$ready:['Ready for Assignment','Awaiting Back Office Review'].includes(status) ? 1 : 0});
+  const recipients = await all("SELECT id FROM users WHERE active=1 AND id!=$actor AND (id=$sales OR ($visible=1 AND (role='admin' OR id=$backoffice OR (role='backoffice' AND $unassigned=1 AND $ready=1))))",{$visible:(adminApproved(c) || quoteVisible(c) || ['paid','partially_paid'].includes(c.payment_state) && c.document_state === 'complete') ? 1 : 0,$actor:actor.id,$sales:c.sales_user_id,$backoffice:c.backoffice_user_id || '',$unassigned:c.backoffice_user_id ? 0 : 1,$ready:[ADMIN_PENDING_STATUS,'Ready for Assignment','Awaiting Back Office Review'].includes(status) ? 1 : 0});
   for (const recipient of recipients) await run('INSERT INTO notifications VALUES ($id,$user,$title,$body,NULL,$at)',{$id:id('notice'),$user:recipient.id,$title:title,$body:JSON.stringify({caseId:c.id,ref:c.ref,status,actor:actor.name}),$at:now()});
 }
 function publicDocument(document) {
@@ -557,6 +563,7 @@ async function documentGate(c, res) {
   return false;
 }
 async function processingGate(c,res) {
+  if(adminApproved(c)) return true;
   if((await paymentSystem.cash.summary(c.id))?.processingAllowed) return true;
   const paid=await one("SELECT id FROM payments WHERE case_id=$id AND status IN ('PAID','verified','offline_approved') AND gateway!='demo' AND (gateway!='acceptance_test' OR $test=1)",{$id:c.id,$test:isAcceptanceCase(c,SESSION_SECRET)?1:0});
   if(paid) return true;
@@ -606,7 +613,7 @@ async function routeApi(req, res, url) {
     const q=String(url.searchParams.get('q') || '').trim().slice(0,140),kind=url.searchParams.get('kind') || '';
     if(!['','pdf','image','other'].includes(kind)) return send(res,400,{error:'Choose a valid file type.'});
     const review="(c.status NOT IN ('Deleted','Cancelled') AND c.details_json LIKE '%\"_intakeQuote\"%' AND c.details_json LIKE '%\"submittedAt\":%')";
-    const roleScope=user.role==='sales' ? 'c.sales_user_id=$user' : `(${paidCaseSQL('c',true)} OR ${review})${user.role==='backoffice' ? ' AND (c.backoffice_user_id=$user OR c.backoffice_user_id IS NULL)' : ''}`;
+    const roleScope=user.role==='admin' ? '1=1' : user.role==='sales' ? 'c.sales_user_id=$user' : `(${paidCaseSQL('c',true)} OR ${approvalSQL('c')} OR ${review})${user.role==='backoffice' ? ' AND (c.backoffice_user_id=$user OR c.backoffice_user_id IS NULL)' : ''}`;
     const released="(d.doc_type!='Received Document' OR ($sales=0 OR (c.status IN ('Closed','Delivered') AND NOT EXISTS (SELECT 1 FROM cash_accounts ca WHERE ca.case_id=c.id AND ca.total>(SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.case_id=c.id AND p.gateway!='demo' AND p.status IN ('PAID','verified','offline_approved'))))))";
     const scope=`c.status!='Deleted' AND (${roleScope}) AND ${released}`;
     const type=kind==='pdf' ? " AND d.mime_type='application/pdf'" : kind==='image' ? " AND d.mime_type LIKE 'image/%'" : kind==='other' ? " AND d.mime_type!='application/pdf' AND d.mime_type NOT LIKE 'image/%'" : '';
@@ -730,10 +737,10 @@ async function routeApi(req, res, url) {
   }
   if (req.method === 'GET' && url.pathname === '/api/cases') {
     const reviewSQL="status IN ('Awaiting Back Office Review','Awaiting Quoted Payment','Correction Required','Awaiting Documents','Awaiting Payment') AND details_json LIKE '%\"_intakeQuote\"%'";
-    const where = user.role === 'sales' ? "WHERE sales_user_id=$uid AND status!='Deleted'" : user.role === 'backoffice' ? `WHERE status!='Draft' AND (${paidCaseSQL('cases',true)} OR (${reviewSQL})) AND (backoffice_user_id=$uid OR backoffice_user_id IS NULL)` : `WHERE (sales_user_id=$uid AND status!='Deleted') OR ${paidCaseSQL('cases',true)} OR (${reviewSQL})`;
-    const params = { $uid: user.id };
+    const where = user.role === 'sales' ? "WHERE sales_user_id=$uid AND status!='Deleted'" : user.role === 'backoffice' ? `WHERE status!='Draft' AND (${paidCaseSQL('cases',true)} OR ${approvalSQL()} OR (${reviewSQL})) AND (backoffice_user_id=$uid OR backoffice_user_id IS NULL)` : "WHERE status!='Deleted'";
+    const params = user.role==='admin' ? {} : { $uid: user.id };
     const listed = await caseRows(await all(`SELECT * FROM cases ${where} ORDER BY updated_at DESC`, params));
-    return send(res, 200, { cases: user.role === 'sales' ? listed : listed.filter(item => user.role==='admin' && item.sales?.id===user.id || item.quote?.submittedAt || (item.payment_state === 'paid' || item.cashPayment?.processingAllowed) && item.document_state === 'complete' && (!item.uploads || item.uploads.complete)) });
+    return send(res, 200, { cases: ['sales','admin'].includes(user.role) ? listed : listed.filter(item => user.role==='admin' && item.sales?.id===user.id || item.quote?.submittedAt || (item.payment_state === 'paid' || item.cashPayment?.processingAllowed || item.adminPaymentApproval) && item.document_state === 'complete' && (!item.uploads || item.uploads.complete)) });
   }
   if (req.method === 'POST' && url.pathname === '/api/cases') return body(req).then(async b => {
     if (user.role !== 'sales' && user.role !== 'admin') return send(res, 403, { error: 'Only sales or admin can create cases' });
@@ -810,6 +817,7 @@ async function routeApi(req, res, url) {
     const c = (await one('SELECT * FROM cases WHERE id=$id OR ref=$id' + (db.cloud && ['POST','DELETE'].includes(req.method) && caseMatch[2]!=='upload-url' ? ' FOR UPDATE' : ''), { $id: caseMatch[1] }));
     if(c?.status==='Deleted') return send(res,404,{error:'Case not found'});
     if (!c || c.status==='Deleted' || !canSee(user, c)) return send(res, c && c.status!=='Deleted' ? 403 : 404, { error: c && c.status!=='Deleted' ? 'Not allowed' : 'Not found' });
+    if(req.method==='POST' && caseMatch[2]==='payment-exception' && user.role!=='admin') return send(res,403,{error:'Admin access required'});
     if(req.method==='POST' && caseMatch[2]==='discount') {
       const b=await body(req);
       if(!cashAccount(user) || c.sales_user_id!==user.id) return send(res,403,{error:'Only Success Online Main Branch sales can discount their own cases.'});
@@ -1086,19 +1094,35 @@ async function routeApi(req, res, url) {
     if (req.method === 'POST' && caseMatch[2] === 'verify-payment') return send(res,403,{error:'Use administrator receiving-account verification in Payments'});
     if (req.method === 'POST' && caseMatch[2] === 'payment-exception') {
       if(user.role !== 'admin') return send(res,403,{error:'Admin access required'});
-      return send(res,409,{error:'Processing before verified payment is disabled. Receive and verify the payment first.'});
+      const b=await body(req),reason=String(b.reason || '').trim();
+      if(!reason || reason.length>1000) return send(res,400,{error:'Enter an approval reason up to 1000 characters.'});
+      if(['Cancelled','Rejected','Closed','Delivered','Deleted'].includes(c.status)) return send(res,409,{error:'This case is closed for payment approval.'});
+      if(adminApproved(c)) return send(res,200,await caseDetailData(c,user));
+      const row=await caseRow(c);
+      if(row.payment_state==='paid') return send(res,409,{error:'Payment is already confirmed.'});
+      if(caseQuote(c) && !caseQuote(c).amount) return send(res,409,{error:'Set the case price before approving pending payment.'});
+      const stamp=now(),details=json(c,'details_json',{});
+      details[ADMIN_APPROVAL_KEY]={by:user.id,at:stamp,reason};
+      const status=c.backoffice_user_id ? c.status : ADMIN_PENDING_STATUS;
+      await run('UPDATE cases SET details_json=$details,status=$status,updated_at=$at WHERE id=$id',{$id:c.id,$details:JSON.stringify(details),$status:status,$at:stamp});
+      await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:id('aud'),$actor:user.id,$action:'case.approve_payment_pending',$type:'case',$entity:c.id,$reason:reason,$at:stamp});
+      await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)',{$id:id('note'),$case:c.id,$actor:user.id,$old:c.status,$new:status,$note:`Admin approved processing with payment pending. ${reason}`,$vis:'sales',$next:'',$at:stamp});
+      await recomputeCase(c.id);
+      const updated=await one('SELECT * FROM cases WHERE id=$id',{$id:c.id});
+      await notifyCaseUpdate(updated,user,'Admin approved case with payment pending');
+      return send(res,200,await caseDetailData(updated,user));
     }
     if (req.method === 'POST' && caseMatch[2] === 'claim') {
-      if (user.role !== 'backoffice') return send(res, 403, { error: 'Only back office can claim cases' });
+      if (user.role !== 'backoffice') return send(res, 403, { error: 'Only back office can accept cases' });
       if (!(await documentGate(c, res))) return;
       if (!(await processingGate(c,res))) return;
-      const claimable=['Ready for Assignment','Assigned','Document Review','Ready to Submit','Submitted to Official Portal','Under Government Review','Customer Action Required','Document Received','Correction Required','Approved'];
-      if(!claimable.includes(c.status)) return send(res,409,{error:'Case is not ready to claim'});
-      const status=c.status==='Ready for Assignment'?'Assigned':c.status;
+      const claimable=[ADMIN_PENDING_STATUS,'Ready for Assignment','Assigned','Document Review','Ready to Submit','Submitted to Official Portal','Under Government Review','Customer Action Required','Document Received','Correction Required','Approved','Application Resubmitted','Rejected'];
+      if(!claimable.includes(c.status)) return send(res,409,{error:'Case is not ready to accept'});
+      const status=['Ready for Assignment',ADMIN_PENDING_STATUS].includes(c.status)?'Assigned':c.status;
       const result=await run('UPDATE cases SET backoffice_user_id=$u,status=$status,updated_at=$at WHERE id=$id AND backoffice_user_id IS NULL AND status=$old',{$u:user.id,$status:status,$at:now(),$id:c.id,$old:c.status});
-      if(!result.changes) return send(res,409,{error:'Case was already claimed or is not ready'});
-      await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)',{$id:id('note'),$case:c.id,$actor:user.id,$old:c.status,$new:status,$note:'Case claimed by back office',$vis:'sales',$next:'',$at:now()});
-      await notifyCaseUpdate({...c,backoffice_user_id:user.id},user,'Case assigned',status);
+      if(!result.changes) return send(res,409,{error:'Case was already accepted or is not ready'});
+      await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)',{$id:id('note'),$case:c.id,$actor:user.id,$old:c.status,$new:status,$note:`Case accepted by ${user.name}`,$vis:'sales',$next:'',$at:now()});
+      await notifyCaseUpdate({...c,backoffice_user_id:user.id},user,`Case accepted by ${user.name}`,status);
       await syncCase(c.id);
       return send(res,200,{case:await caseRow(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}))});
     }
@@ -1111,24 +1135,26 @@ async function routeApi(req, res, url) {
       if (!receivedDocument) return send(res, 400, { error: 'Upload the received document before submitting this case' });
       const at = now();
       (await run('UPDATE cases SET status=$status,completed_at=$at,updated_at=$at WHERE id=$id', { $status: 'Closed', $at: at, $id: c.id }));
-      (await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)', { $id: id('note'), $case: c.id, $actor: user.id, $old: c.status, $new: 'Closed', $note: 'Received document submitted and request closed', $vis: 'sales', $next: '', $at: at }));
-      await notifyCaseUpdate(c,user,'Case completed','Closed');
+      (await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)', { $id: id('note'), $case: c.id, $actor: user.id, $old: c.status, $new: 'Closed', $note: 'Application complete; completed application document submitted', $vis: 'sales', $next: '', $at: at }));
+      await notifyCaseUpdate(c,user,'Application Complete - document available','Closed');
       (await syncCase(c.id));
       return send(res, 200, { case: (await caseRow((await one('SELECT * FROM cases WHERE id=$id', { $id: c.id })))) });
     }
     if (req.method === 'POST' && caseMatch[2] === 'progress') return body(req).then(async b => {
       if (!['backoffice','admin'].includes(user.role)) return send(res, 403, { error: 'Only back office or admin can update progress' });
+      if (user.role==='backoffice' && c.backoffice_user_id!==user.id) return send(res,409,{error:'Accept the case before updating its status.'});
+      if (['Closed','Delivered'].includes(b.status)) return send(res,400,{error:'Upload and submit the completed application document to complete this application.'});
       if (!transitions[c.status]?.includes(b.status)) return send(res, 400, { error: `Cannot move from ${c.status} to ${b.status}` });
       if (!['Awaiting Documents','Correction Required','Customer Action Required','Rejected','Cancelled'].includes(b.status) && !(await documentGate(c, res))) return;
       if (!['Awaiting Documents','Awaiting Payment','Correction Required','Customer Action Required','Rejected','Cancelled'].includes(b.status) && !(await processingGate(c,res))) return;
-      if (['Correction Required','Rejected','Cancelled'].includes(b.status) && !String(b.note || '').trim()) return send(res, 400, { error: 'A reason is required' });
+      if (['Awaiting Documents','Correction Required','Customer Action Required','Rejected','Cancelled'].includes(b.status) && !String(b.note || '').trim()) return send(res, 400, { error: 'A reason is required' });
       (await run('UPDATE cases SET status=$s,follow_up_date=$f,official_reference=COALESCE($r,official_reference),completed_at=CASE WHEN $s IN ($delivered,$closed) THEN $at ELSE completed_at END,updated_at=$at WHERE id=$id', { $s: b.status, $f: b.followUpDate || null, $r: b.officialReference || null, $delivered: 'Delivered', $closed: 'Closed', $at: now(), $id: c.id }));
       let nextAction=b.nextAction || '';
       if (correctionStatuses.includes(b.status) && (b.status==='Correction Required' || !correctionStatuses.includes(c.status))) {
         const baseline=await all("SELECT id FROM documents WHERE case_id=$id AND state='uploaded'",{$id:c.id});
         nextAction=JSON.stringify({type:'reupload_request',documentTypes:[],baselineDocumentIds:baseline.map(doc=>doc.id),instructions:nextAction});
       }
-      const savedNote={id:id('note'),case_id:c.id,actor_id:user.id,actor:user.name,old_status:c.status,new_status:b.status,note:b.note || '',visibility:correctionStatuses.includes(b.status)?'sales':b.visibility || 'sales',next_action:nextAction,created_at:now()};
+      const savedNote={id:id('note'),case_id:c.id,actor_id:user.id,actor:user.name,old_status:c.status,new_status:b.status,note:b.note || '',visibility:(correctionStatuses.includes(b.status) || b.status==='Rejected')?'sales':b.visibility || 'sales',next_action:nextAction,created_at:now()};
       (await run('INSERT INTO notes VALUES ($id,$case,$actor,$old,$new,$note,$vis,$next,$at)', { $id:savedNote.id,$case:c.id,$actor:user.id,$old:c.status,$new:b.status,$note:savedNote.note,$vis:savedNote.visibility,$next:savedNote.next_action,$at:savedNote.created_at }));
       await notifyCaseUpdate(c,user,b.status === 'Correction Required' ? 'Returned to sales for correction' : 'Case status updated',b.status);
       (await syncCase(c.id));
@@ -1331,7 +1357,7 @@ export async function handler(req, res) {
     };
     const sheetsJobs = new Set(),caseMirrorJobs=new Set();
     const documentRequest = req.method==='POST' && (url.pathname==='/api/cases' || /\/api\/cases\/[^/]+\/(documents|finish-uploads)$/.test(url.pathname));
-    const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|submit-received-document|request-reupload|submit-reupload|submit-review|set-quote|remark|resume-upload)$/.test(url.pathname);
+    const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|payment-exception|submit-received-document|request-reupload|submit-reupload|submit-review|set-quote|remark|resume-upload)$/.test(url.pathname);
     const paymentRequest = url.pathname==='/api/sms-observer/events' || /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/(payment-order|cash-payment|discount)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname);
     const readOnly = (req.method === 'GET' && (
       ['/api/admin/services','/api/workspace/documents','/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments','/api/payments/cash-pending'].includes(url.pathname) ||

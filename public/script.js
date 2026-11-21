@@ -76,7 +76,7 @@ Object.assign(intakeWords, {
   "Active Cases": "सक्रिय अर्ज",
   "Operations": "कामकाज",
   "Business analytics": "व्यवसाय विश्लेषण",
-  "Case Review & Quotes": "अर्ज तपासणी व शुल्क",
+  "Case Pricing": "अर्जाचे शुल्क",
   "Sales Performance": "विक्री कामगिरी",
   "Back Office Performance": "बॅक ऑफिस कामगिरी",
   "Pricing": "सेवांचे दर",
@@ -170,7 +170,7 @@ Object.assign(intakeWords, {
   'No recent requests yet.':'अद्याप कोणतेही नवीन बदल नाहीत.', 'View All Requests':'सर्व अर्ज पाहा',
   'Team noticeboard':'कर्मचारी सूचना फलक', 'Announcements':'सूचना', 'News, pictures and updates from your admin.':'प्रशासकाकडून बातम्या, छायाचित्रे आणि सूचना.',
   'No announcements yet':'अद्याप कोणत्याही सूचना नाहीत', 'New team updates will appear here.':'कर्मचाऱ्यांसाठी नवीन सूचना येथे दिसतील.',
-  'Operations queue':'कामांची यादी', 'Claim, review, submit and follow up on customer requests.':'ग्राहकांचे अर्ज स्वीकारा, तपासा, सादर करा आणि पाठपुरावा करा.',
+  'Operations queue':'कामांची यादी', 'Accept, review, submit and follow up on customer requests.':'ग्राहकांचे अर्ज स्वीकारा, तपासा, सादर करा आणि पाठपुरावा करा.',
   'Unassigned work':'नियुक्त न केलेले काम', 'Current workload':'सध्याची कामे',
   'Search and manage customer applications still in progress.':'प्रक्रियेत असलेले ग्राहकांचे अर्ज शोधा व व्यवस्थापित करा.',
   'Closed customer applications and their received documents.':'पूर्ण झालेले ग्राहकांचे अर्ज आणि प्राप्त कागदपत्रे.',
@@ -185,11 +185,143 @@ Object.assign(intakeWords, {
   'Next action':'पुढील कृती', 'Open':'उघडा', 'Filter':'फिल्टर', 'All statuses':'सर्व स्थिती', 'All services':'सर्व सेवा'
 });
 
+Object.assign(intakeWords, {
+  "Services": "सेवा",
+  "Under Review": "तपासणी सुरू आहे",
+  "Under review": "तपासणी सुरू आहे",
+  "Ready to Assign": "नियुक्तीसाठी तयार",
+  "Requests being checked or processed": "तपासणी किंवा प्रक्रियेत असलेले अर्ज",
+  "Ready for back office staff": "बॅक ऑफिस कर्मचाऱ्यांसाठी तयार",
+  "Do you have any evidence of the new name?": "नवीन नावाचा काही पुरावा आहे का?",
+  "If No, affidavit charges will increase the total payable.": "नसल्यास, प्रतिज्ञापत्राचे शुल्क एकूण देय रकमेत वाढेल.",
+  "Enter your full old name as shown on your documents.": "कागदपत्रांवरील आपले संपूर्ण जुने नाव भरा.",
+  "Enter your full new name for the Gazette.": "राजपत्रासाठी आपले संपूर्ण नवीन नाव भरा.",
+  "Enter your full name as shown on your documents.": "कागदपत्रांवरील आपले संपूर्ण नाव भरा.",
+  "Without affidavit charges": "प्रतिज्ञापत्र शुल्काशिवाय",
+  "With affidavit charges": "प्रतिज्ञापत्र शुल्कासह",
+  "Affidavit charges will increase the total payable. The price with affidavit charges applies.": "प्रतिज्ञापत्राच्या शुल्कामुळे एकूण देय रक्कम वाढेल. प्रतिज्ञापत्रासह असलेला दर लागू होईल.",
+  "Accept Case": "अर्ज स्वीकारा",
+  "Discount (Rs.)": "सवलत (रु.)",
+  "Discount": "सवलत",
+  "Main amount": "मूळ रक्कम",
+  "Apply discount": "सवलत लागू करा",
+  "Discount applied. Payment amount updated.": "सवलत लागू झाली. देय रक्कम अद्ययावत झाली.",
+  "Selected services": "निवडलेल्या सेवा",
+  "Payment method": "देयकाची पद्धत",
+  "Choose payment method": "देयकाची पद्धत निवडा",
+  "Pay online": "ऑनलाइन पैसे भरा",
+  "Pay in cash": "रोख पैसे भरा",
+  "Cash amount paid (₹)": "भरलेली रोख रक्कम (₹)",
+  "Amount paid in cash": "रोख भरलेली रक्कम",
+  "Pending amount": "बाकी रक्कम",
+  "Enter cash received": "मिळालेली रोख रक्कम भरा",
+  "Success Online Main Branch can pay online or record cash payments.": "सक्सेस ऑनलाइन मुख्य शाखा ऑनलाइन पैसे भरू शकते किंवा रोख देयकाची नोंद करू शकते.",
+  "A positive cash payment allows processing after documents finish uploading. Admin must confirm the full payment before the completed document can be received.": "रोख रक्कम भरल्यानंतर आणि कागदपत्रे अपलोड झाल्यानंतर अर्जाची प्रक्रिया सुरू होऊ शकते. पूर्ण झालेले कागदपत्र मिळवण्यापूर्वी प्रशासकाने संपूर्ण देयकाची पुष्टी करणे आवश्यक आहे.",
+  "Admin Approved Payment Pending": "प्रशासकाने मंजूर केले — देयक प्रलंबित",
+  "Processing approved by admin. Payment is still pending.": "प्रशासकाने प्रक्रियेला मंजुरी दिली आहे. देयक अद्याप प्रलंबित आहे.",
+  "Approve case with payment pending": "देयक प्रलंबित असताना अर्ज मंजूर करा",
+  "Allow processing while payment remains pending.": "देयक प्रलंबित असतानाही प्रक्रिया सुरू करण्यास परवानगी द्या.",
+  "Approval reason": "मंजुरीचे कारण",
+  "Approve case": "अर्ज मंजूर करा",
+  "Case approved. Payment remains pending.": "अर्ज मंजूर झाला. देयक अद्याप प्रलंबित आहे.",
+  "Your customer requests, document uploads and payment follow-ups.": "आपल्या ग्राहकांचे अर्ज, कागदपत्रांचे अपलोड आणि देयकांचा पाठपुरावा.",
+  "Assigned requests, document reviews and completed work.": "नियुक्त अर्ज, कागदपत्रांची तपासणी आणि पूर्ण झालेली कामे.",
+  "Document follow-up needed": "कागदपत्रांसाठी पाठपुरावा आवश्यक",
+  "Customers in your request history": "आपल्या अर्जांच्या इतिहासातील ग्राहक",
+  "Requests awaiting full payment": "संपूर्ण देयकासाठी प्रलंबित अर्ज",
+  "Check details or upload corrections": "तपशील तपासा किंवा दुरुस्त कागदपत्रे अपलोड करा",
+  "View completed requests →": "पूर्ण झालेले अर्ज पाहा →",
+  "View completed requests": "पूर्ण झालेले अर्ज पाहा",
+  "Recent Requests": "अलीकडील अर्ज",
+  "Unpaid Payment": "देयक भरलेले नाही",
+  "No pending requests. All caught up.": "कोणतेही अर्ज प्रलंबित नाहीत.",
+  "Requests awaiting payment confirmation or document uploads. Complete both to send the request to back office.": "देयकाच्या पुष्टीसाठी किंवा कागदपत्रांसाठी प्रलंबित अर्ज. बॅक ऑफिसकडे पाठवण्यासाठी दोन्ही पूर्ण करा.",
+  "Upload a photo clicked at the moment.": "आत्ताच काढलेला फोटो अपलोड करा.",
+  "Any One Date of Birth Proof": "जन्मतारखेचा कोणताही एक पुरावा",
+  "Upload every required document before moving the case forward.": "अर्ज पुढे पाठवण्यापूर्वी सर्व आवश्यक कागदपत्रे अपलोड करा.",
+  "Workflow action": "प्रक्रियेतील कृती",
+  "Move case forward": "अर्ज पुढे पाठवा",
+  "Progress note or correction instructions": "प्रगतीची नोंद किंवा दुरुस्तीच्या सूचना",
+  "Update status": "स्थिती अद्ययावत करा",
+  "Required documents are missing. Upload them to unlock progress.": "आवश्यक कागदपत्रे अपूर्ण आहेत. प्रक्रिया पुढे नेण्यासाठी ती अपलोड करा."
+});
+
+Object.assign(intakeWords,{'Pending Documents':'प्रलंबित कागदपत्रे','Pending Payment':'प्रलंबित देयक','Working Person':'काम करणारी व्यक्ती','Scan document':'कागदपत्र स्कॅन करा','Approve Case':'अर्ज मंजूर करा','Approval':'मंजुरी','Set case price first':'आधी अर्जाचे शुल्क निश्चित करा','Review pending sales cases and approve processing while payment is pending.':'विक्री विभागातील प्रलंबित अर्ज तपासा आणि देयक प्रलंबित असताना प्रक्रियेस मंजुरी द्या.'});
+
+Object.assign(intakeWords,{'Case Accepted':'अर्ज स्वीकारला','Documents Under Review':'कागदपत्रांची तपासणी सुरू','Documents OK':'कागदपत्रे योग्य आहेत','Documents Pending':'कागदपत्रे प्रलंबित','Application Submitted':'अर्ज सादर केला','Application Rejected':'अर्ज नाकारला','Application Resubmitted':'अर्ज पुन्हा सादर केला','Application Complete':'अर्ज पूर्ण झाला','Completion Document Pending':'पूर्ण झालेल्या अर्जाचे कागदपत्र बाकी'});
+Object.assign(intakeWords,{
+  'Crop document':'कागदपत्र क्रॉप करा',
+  'Document to crop':'क्रॉप करण्यासाठी कागदपत्र',
+  'Drag across the image to select the area to keep, or adjust the edges below.':'ठेवायचा भाग निवडण्यासाठी चित्रावर बोट किंवा माऊस ओढा, किंवा खालील कडा समायोजित करा.',
+  'Left':'डावी बाजू','Top':'वरची बाजू','Right':'उजवी बाजू','Bottom':'खालची बाजू',
+  'Cancel':'रद्द करा','Reset':'पुन्हा सेट करा','Use original':'मूळ चित्र वापरा','Use crop':'क्रॉप केलेले चित्र वापरा',
+  'Select an area of the document to keep.':'कागदपत्राचा ठेवायचा भाग निवडा.',
+  'Could not crop this image. Try again.':'हे चित्र क्रॉप करता आले नाही. पुन्हा प्रयत्न करा.',
+  'Could not open this image. Choose another JPG or PNG.':'हे चित्र उघडता आले नाही. दुसरे JPG किंवा PNG निवडा.',
+  'Requests awaiting documents or corrections requested by back office.':'कागदपत्रे किंवा बॅक ऑफिसने सांगितलेल्या दुरुस्त्यांसाठी प्रलंबित अर्ज.',
+  'Requests awaiting full payment or payment confirmation.':'पूर्ण देयक किंवा देयकाच्या पुष्टीसाठी प्रलंबित अर्ज.',
+  'Corrected documents forward automatically':'दुरुस्त केलेली कागदपत्रे आपोआप पुढे पाठवली जातात',
+  'Reupload all requested documents. They return to back office automatically using the existing case and payment; no additional payment is required.':'मागितलेली सर्व कागदपत्रे पुन्हा अपलोड करा. ती सध्याच्या अर्जासह आणि देयकासह आपोआप बॅक ऑफिसकडे पाठवली जातील; अतिरिक्त देयक आवश्यक नाही.',
+  'Replacement files stay highlighted while sales prepares and submits the corrections.':'विक्री विभाग दुरुस्त्या करत असताना बदललेली कागदपत्रे ठळकपणे दिसतील.',
+  'Retry forwarding':'पुढे पाठवण्यासाठी पुन्हा प्रयत्न करा',
+  'Awaiting corrected documents':'दुरुस्त केलेल्या कागदपत्रांची प्रतीक्षा',
+  'Awaiting corrected documents from sales':'विक्री विभागाकडून दुरुस्त केलेल्या कागदपत्रांची प्रतीक्षा',
+  'Return to sales':'विक्री विभागाकडे परत पाठवा',
+  'Upload received document':'पूर्ण झालेले कागदपत्र अपलोड करा',
+  'Replace received document':'पूर्ण झालेले कागदपत्र बदला',
+  'Upload the completed document received for this request.':'या अर्जासाठी मिळालेले पूर्ण झालेले कागदपत्र अपलोड करा.',
+  'Upload the received PDF, JPG, or PNG.':'मिळालेले PDF, JPG किंवा PNG अपलोड करा.',
+  'No received document uploaded':'पूर्ण झालेले कागदपत्र अपलोड केलेले नाही',
+  'Corrected documents forwarded to back office. No additional payment required.':'दुरुस्त केलेली कागदपत्रे बॅक ऑफिसकडे पाठवली आहेत. अतिरिक्त देयक आवश्यक नाही.',
+  'Application Complete - upload document':'अर्ज पूर्ण झाला - कागदपत्र अपलोड करा',
+  'Complete application':'अर्ज पूर्ण करा',
+  'Reason required for Documents Pending or Application Rejected':'कागदपत्रे प्रलंबित किंवा अर्ज नाकारल्यास कारण आवश्यक आहे',
+  'Enter a reason for pending documents or application rejection.':'कागदपत्रे प्रलंबित असण्याचे किंवा अर्ज नाकारण्याचे कारण लिहा.',
+  'Documents Pending - returned to sales for correction':'कागदपत्रे प्रलंबित - दुरुस्तीसाठी विक्री विभागाकडे परत पाठवले',
+  'Review the rejection reason in the case timeline.':'अर्जाच्या कालक्रमात नकाराचे कारण तपासा.',
+  'Case accepted. Your name is now visible to sales.':'अर्ज स्वीकारला आहे. तुमचे नाव आता विक्री विभागाला दिसते.',
+  'Application complete. The document is available to sales.':'अर्ज पूर्ण झाला आहे. कागदपत्र विक्री विभागाला उपलब्ध आहे.'
+});
 let intakeLanguage = 'en';
 try { intakeLanguage = localStorage.getItem('success-online.intake-language') === 'mr' ? 'mr' : 'en'; } catch {}
 let intakeLanguageObserver;
 const intakeTextSources = new WeakMap();
 const intakeAttributeSources = new WeakMap();
+
+// Average processing times supplied by Success Online, independent of fees and workflow deadlines.
+const serviceTimelines = {
+  'caste-validity': {time:'30–45 days'},
+  'ews-certificate': {time:'30–45 days'},
+  'food-license': {time:'Around 45 days',note:'Depending on the business.'},
+  'pf-assistance': {time:'5–10 days'},
+  'income-certificate': {time:'10–15 days'},
+  'domicile-certificate': {time:'10–15 days'},
+  'non-creamy-layer': {time:'30–45 days'},
+  passport: {time:'22–30 days',note:'After the appointment.'},
+  'voting-card': {time:'2–3 months'},
+  pan: {time:'22–30 days'},
+  'ration-card': {time:'2–3 months'},
+  'caste-certificate': {time:'30–45 days'},
+  gazette: {time:'15–20 days'},
+  'police-clearance': {time:'15–20 days',note:'Depending on the police station.'},
+  'shop-act': {time:'4–5 days'},
+  'udyam-aadhaar': {time:'4–5 days'}
+};
+Object.assign(intakeWords, {
+  'Average processing time':'प्रक्रियेसाठी लागणारा सरासरी कालावधी',
+  'Average estimate; actual processing time may vary.':'हा सरासरी अंदाज आहे; प्रत्यक्ष प्रक्रियेचा कालावधी बदलू शकतो.',
+  '30–45 days':'३०–४५ दिवस','Around 45 days':'साधारण ४५ दिवस','5–10 days':'५–१० दिवस',
+  '10–15 days':'१०–१५ दिवस','22–30 days':'२२–३० दिवस','2–3 months':'२–३ महिने',
+  '15–20 days':'१५–२० दिवस','4–5 days':'४–५ दिवस',
+  'Depending on the business.':'व्यवसायाच्या प्रकारानुसार.',
+  'After the appointment.':'अपॉइंटमेंटनंतर.',
+  'Depending on the police station.':'पोलीस ठाण्यानुसार.'
+});
+function serviceTimeline(service) {
+  const timeline=serviceTimelines[service?.slug];
+  if(!timeline) return '';
+  return `<aside class="service-timeline" role="note"><span class="service-timeline-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="service-timeline-copy"><span>Average processing time</span>: <strong>(<span>${h(timeline.time)}</span>)</strong>${timeline.note?`<span class="service-timeline-note"> · <span>${h(timeline.note)}</span></span>`:''}</span></aside>`;
+}
 
 function intakeLanguageParts(value) {
   const parts = value.split(/\s\/\s/);
@@ -240,7 +372,12 @@ function intakeTranslate(value, maps) {
   const parts = intakeLanguageParts(source);
   const selected = parts ? parts[intakeLanguage] : source;
   let translated = maps[intakeLanguage].get(selected) || selected;
+  if(translated===selected && /:$/.test(selected)) translated=(maps[intakeLanguage].get(selected.slice(0,-1)) || selected.slice(0,-1))+':';
   if (intakeLanguage === 'mr') {
+    translated = translated.replace(/^(\d+) pending requests$/, '$1 प्रलंबित अर्ज')
+      .replace(/^(\d+) corrected file\(s\) ready$/, '$1 दुरुस्त केलेल्या फाइल तयार')
+      .replace(/^Completed (.+) application document$/, '$1 अर्जाचे पूर्ण झालेले कागदपत्र')
+      .replace(/^Documents saved\. Automatic forwarding failed: (.+)\. Use Retry forwarding\.$/, 'कागदपत्रे जतन केली आहेत. आपोआप पुढे पाठवता आले नाही: $1. पुढे पाठवण्यासाठी पुन्हा प्रयत्न करा.');
     translated = translated.replace(/^(\d+) of (\d+) required documents selected\. Upload every required document to continue\.$/, '$2 आवश्यक कागदपत्रांपैकी $1 निवडली आहेत. पुढे जाण्यासाठी सर्व आवश्यक कागदपत्रे अपलोड करा.')
       .replace(/^(\d+) pages selected$/, '$1 पाने निवडली आहेत')
       .replace(/^(\d+) (?:file|files) ready$/, '$1 फाइल तयार आहेत')
@@ -397,7 +534,7 @@ const dateTime = value => value ? new Date(value).toLocaleString('en-IN', { date
 const roleName = role => ({admin:'Administrator',sales:'Sales Staff',backoffice:'Back Office Staff'}[role] || role);
 function icon(name) {
   const paths={arrowUp:'<path d="M12 20V4m-6 6 6-6 6 6"/>',arrowDown:'<path d="M12 4v16m-6-6 6 6 6-6"/>',upload:'<path d="M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6"/>',eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',check:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',person:'<circle cx="12" cy="7" r="4"/><path d="M5 21v-3a7 7 0 0 1 14 0v3"/>',people:'<path d="M16 21v-3a5 5 0 0 0-5-5H7a5 5 0 0 0-5 5v3M18 4a4 4 0 0 1 0 8M22 21v-3a5 5 0 0 0-4-4.8"/><circle cx="9" cy="7" r="4"/>',alert:'<path d="m10.3 3.9-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3.1l-8-14a2 2 0 0 0-3.4 0Z"/><path d="M12 8v5M12 17h.01"/>',services:'<path d="M3 7h6l2-3h9v15H3z"/><path d="M3 10h17"/>',documents:'<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 12h6M9 16h6"/>',storage:'<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 8h.01M7 17h.01"/>',notifications:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',search:'<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/>',shield:'<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z"/><path d="m8 12 3 3 5-6"/>',checklist:'<rect x="5" y="4" width="15" height="18" rx="2"/><path d="M9 2h7v4H9zM9 11l2 2 4-4M9 17h6"/>',trash:'<path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/>',activity:'<path d="M2 12h5l3-8 4 16 3-8h5"/>',arrow:'<path d="m9 6 6 6-6 6"/>',image:'<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="2"/><path d="m3 17 5-5 4 4 4-6 5 7"/>',pricing:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',dashboard:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',cases:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',completed:'<rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>',queue:'<path d="M4 5h16v14H4zM4 13h5l2 3h2l2-3h5M8 9h8"/>',payments:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',admin:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',employees:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',plus:'<path d="M12 5v14M5 12h14"/>',more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',logout:'<path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h12"/>',switch:'<path d="M4 7h15l-3-3M20 17H5l3 3M20 7v4M4 17v-4"/>'};
-  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name.endsWith('Performance') ? 'admin' : name === 'pending' ? 'queue' : name]||paths.profile}</svg>`;
+  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name.endsWith('Performance') ? 'admin' : ['pending','pendingDocuments','pendingPayment'].includes(name) ? 'queue' : name]||paths.profile}</svg>`;
 }
 function labelTables() {
   document.querySelectorAll('.table').forEach(table=>{
@@ -481,11 +618,14 @@ async function loadViewData() {
   if(['salesPerformance','backofficePerformance'].includes(view)) await loadPerformance(view==='salesPerformance'?'sales':'backoffice');
 }
 
+function brandMark() {
+  return '<span class="brand-logo-mark" data-language-preserve><img src="/assets/brand/success-online-mark.png" alt="" width="46" height="46" decoding="async"></span>';
+}
 function renderLogin() {
   app.innerHTML = `<section class="login auth-page">
     <div class="auth-shell">
       <aside class="auth-intro">
-        <div class="login-brand"><div class="mark">SO</div><div><strong>Success Online</strong><span>Service Workspace</span></div></div>
+        <div class="login-brand" data-language-preserve><div class="login-logo-card"><img src="/assets/brand/success-online-logo.png" alt="Success Online — Digital &amp; Online Services" width="156" height="156" decoding="async"></div></div>
         <div class="auth-story"><span class="auth-overline">A simpler working day</span><h2>Every request.<br>A step forward.</h2><p>Your customers, documents, and payments. Together in one organised workspace.</p></div>
         <div class="auth-art" aria-hidden="true"><div class="auth-orbit"></div><div class="auth-art-card"><span class="auth-art-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 3h7l4 4v14H7zM14 3v5h5M10 12h5M10 16h5"/></svg></span><span class="auth-art-lines"><i></i><i></i></span><span class="auth-art-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 12 4 4 8-8"/></svg></span></div><div class="auth-art-card auth-art-card-back"></div></div>
         <p class="auth-intro-foot">Built for the way your team works.</p>
@@ -525,27 +665,29 @@ function renderLogin() {
   };
 }
 
-const navLabels = { services:'Services',documents:'Documents',storage:'Storage',notifications:'Notifications', dashboard: 'Live Dashboard', cases: 'Active Requests', pending: 'Pending Requests', completed: 'Completed Requests', payments: 'Payments', queue: 'Work Queue', admin: 'Business Reports', employees: 'Staff', pricing: 'Service Pricing',quotes: 'Review & Quotes',salesPerformance:'Sales Performance',backofficePerformance:'Back Office Performance' };
+const navLabels = { services:'Services',documents:'Documents',storage:'Storage',notifications:'Notifications', dashboard: 'Live Dashboard', cases: 'Active Requests', pending: 'Pending Requests', pendingDocuments:'Pending Documents', pendingPayment:'Pending Payment', completed: 'Completed Requests', payments: 'Payments', queue: 'Work Queue', admin: 'Business Reports', employees: 'Staff', pricing: 'Service Pricing',quotes: 'Case Pricing',salesPerformance:'Sales Performance',backofficePerformance:'Back Office Performance' };
 
 function shell(content) {
-  const links = ['dashboard','cases','pending','completed','quotes','payments','queue','admin','salesPerformance','backofficePerformance','employees','pricing','services','documents','storage','notifications']
+  const links = ['dashboard','cases','pending','pendingDocuments','pendingPayment','completed','quotes','payments','queue','admin','salesPerformance','backofficePerformance','employees','pricing','services','documents','storage','notifications']
     .filter(item => !['queue','storage'].includes(item) || me.role !== 'sales')
+    .filter(item => item!=='pending' || me.role==='admin')
+    .filter(item => !['pendingDocuments','pendingPayment'].includes(item) || me.role==='sales')
 
     .filter(item => !['admin','employees','pricing','services','salesPerformance','backofficePerformance'].includes(item) || me.role === 'admin');
   const canCreate = ['sales','admin'].includes(me.role);
-  const primaryLinks=links.filter(item=>['dashboard','cases','pending','completed'].includes(item));
+  const primaryLinks=links.filter(item=>['dashboard','cases','pending','pendingDocuments','pendingPayment','completed'].includes(item));
   const moreLinks=links.filter(item=>!primaryLinks.includes(item));
   const navButton=(item,mobile=false)=>`<button data-view="${item}" class="${view===item?'active':''}" ${view===item?'aria-current="page"':''} onclick="setView('${item}')">${icon(item)}<span>${mobile?({dashboard:'Live Dashboard',cases:'Active Requests',pending:'Pending Requests',completed:'Completed',queue:'Work Queue'}[item]||navLabels[item]):navLabels[item]}</span>${hasSectionUpdates(item) ? '<i class="nav-update-dot" title="Unread case updates" aria-hidden="true"></i>' : ''}</button>`;
   const initials=(me.name||me.username).trim().split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase();
   return `<div class="shell">
     <aside class="side">
-      <div class="side-brand"><div class="mark">SO</div><div><strong>Success Online</strong><span>Service Workspace</span></div></div>
-      <nav class="nav" aria-label="Main navigation">${[['Workspace',['dashboard','cases','pending','completed','quotes','documents']],['Administration',['queue','services','pricing','admin','salesPerformance','backofficePerformance','employees','payments']],['System',['storage','notifications']]].map(([label,items])=>{const visible=items.filter(item=>links.includes(item));return visible.length?`<p class="nav-group-label">${label}</p>${visible.map(item=>navButton(item)).join('')}`:'';}).join('')}</nav>
+      <div class="side-brand" data-language-preserve>${brandMark()}<div><strong>Success Online</strong><span>Digital &amp; Online Services</span></div></div>
+      <nav class="nav" aria-label="Main navigation">${[['Workspace',['dashboard','cases','pending','pendingDocuments','pendingPayment','completed','quotes','documents']],['Administration',['queue','services','pricing','admin','salesPerformance','backofficePerformance','employees','payments']],['System',['storage','notifications']]].map(([label,items])=>{const visible=items.filter(item=>links.includes(item));return visible.length?`<p class="nav-group-label">${label}</p>${visible.map(item=>navButton(item)).join('')}`:'';}).join('')}</nav>
       <div class="side-foot"><span class="live-dot"></span><div><strong>Workspace online</strong><small>Private assistance service</small></div></div>
     </aside>
     <div class="workspace">
       <header class="top">
-        <div class="top-identity"><div class="mobile-brand"><span class="mark">SO</span><div><strong>Success Online</strong><small>${h(roleName(me.role))}</small></div></div><p class="desktop-identity">${h(me.name)} <span class="role">${h(roleName(me.role))}</span></p></div>
+        <div class="top-identity"><div class="mobile-brand">${brandMark()}<div><strong>Success Online</strong><small>${h(roleName(me.role))}</small></div></div><p class="desktop-identity">${h(me.name)} <span class="role">${h(roleName(me.role))}</span></p></div>
         <div class="top-actions"><button class="workspace-notification-button" aria-label="Open notifications" onclick="setView('notifications')">${icon('notifications')}<span data-unread-count ${caseNotifications.length?'':'hidden'}>${caseNotifications.length}</span></button>${languageToggle()}${canCreate?`<button class="primary new-case-button" onclick="startCase()">${icon('plus')}<span>New Case</span></button>`:''}<details class="profile"><summary class="profile-button" aria-label="Open profile menu"><span class="avatar">${h(initials)}</span></summary><div class="profile-menu"><p class="eyebrow">Your account</p><strong>${h(me.name)}</strong><small>${h(roleName(me.role))}</small><div class="profile-login"><span>Staff login</span><strong>${h(me.username)}</strong></div><button onclick="setView('dashboard')">${icon('dashboard')}Live Dashboard</button><button onclick="switchAccount()">${icon('switch')}Switch account</button><button class="profile-signout" onclick="logout()">${icon('logout')}Sign out</button></div></details></div>
       </header>
       <main class="content">${content}</main>
@@ -557,7 +699,7 @@ function shell(content) {
 function render() {
   if (!me) return renderLogin();
   caseListNeedsRender = false;
-  const content = view==='services' ? renderServiceCatalog() : view==='documents' ? renderDocumentLibrary() : view==='storage' ? renderDocumentLibrary(true) : view==='notifications' ? renderNotificationCenter() : view === 'quotes' ? renderQuotes() : view === 'salesPerformance' ? renderPerformance('sales') : view === 'backofficePerformance' ? renderPerformance('backoffice') : view === 'pending' ? renderPendingCases() : view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : view === 'pricing' ? renderPricing() : renderDashboard();
+  const content = view==='services' ? renderServiceCatalog() : view==='documents' ? renderDocumentLibrary() : view==='storage' ? renderDocumentLibrary(true) : view==='notifications' ? renderNotificationCenter() : view === 'quotes' ? renderQuotes() : view === 'salesPerformance' ? renderPerformance('sales') : view === 'backofficePerformance' ? renderPerformance('backoffice') : ['pending','pendingDocuments','pendingPayment'].includes(view) ? renderPendingCases() : view === 'cases' ? renderCases() : view === 'completed' ? renderCompletedCases() : view === 'payments' ? renderPayments() : view === 'queue' ? renderQueue() : view === 'admin' ? renderAdmin() : view === 'employees' ? renderEmployees() : view === 'pricing' ? renderPricing() : renderDashboard();
   app.innerHTML = shell(content);
   applyIntakeLanguage();
   labelTables();
@@ -569,13 +711,13 @@ function pageHead(title, description, action = '') {
 }
 
 function statusClass(status) {
-  if(/unpaid|missing/i.test(status)) return 'warning';
+  if(/unpaid|missing|payment pending/i.test(status)) return 'warning';
   if (/Ready|Received|Approved|Delivered|Closed|paid/i.test(status)) return 'success';
   if (/Awaiting|Correction|Action|unpaid/i.test(status)) return 'warning';
   if (/Rejected|Cancelled|failed/i.test(status)) return 'danger';
   return 'neutral';
 }
-function statusLabel(status) { return status === 'Awaiting Payment' ? 'Unpaid Payment' : status; }
+function statusLabel(status) { return ({'Awaiting Payment':'Unpaid Payment','Assigned':'Case Accepted','Document Review':'Documents Under Review','Ready to Submit':'Documents OK','Correction Required':'Documents Pending','Awaiting Documents':'Documents Pending','Customer Action Required':'Documents Pending','Submitted to Official Portal':'Application Submitted','Under Government Review':'Application Submitted','Rejected':'Application Rejected','Document Received':'Completion Document Pending','Closed':'Application Complete','Delivered':'Application Complete'})[status] || status; }
 function statusBadge(status) { const label=({paid:'Paid',partially_paid:'Partially paid',unpaid:'Unpaid',missing:'Missing',complete:'Complete'})[status]||status;return `<span class="badge ${statusClass(status)}">${h(statusLabel(label))}</span>`; }
 
 function metricCard(label, value, detail, tone = '', symbol = '') {
@@ -588,13 +730,21 @@ function counts() { return cases.reduce((result, item) => { result[item.status] 
 const isCompletedCase = item => ['Closed','Delivered'].includes(item.status);
 
 const isPaymentConfirmed = item => item.cashPayment ? item.cashPayment.processingAllowed : item.payment?.gateway !== 'demo' && ['paid','PAID','verified','offline_approved'].includes(item.payment?.status || item.payment_state);
-const isPendingCase = item => !(item.quote?.submittedAt && !isPaymentConfirmed(item)) && !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && (!isPaymentConfirmed(item) || item.document_state !== 'complete');
-const isActiveCase = item => !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && isPaymentConfirmed(item) && item.document_state === 'complete';
+const isPaymentSettled = item => item.cashPayment ? item.cashPayment.releaseAllowed : isPaymentConfirmed(item);
+const hasPendingApproval = item => !!item.adminPaymentApproval && !isPaymentSettled(item);
+const canProcessCase = item => isPaymentConfirmed(item) || !!item.adminPaymentApproval;
+const needsDocumentAction = item => !isCompletedCase(item) && !['Cancelled','Rejected','Deleted'].includes(item.status) && (['Correction Required','Awaiting Documents','Customer Action Required'].includes(item.status) || item.reupload?.pending || item.document_state !== 'complete');
+const needsPaymentAction = item => !['Cancelled','Rejected','Deleted'].includes(item.status) && !isPaymentSettled(item);
+const isPendingCase = item => !(item.quote?.submittedAt && !isPaymentConfirmed(item)) && !isCompletedCase(item) && !['Cancelled','Rejected'].includes(item.status) && (!canProcessCase(item) || needsDocumentAction(item));
+const isAdminPendingCase = item => !isCompletedCase(item) && !['Cancelled','Rejected','Deleted'].includes(item.status) && (!isPaymentSettled(item) || item.document_state!=='complete');
+const pendingCaseVisible = item => me?.role==='admin' ? isAdminPendingCase(item) : view==='pendingDocuments' ? needsDocumentAction(item) : view==='pendingPayment' ? needsPaymentAction(item) : isPendingCase(item);
+const isActiveCase = item => !isCompletedCase(item) && !['Cancelled','Deleted'].includes(item.status) && (item.status==='Rejected' || (canProcessCase(item) && item.document_state === 'complete' && !needsDocumentAction(item)));
 function notificationSection(notice) {
   const item = cases.find(item => item.id === notice.caseId) || {status:notice.status};
+  if(me?.role==='sales') return needsDocumentAction(item) ? 'pendingDocuments' : needsPaymentAction(item) ? 'pendingPayment' : isCompletedCase(item) ? 'completed' : 'cases';
   return item.quote && !isPaymentConfirmed(item) ? 'quotes' : isCompletedCase(item) ? 'completed' : isPendingCase(item) ? 'pending' : 'cases';
 }
-function hasSectionUpdates(section) { if(section==='notifications') return caseNotifications.length>0;return caseNotifications.some(notice => notificationSection(notice) === section); }
+function hasSectionUpdates(section) { if(me?.role==='sales' && ['pendingDocuments','pendingPayment'].includes(section)) return caseNotifications.some(notice=>{const item=cases.find(item=>item.id===notice.caseId);return item && (section==='pendingDocuments'?needsDocumentAction(item):needsPaymentAction(item));});if(section==='notifications') return caseNotifications.length>0;return caseNotifications.some(notice => notificationSection(notice) === section); }
 function updateCaseIndicators() {
   const checked=document.querySelector('[data-workspace-last-check]');if(checked && lastWorkspaceRefresh) checked.textContent='Checks every 15 seconds - Checked '+lastWorkspaceRefresh.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
   document.querySelectorAll('[data-unread-count]').forEach(b=>{b.textContent=caseNotifications.length;b.hidden=!caseNotifications.length;});
@@ -637,7 +787,7 @@ async function refreshCaseUpdates() {
       const feed=document.querySelector('#announcementFeed');
       if(feed) feed.innerHTML=announcementCards();
     }
-    if (caseListNeedsRender && !document.querySelector('#drawer,.profile[open],.mobile-more[open],.announcement-composer[open]') && !announcementPosting && !editing && ['dashboard','cases','pending','completed','queue'].includes(view)) {
+    if (caseListNeedsRender && !document.querySelector('#drawer,.profile[open],.mobile-more[open],.announcement-composer[open]') && !announcementPosting && !editing && ['dashboard','cases','pending','pendingDocuments','pendingPayment','completed','queue'].includes(view)) {
       const search = document.querySelector('#caseSearch')?.value || '';
       const serviceFilter = document.querySelector('#caseServiceFilter')?.value || '';
       render();
@@ -659,8 +809,8 @@ function startCaseUpdatePolling() {
   updatesTimer = setTimeout(tick,15000);
 }
 function renderPendingCases() {
-  const rows = cases.filter(isPendingCase).sort((a,b) => Number(b.status === 'Correction Required') - Number(a.status === 'Correction Required') || String(b.updated_at).localeCompare(String(a.updated_at)));
-  return `${pageHead(navLabels.pending,'Requests awaiting payment confirmation or document uploads. Complete both to send the request to back office.')} ${caseToolbar(rows,false)}<div id="caseList" class="table-shell">${rows.length ? caseTable(rows) : empty('No pending requests. All caught up.')}</div>`;
+  const rows = cases.filter(pendingCaseVisible).sort((a,b) => Number(b.status === 'Correction Required') - Number(a.status === 'Correction Required') || String(b.updated_at).localeCompare(String(a.updated_at)));
+  return `${pageHead(navLabels[view] || navLabels.pending,view==='pendingDocuments' ? 'Requests awaiting documents or corrections requested by back office.' : view==='pendingPayment' ? 'Requests awaiting full payment or payment confirmation.' : me.role==='admin' ? 'Review pending sales cases and approve processing while payment is pending.' : 'Requests awaiting payment confirmation or document uploads. Complete both to send the request to back office.')} ${caseToolbar(rows,false)}<div id="caseList" class="table-shell">${rows.length ? caseTable(rows) : empty('No pending requests. All caught up.')}</div>`;
 }
 
 function renderDashboard() {
@@ -681,7 +831,7 @@ function renderDashboard() {
       <button type="button" class="metric-card green overview-completed-card" onclick="setView('completed')" aria-label="View completed requests"><span class="metric-symbol" data-metric-icon="check">${icon('check')}</span><strong>${number(workload.filter(isCompletedCase).length)}</strong><span class="metric-label">Completed Requests</span><small>View completed requests &rarr;</small></button>
       ${metricCard('Total Customers',number(customers),'Customers in your request history','violet','people')}
       ${metricCard('Pending Payments',number(mine.filter(item=>(item.cashPayment ? !item.cashPayment.releaseAllowed : !isPaymentConfirmed(item)) && !['Cancelled','Rejected'].includes(item.status)).length),'Requests awaiting full payment','amber','payments')}
-      ${metricCard('Ready to Assign',number(mine.filter(item=>item.status==='Ready for Assignment' && isActiveCase(item)).length),'Ready for back office staff','blue','person')}
+      ${metricCard('Ready to Assign',number(mine.filter(item=>['Ready for Assignment','Admin Approved Payment Pending'].includes(item.status) && !item.backoffice && isActiveCase(item)).length),'Ready for back office staff','blue','person')}
       ${metricCard('Needs Correction',number(mine.filter(item=>['Correction Required','Rejected'].includes(item.status)).length),'Check details or upload corrections','rose','alert')}
     </section>
     ${dashboardActivity()}
@@ -769,17 +919,18 @@ function renderCompletedCases() {
 
 function caseToolbar(rows, completed) {
   const serviceFilter = me.role === 'admin' ? `<label class="service-filter"><span>Services</span><select id="caseServiceFilter" onchange="filterCases(${completed})"><option value="">All services</option>${services.map(service => `<option value="${h(service.id)}">${h(service.name)}</option>`).join('')}</select></label>` : '';
-  return `<div class="toolbar"><div class="toolbar-controls"><label class="search"><span>Search</span><input id="caseSearch" oninput="filterCases(${completed})" placeholder="Request ID, customer, service, phone"></label>${serviceFilter}</div><span id="caseListCount" class="count-label">${number(rows.length)} ${view === 'pending' ? 'pending' : completed ? 'completed' : 'active'} requests</span></div>`;
+  return `<div class="toolbar"><div class="toolbar-controls"><label class="search"><span>Search</span><input id="caseSearch" oninput="filterCases(${completed})" placeholder="Request ID, customer, service, phone"></label>${serviceFilter}</div><span id="caseListCount" class="count-label">${number(rows.length)} ${['pending','pendingDocuments','pendingPayment'].includes(view) ? 'pending' : completed ? 'completed' : 'active'} requests</span></div>`;
 }
 
 function caseTable(rows, completed = false) {
-  return `<table class="table case-table"><thead><tr><th>Request ID</th><th>Customer</th><th>Service</th><th>Status</th><th>Payment</th><th>Owner</th><th>Salesperson username</th><th>Updated</th>${completed ? '<th>Download file</th>' : ''}${['sales','admin'].includes(me?.role)?'<th>Delete Request</th>':''}</tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
+  return `<table class="table case-table ${me?.role==='sales'?'sales-case-table':''}"><thead><tr><th>Request ID</th><th>Customer</th><th>Service</th><th>Status</th><th>Payment</th><th>${me?.role==='sales'?'Working Person':'Owner'}</th>${me?.role==='sales'?'':'<th>Salesperson username</th>'}<th>Updated</th>${completed ? '<th>Download file</th>' : ''}${me?.role==='admin' && !completed?'<th>Approval</th>':''}${['sales','admin'].includes(me?.role)?'<th>Delete Request</th>':''}</tr></thead><tbody>${rows.map(item => `<tr onclick="openCase('${item.id}')">
     <td><strong><button class="case-link" onclick="event.stopPropagation();openCase('${item.id}')" aria-label="Open request ${h(item.ref)}"><i class="case-update-dot" data-case-update="${item.id}" ${caseNotifications.some(notice => notice.caseId === item.id) ? '' : 'hidden'} title="Unread case update" aria-hidden="true"></i>${h(item.ref)}</button></strong><small>${item.syntheticTest ? 'SYNTHETIC TEST ? No payment required' : h(item.priority)}</small></td>
     <td><strong>${h(item.customer.name)}</strong><small>${h(item.customer.mobile.replace(/\d(?=\d{4})/g, 'x'))}</small></td>
     <td>${h(item.service.name)}<small>${h(item.variant.name)}</small></td>
-    <td>${statusBadge(item.status)}${item.quote && !item.quote.submittedAt && item.uploads ? `<small>${item.uploads.completed} / ${item.uploads.total} files saved${item.pendingUploads?.length ? ' ? Uploads need attention' : ''}</small>` : ''}</td><td>${statusBadge(item.payment?.status || item.payment_state)}<small>${item.quote && !item.quote.amount ? 'Price after review' : money(item.amounts.total)}</small>${item.quote?.amount && !isPaymentConfirmed(item) && ['sales','admin'].includes(me.role) ? `<a href="/?pay=${encodeURIComponent(item.id)}" onclick="event.stopPropagation();event.preventDefault();pay('${item.id}')">Pay ${money(item.amounts.total)}</a>` : ''}<small>${h(item.payment?.gateway_order_id || '')}</small></td>
-    <td>${h(item.backoffice?.name || 'Unassigned')}</td><td data-language-preserve>${h(item.sales?.username || 'Unassigned')}</td><td>${dateTime(item.updated_at)}</td>
+    <td>${statusBadge(item.status)}${hasPendingApproval(item) && item.status!=='Admin Approved Payment Pending' ? statusBadge('Admin Approved Payment Pending') : ''}${item.quote && !item.quote.submittedAt && item.uploads ? `<small>${item.uploads.completed} / ${item.uploads.total} files saved${item.pendingUploads?.length ? ' ? Uploads need attention' : ''}</small>` : ''}</td><td>${statusBadge(item.payment?.status || item.payment_state)}<small>${item.quote && !item.quote.amount ? 'Price after review' : money(item.amounts.total)}</small>${item.quote?.amount && !isPaymentConfirmed(item) && ['sales','admin'].includes(me.role) ? `<a href="/?pay=${encodeURIComponent(item.id)}" onclick="event.stopPropagation();event.preventDefault();pay('${item.id}')">Pay ${money(item.amounts.total)}</a>` : ''}<small>${h(item.payment?.gateway_order_id || '')}</small></td>
+    <td>${h(item.backoffice?.name || 'Unassigned')}</td>${me?.role==='sales'?'':`<td data-language-preserve>${h(item.sales?.username || 'Unassigned')}</td>`}<td>${dateTime(item.updated_at)}</td>
     ${completed ? `<td class="completed-download-cell">${item.received_document ? `<a class="completed-download" href="${h(item.received_document.download_url)}" download onclick="event.stopPropagation()" aria-label="Download completed document for ${h(item.ref)}">${icon('download')}<span>Download</span></a>` : item.cashPayment && !item.cashPayment.releaseAllowed ? `<button class="quiet" onclick="event.stopPropagation();openCase('${item.id}')">Pay pending amount</button>` : '<span class="muted">Not available</span>'}</td>` : ''}
+    ${me?.role==='admin' && !completed ? `<td onclick="event.stopPropagation()">${canApprovePendingCase(item) ? `<button class="primary" onclick="openCaseApproval('${item.id}')">Approve Case</button>` : hasPendingApproval(item) ? statusBadge('Admin Approved Payment Pending') : item.quote && !item.quote.amount && !isPaymentSettled(item) ? '<small>Set case price first</small>' : '<span class="muted">?</span>'}</td>` : ''}
     ${['sales','admin'].includes(me?.role)?`<td class="case-delete-cell" onclick="event.stopPropagation()"><button class="case-delete-button" onclick="deleteSalesCase('${item.id}',this)" ${item.deletionAllowed===true && item.sales?.id===me.id?'':'disabled title="Cases with recorded payments cannot be deleted"'} aria-label="Delete request ${h(item.ref)}">Delete</button></td>`:''}
   </tr>`).join('')}</tbody></table>`;
 }
@@ -805,8 +956,8 @@ async function deleteSalesCase(caseId,button) {
 function renderQueue() {
   const rows = cases.filter(isActiveCase);
   const groups = ['Ready for Assignment','Assigned','Submitted to Official Portal','Document Received'];
-  return `${pageHead(navLabels.queue, 'Claim, review, submit and follow up on customer requests.')}
-    <section class="metric-grid compact">${groups.map((status, index) => metricCard(status, number(rows.filter(item => item.status === status).length), index === 0 ? 'Unassigned work' : 'Current workload', index === 0 ? 'green' : ''))}</section>
+  return `${pageHead(navLabels.queue, 'Accept, review, submit and follow up on customer requests.')}
+    <section class="metric-grid compact">${groups.map((status, index) => metricCard(statusLabel(status), number(rows.filter(item => item.status === status).length), index === 0 ? 'Unassigned work' : 'Current workload', index === 0 ? 'green' : ''))}</section>
     <div class="table-shell">${rows.length ? caseTable(rows) : empty('The operations queue is clear.')}</div>`;
 }
 
@@ -1017,13 +1168,13 @@ function filterCases(completed = null) {
   const value = (document.querySelector('#caseSearch')?.value || '').toLowerCase();
   const serviceId = document.querySelector('#caseServiceFilter')?.value || '';
   const filtered = cases
-    .filter(item => view === 'pending' ? isPendingCase(item) : completed ? isCompletedCase(item) : view === 'cases' || view === 'queue' ? isActiveCase(item) : completed === null || isCompletedCase(item) === completed)
+    .filter(item => ['pending','pendingDocuments','pendingPayment'].includes(view) ? pendingCaseVisible(item) : completed ? isCompletedCase(item) : view === 'cases' || view === 'queue' ? isActiveCase(item) : completed === null || isCompletedCase(item) === completed)
     .filter(item => !serviceId || item.service.id === serviceId)
     .filter(item => [item.ref,item.customer.name,item.customer.mobile,item.service.name,item.status,statusLabel(item.status)].join(' ').toLowerCase().includes(value));
   document.querySelector('#caseList').innerHTML = filtered.length ? caseTable(filtered, Boolean(completed)) : empty('No cases match this search.');
   labelTables();
   const count = document.querySelector('#caseListCount');
-  if (count) count.textContent = `${number(filtered.length)} ${view === 'pending' ? 'pending' : completed ? 'completed' : 'active'} requests`;
+  if (count) count.textContent = `${number(filtered.length)} ${['pending','pendingDocuments','pendingPayment'].includes(view) ? 'pending' : completed ? 'completed' : 'active'} requests`;
 }
 
 async function startCase() {
@@ -1057,10 +1208,24 @@ function drawWizard() {
   applyIntakeLanguage();
 }
 
+function updateReviewDiscount(input) {
+  draft.discount=input.value;
+  if (!input.validity.valid) return;
+  const discount=Math.round(Number(input.value || 0)*100);
+  const total=Number(input.dataset.total)-discount;
+  document.querySelector('#reviewServiceCharge').textContent=money(Number(input.dataset.serviceCharge)-discount);
+  document.querySelector('#reviewTotalPayable').textContent=money(total);
+  const breakdown=document.querySelector('#reviewDiscountBreakdown');
+  breakdown.hidden=!discount;
+  breakdown.innerHTML=discount ? `<div><span>Main amount</span><strong>${money(Number(input.dataset.total))}</strong></div><div><span>Discount</span><strong>-${money(discount)}</strong></div>` : '';
+  const cashInput=document.querySelector('#reviewCashAmount');
+  if(cashInput) {cashInput.max=(total/100).toFixed(2);updateReviewCash(cashInput.value,total);}
+}
+Object.assign(window,{updateReviewDiscount,saveCaseDiscount});
 function cashReviewOptions(amount) {
     if(!me?.cashPaymentsAllowed) return '';
   const cash=draft.paymentMethod==='cash',paid=Math.round(Number(draft.cashAmount || 0)*100);
-  return `<section class="cash-review-panel"><h3>Payment method</h3><p>Success Online Main Branch can pay online or record cash payments.</p><label>Choose payment method<select onchange="setCashReviewMethod(this.value)"><option value="online" ${cash?'':'selected'}>Pay online</option><option value="cash" ${cash?'selected':''}>Pay in cash</option></select></label>${cash?`<label>Cash amount paid (₹)<input id="reviewCashAmount" type="number" min="0.01" step="0.01" max="${(amount.total/100).toFixed(2)}" value="${h(draft.cashAmount || '')}" oninput="updateReviewCash(this.value,${amount.total})" placeholder="Enter cash received"></label><dl class="cash-payment-totals"><div><dt>Amount paid in cash</dt><dd id="reviewCashPaid">${money(paid)}</dd></div><div><dt>Pending amount</dt><dd id="reviewCashPending">${money(Math.max(0,amount.total-paid))}</dd></div><div><dt>Total</dt><dd>${money(amount.total)}</dd></div></dl><p>A positive cash payment allows processing after documents finish uploading. Admin must confirm the full payment before the completed document can be received.</p>`:''}</section>`;
+  return `<section class="cash-review-panel"><h3>Payment method</h3><p>Success Online Main Branch can pay online or record cash payments.</p><label>Choose payment method<select onchange="setCashReviewMethod(this.value)"><option value="online" ${cash?'':'selected'}>Pay online</option><option value="cash" ${cash?'selected':''}>Pay in cash</option></select></label>${cash?`<label>Cash amount paid (₹)<input id="reviewCashAmount" type="number" min="0.01" step="0.01" max="${(amount.total/100).toFixed(2)}" value="${h(draft.cashAmount || '')}" oninput="updateReviewCash(this.value,Math.round(Number(this.max)*100))" placeholder="Enter cash received"></label><dl class="cash-payment-totals"><div><dt>Amount paid in cash</dt><dd id="reviewCashPaid">${money(paid)}</dd></div><div><dt>Pending amount</dt><dd id="reviewCashPending">${money(Math.max(0,amount.total-paid))}</dd></div><div><dt>Total</dt><dd>${money(amount.total)}</dd></div></dl><p>A positive cash payment allows processing after documents finish uploading. Admin must confirm the full payment before the completed document can be received.</p>`:''}</section>`;
 }
 function setCashReviewMethod(method) {draft.paymentMethod=method;rerenderWizard();}
 function updateReviewCash(value,total) {
@@ -1071,7 +1236,7 @@ function updateReviewCash(value,total) {
 }
 function wizardBody(service, variant) {
   if (draft.step === 1) return `<div class="formgrid"><label>Full name<input id="name" oninput="removeNameNumbers(this)" autocomplete="name" value="${h(draft.customer.name || '')}"></label><label>Mobile number<input id="mobile" type="tel" inputmode="numeric" maxlength="10" pattern="[0-9]{10}" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" autocomplete="tel-national" placeholder="10-digit mobile number" value="${h(draft.customer.mobile || '')}"></label><label>Address<input id="address" autocomplete="street-address" value="${h(draft.customer.address || '')}"></label></div><div class="form-actions"><button class="primary" onclick="saveStep1()">Continue</button></div>`;
-  if (draft.step === 2) return `<div class="formgrid"><label>Services<select id="service"><option value="" disabled hidden ${!draft.serviceId ? 'selected' : ''}>Choose...</option>${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label></div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="quiet" onclick="wizardBack(1)">Back</button><button class="primary" onclick="saveStep2()">Continue</button></div>`;
+  if (draft.step === 2) return `<div class="formgrid"><label>Services<select id="service"><option value="" disabled hidden ${!draft.serviceId ? 'selected' : ''}>Choose...</option>${services.map(item => `<option value="${item.id}" ${item.id === draft.serviceId ? 'selected' : ''}>${h(item.name)}</option>`)}</select></label></div><div id="serviceTimeline">${serviceTimeline(service)}</div><div id="serviceFields" class="formgrid"></div><div id="svcInfo" class="summary-box"></div><div class="form-actions"><button class="quiet" onclick="wizardBack(1)">Back</button><button class="primary" onclick="saveStep2()">Continue</button></div>`;
   if (draft.step === 3) {
     const docs = applicableDocuments(variant?.documents || [], draft.details);
     const missing = docs.filter(item => item.required && !draft.docs[item.label]);
@@ -1083,7 +1248,7 @@ function wizardBody(service, variant) {
   const discount=me?.discountsAllowed && !needsQuote ? Math.round(Number(draft.discount || 0)*100) : 0;
   const amount={...mainAmount,serviceCharge:mainAmount.serviceCharge-discount,total:mainAmount.total-discount};
   const pages = Object.values(draft.docs).reduce((count,doc) => count + (doc.pages?.length || 1), 0);
-  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your request.</p></div></header><div class="intake-review-card"><div class="intake-review-service"><span>Selected services</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(variant?.fields?.find(field => field.label === label)?.sensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge${amount.surcharge ? ` (includes \u20B9200 ${service.slug === 'domicile-certificate' ? 'affidavit fee' : 'Talathi surcharge'})` : ''}</span><strong>${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div>${me?.discountsAllowed && !needsQuote ? `<label>Discount (Rs.)<input id="reviewDiscount" type="number" min="0" max="${(Math.min(mainAmount.serviceCharge,mainAmount.total-1)/100).toFixed(2)}" step="0.01" value="${h(draft.discount || '')}" onchange="draft.discount=this.value;rerenderWizard()"></label>${discount?`<div><span>Main amount</span><strong>${money(mainAmount.total)}</strong></div><div><span>Discount</span><strong>-${money(discount)}</strong></div>`:''}` : ''}<div class="intake-review-total"><span>Total payable</span><strong>${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div>${needsQuote ? '<p>Back office will review your documents and send a payment request with the final case price.</p>' : cashReviewOptions(amount)}<label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button>${needsQuote ? `<button class="primary" onclick="submitCase('review')">Submit to back office</button>` : `<button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button>`}</div>`;
+  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your request.</p></div></header>${serviceTimeline(service)}<div class="intake-review-card"><div class="intake-review-service"><span>Selected services</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(variant?.fields?.find(field => field.label === label)?.sensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge${amount.surcharge ? ` (includes \u20B9200 ${service.slug === 'domicile-certificate' ? 'affidavit fee' : 'Talathi surcharge'})` : ''}</span><strong id="reviewServiceCharge">${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div>${me?.discountsAllowed && !needsQuote ? `<label>Discount (Rs.)<input id="reviewDiscount" data-service-charge="${mainAmount.serviceCharge}" data-total="${mainAmount.total}" type="number" min="0" max="${(Math.min(mainAmount.serviceCharge,mainAmount.total-1)/100).toFixed(2)}" step="0.01" value="${h(draft.discount || '')}" oninput="updateReviewDiscount(this)"></label><div id="reviewDiscountBreakdown" ${discount?'':'hidden'}>${discount?`<div><span>Main amount</span><strong>${money(mainAmount.total)}</strong></div><div><span>Discount</span><strong>-${money(discount)}</strong></div>`:''}</div>` : ''}<div class="intake-review-total"><span>Total payable</span><strong id="reviewTotalPayable">${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div>${needsQuote ? '<p>Back office will review your documents and send a payment request with the final case price.</p>' : cashReviewOptions(amount)}<label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button>${needsQuote ? `<button class="primary" onclick="submitCase('review')">Submit to back office</button>` : `<button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button>`}</div>`;
 }
 
 function documentTemplateLink(item) {
@@ -1126,8 +1291,10 @@ function bindWizard() {
       draft.variantId = '';
       document.querySelector('#serviceFields').innerHTML = '';
       document.querySelector('#svcInfo').innerHTML = '';
+      document.querySelector('#serviceTimeline').innerHTML = '';
       return;
     }
+    document.querySelector('#serviceTimeline').innerHTML=serviceTimeline(service);
     const variant = (service.slug==='gazette' && draft.details['Do you have any evidence of the new name?'] ? service.variants.find(item=>item.name===(draft.details['Do you have any evidence of the new name?']==='No'?'With affidavit charges':'Without affidavit charges')) : null) || service.variants.find(item => item.id === draft.variantId) || service.variants[0];
     const selector=document.querySelector('#requestVariant');
     if(selector) selector.remove();
@@ -1315,11 +1482,75 @@ function wizardBack(step) {
   rerenderWizard();
 }
 function uploadControls(encodedType, caseId = '', multiple = false) {
-  const handler = caseId ? `uploadCaseDocument('${caseId}','${encodedType}',this)` : multiple ? `pickDocs('${encodedType}',this.files)` : `pickDoc('${encodedType}',this.files[0])`;
-  return `<span class="upload-options"><label class="file-action">${multiple ? 'Add files' : 'Upload document'}<input type="file" ${multiple ? 'multiple' : ''} accept="image/jpeg,image/png,application/pdf" onchange="${handler}"></label></span>`;
+  const handler = `prepareDocumentSelection('${encodedType}','${caseId}',${multiple},this)`;
+  return `<span class="upload-options"><label class="file-action">${multiple ? 'Add files' : 'Upload document'}<input type="file" ${multiple ? 'multiple' : ''} accept="image/jpeg,image/png,application/pdf" onchange="${handler}"></label><label class="file-action">Scan document<input type="file" accept="image/jpeg,image/png" capture="environment" onchange="${handler}"></label></span>`;
 }
 function validateFile(file) {
   if (!['image/jpeg','image/png','application/pdf'].includes(file.type) || !file.size || file.size > 10_000_000) throw new Error('Choose JPG, PNG, or PDF up to 10 MB');
+}
+let documentSelectionBusy = false;
+async function prepareDocumentSelection(encodedType, caseId, multiple, input) {
+  if (drawerBusy || documentSelectionBusy || !input.files?.length) return;
+  const files = Array.from(input.files);
+  documentSelectionBusy = true;
+  try {
+    files.forEach(validateFile);
+    const prepared = [];
+    for (const file of files) {
+      const result = file.type.startsWith('image/') ? await cropDocumentImage(file) : file;
+      if (!result) return;
+      prepared.push(result);
+    }
+    if (caseId) await uploadCaseDocument(caseId, encodedType, {files:prepared, value:'', closest:selector=>input.closest(selector)});
+    else if (multiple) await pickDocs(encodedType, prepared);
+    else await pickDoc(encodedType, prepared[0]);
+  } catch (error) { toast(error.message); }
+  finally { documentSelectionBusy = false; input.value = ''; }
+}
+function cropDocumentImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const dialog = document.createElement('dialog');
+    dialog.className = 'document-crop-dialog';
+    dialog.innerHTML = `<h2>Crop document</h2><p>Drag across the image to select the area to keep, or adjust the edges below.</p><div class="document-crop-stage"><img alt="Document to crop"><div class="document-crop-selection"></div></div><div class="document-crop-edges">${['Left','Top','Right','Bottom'].map((label,i)=>`<label>${label}<input type="range" min="0" max="1000" value="${i<2?0:1000}" data-crop-edge="${i}"></label>`).join('')}</div><p class="document-crop-error" role="alert"></p><div class="document-crop-actions"><button type="button" data-crop="cancel">Cancel</button><button type="button" data-crop="reset">Reset</button><button type="button" data-crop="original">Use original</button><button type="button" class="primary" data-crop="save">Use crop</button></div>`;
+    const image = dialog.querySelector('img'), stage = dialog.querySelector('.document-crop-stage'), selection = dialog.querySelector('.document-crop-selection');
+    const inputs = [...dialog.querySelectorAll('[data-crop-edge]')];
+    let box = [0,0,1000,1000], start, done = false;
+    const finish = result => { if(done) return;done=true;dialog.close();dialog.remove();URL.revokeObjectURL(url);resolve(result); };
+    const draw = () => {
+      selection.style.cssText = `left:${box[0]/10}%;top:${box[1]/10}%;width:${(box[2]-box[0])/10}%;height:${(box[3]-box[1])/10}%`;
+      inputs.forEach((input,i)=>input.value=box[i]);
+    };
+    inputs.forEach((input,i)=>input.oninput=()=>{
+      const value=Number(input.value);
+      box[i]=i<2?Math.min(value,box[i+2]-1):Math.max(value,box[i-2]+1);
+      draw();
+    });
+    const point = event => {const rect=stage.getBoundingClientRect();return [Math.max(0,Math.min(1000,(event.clientX-rect.left)/rect.width*1000)),Math.max(0,Math.min(1000,(event.clientY-rect.top)/rect.height*1000))];};
+    stage.onpointerdown = event => {event.preventDefault();start=point(event);stage.setPointerCapture(event.pointerId);};
+    stage.onpointermove = event => {if(!start) return;const end=point(event);box=[Math.min(start[0],end[0]),Math.min(start[1],end[1]),Math.max(start[0],end[0]),Math.max(start[1],end[1])];draw();};
+    stage.onpointerup = stage.onpointercancel = () => {start=null;};
+    dialog.addEventListener('cancel',event=>{event.preventDefault();finish(null);});
+    dialog.querySelector('[data-crop="cancel"]').onclick=()=>finish(null);
+    dialog.querySelector('[data-crop="original"]').onclick=()=>finish(file);
+    dialog.querySelector('[data-crop="reset"]').onclick=()=>{box=[0,0,1000,1000];draw();};
+    dialog.querySelector('[data-crop="save"]').onclick=async event=>{
+      const button=event.currentTarget;button.disabled=true;
+      try {
+        const x=Math.round(box[0]*image.naturalWidth/1000), y=Math.round(box[1]*image.naturalHeight/1000);
+        const width=Math.round(box[2]*image.naturalWidth/1000)-x, height=Math.round(box[3]*image.naturalHeight/1000)-y;
+        if(width<1 || height<1) throw Error('Select an area of the document to keep.');
+        const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+        canvas.getContext('2d').drawImage(image,x,y,width,height,0,0,width,height);
+        const blob=await new Promise(resolve=>canvas.toBlob(resolve,file.type,0.95));
+        if(!blob) throw Error('Could not crop this image. Try again.');
+        const result=new File([blob],file.name,{type:file.type,lastModified:Date.now()});validateFile(result);finish(result);
+      } catch(error) {dialog.querySelector('.document-crop-error').textContent=error.message;button.disabled=false;}
+    };
+    image.onload=()=>{document.body.append(dialog);dialog.showModal();draw();};
+    image.onerror=()=>{URL.revokeObjectURL(url);dialog.remove();reject(Error('Could not open this image. Choose another JPG or PNG.'));};
+    image.src=url;
+  });
 }
 async function pickDoc(encodedType, file) {
   if (!file || drawerBusy) return;
@@ -1488,6 +1719,8 @@ async function submitCase(nextAction='pay') {
   if (!document.querySelector('#consent').checked) return toast('Please confirm customer consent');
   if (draftMissing().length) return toast('Upload all required documents to continue');
   if(!['passport','pf-assistance','ration-card'].includes(services.find(s=>s.id===draft.serviceId)?.slug) && me.cashPaymentsAllowed && draft.paymentMethod==='cash' && (!Number.isFinite(Number(draft.cashAmount)) || Number(draft.cashAmount)<=0)) return toast('Enter the cash amount received to continue.');
+  const discountInput=document.querySelector('#reviewDiscount');
+  if(discountInput) {if(!discountInput.reportValidity()) return;draft.discount=discountInput.value;}
   const intake = draft;
   const needsQuote=['passport','pf-assistance','ration-card'].includes(services.find(s=>s.id===intake.serviceId)?.slug);
   if(needsQuote) {intake.paymentMethod='online';nextAction='review';}
@@ -1563,7 +1796,7 @@ function reuploadSubmissionPanel(item) {
   const state = item.reupload;
   if (!state?.pending) return state?.submittedDocumentIds?.length ? '<section class="reupload-submission is-submitted"><strong>Corrected documents submitted for review</strong><p>The highlighted documents are the latest replacements submitted by sales.</p></section>' : '';
   const sales = ['sales','admin'].includes(me.role);
-  return `<section class="reupload-submission"><div><strong>${sales ? 'Submit corrected documents' : 'Awaiting corrected documents from sales'}</strong><p>${sales ? 'Reupload and preview the corrected files, then submit them to back office for review.' : 'Replacement files stay highlighted while sales prepares and submits the corrections.'}</p><small>${state.pendingDocumentIds.length} corrected file(s) ready${state.missingTypes.length ? `. Still requested: ${h(state.missingTypes.join(', '))}` : ''}</small></div>${sales ? `<button id="submitReupload" type="button" class="primary" onclick="submitReupload('${item.id}')" ${!state.canSubmit?'disabled':''}>Submit reupload</button>` : '<span class="reupload-tag is-pending">Awaiting sales submission</span>'}<p id="reuploadSubmitResult" role="status"></p></section>`;
+  return `<section class="reupload-submission"><div><strong>${sales ? 'Corrected documents forward automatically' : 'Awaiting corrected documents from sales'}</strong><p>${sales ? 'Reupload all requested documents. They return to back office automatically using the existing case and payment; no additional payment is required.' : 'Replacement files stay highlighted while sales prepares and submits the corrections.'}</p><small>${state.pendingDocumentIds.length} corrected file(s) ready${state.missingTypes.length ? `. Still requested: ${h(state.missingTypes.join(', '))}` : ''}</small></div>${sales && state.canSubmit ? `<button id="submitReupload" type="button" class="primary" onclick="submitReupload('${item.id}')" ${!state.canSubmit?'disabled':''}>Retry forwarding</button>` : '<span class="reupload-tag is-pending">Awaiting corrected documents</span>'}<p id="reuploadSubmitResult" role="status"></p></section>`;
 }
 function showReuploadRequest(caseId, encodedType, button) {
   if (drawerBusy) return;
@@ -1740,9 +1973,9 @@ function receivedDocumentPanel(item, documents) {
   const submitted = isCompletedCase(item);
   if (document && !isOperations && !submitted) return '';
   if (!document && !canUpload) return '';
-  return `<section class="detail-section received-document"><div class="panel-title"><div><h3>Received ${h(item.service.name)} document</h3><p>Upload the completed document received for this request.</p></div></div>
+  return `<section class="detail-section received-document"><div class="panel-title"><div><h3>Completed ${h(item.service.name)} application document</h3><p>Upload the completed document received for this request.</p></div></div>
     <div class="doc"><span><strong>${h(document?.file_name || 'No received document uploaded')}</strong><small>${document ? `Uploaded version ${document.version}` : 'Upload the received PDF, JPG, or PNG.'}</small>${document ? statusBadge(submitted ? 'Submitted' : 'Uploaded') + documentActions(item, document) : statusBadge('Pending')}</span>
-    ${canUpload ? `<span class="file-action">${document ? 'Replace received document' : 'Upload received document'}${uploadControls(encodeURIComponent('Received Document'), item.id)}${document ? `<button class="primary complete-case" onclick="submitReceivedDocument('${item.id}',this)">Submit</button>` : ''}</span>` : ''}</div></section>`;
+    ${canUpload ? `<span class="file-action">${document ? 'Replace received document' : 'Upload received document'}${uploadControls(encodeURIComponent('Received Document'), item.id)}${document ? `<button class="primary complete-case" onclick="submitReceivedDocument('${item.id}',this)">Complete application</button>` : ''}</span>` : ''}</div></section>`;
 }
 
 function cashCasePanel(item) {
@@ -1769,7 +2002,7 @@ function cashReceiptHTML(p) {
 function rejectCashReceipt(event) {event.preventDefault();return paymentAction('reject',{notes:event.target.elements.notes.value});}
 const isQuoteService=item=>['passport','pf-assistance','ration-card'].includes(item.service?.slug) || ['Passport','PF Working (Provident Fund)','Ration Card'].includes(item.service?.name);
 function renderQuotes() {
-  const rows=cases.filter(item=>isQuoteService(item) && item.quote && !isPaymentConfirmed(item) && !['Cancelled','Deleted'].includes(item.status));
+  const rows=cases.filter(item=>isQuoteService(item) && item.quote && !canProcessCase(item) && !['Cancelled','Deleted'].includes(item.status));
   return `${pageHead(navLabels.quotes,me.role==='sales' ? 'Track document review and open the payment request after back office confirms the request price.' : 'Review Passport, PF Working and Ration Card documents, then send the final price to sales.')}<div class="table-shell">${rows.length ? caseTable(rows) : empty('No requests awaiting review or quoted payment.')}</div>`;
 }
 function intakeRecoveryPanel(item) {
@@ -1913,25 +2146,47 @@ function caseDiscountForm(item) {
 async function saveCaseDiscount(event,caseId) {
   event.preventDefault();const form=event.target;if(!form.reportValidity()) return;
   const button=form.querySelector('button');button.disabled=true;
-  try {await api(`/api/cases/${caseId}/discount`,{method:'POST',body:{discount:Math.round(Number(form.elements.discount.value)*100)}});await openCase(caseId);void refreshCaseUpdates();toast('Discount applied. Payment amount updated.');}
+  try {await api(`/api/cases/${caseId}/discount`,{method:'POST',body:{discount:Math.round(Number(form.elements.discount.value)*100)}});closeDrawer();await openCase(caseId);void refreshCaseUpdates();toast('Discount applied. Payment amount updated.');}
   catch(error) {toast(error.message);} finally {button.disabled=false;}
 }
+const canApprovePendingCase = item => me?.role==='admin' && !item.adminPaymentApproval && !isPaymentSettled(item) && !['Cancelled','Rejected','Closed','Delivered','Deleted'].includes(item.status) && (!item.quote || !!item.quote.amount);
+async function openCaseApproval(caseId) {
+  if(me?.role!=='admin' || drawerBusy) return;
+  closeDrawer();await openCase(caseId);
+  const form=document.querySelector('#adminPaymentApproval');
+  form?.scrollIntoView({block:'center',behavior:'smooth'});form?.elements.reason.focus({preventScroll:true});
+}
+function adminApprovalPanel(item) {
+  if(hasPendingApproval(item)) return '<aside class="correction-notice"><strong>Admin Approved Payment Pending</strong><p>Processing approved by admin. Payment is still pending.</p></aside>';
+  if(!canApprovePendingCase(item)) return '';
+  return `<form id="adminPaymentApproval" class="detail-section admin-approval-form" onsubmit="approvePendingCase(event,'${item.id}')"><h3>Approve case with payment pending</h3><p>Allow processing while payment remains pending.</p><label>Approval reason<textarea name="reason" required maxlength="1000" rows="3"></textarea></label><div class="admin-approval-actions"><button class="primary">Approve Case</button></div></form>`;
+}
+async function approvePendingCase(event,caseId) {
+  event.preventDefault();const form=event.target;if(!form.reportValidity()) return;
+  const button=form.querySelector('button');button.disabled=true;
+  try {await api(`/api/cases/${caseId}/payment-exception`,{method:'POST',body:{reason:form.elements.reason.value}});closeDrawer();await openCase(caseId);await refreshCaseUpdates();toast('Case approved. Payment remains pending.');}
+  catch(error) {toast(error.message);} finally {button.disabled=false;}
+}
+Object.assign(window,{approvePendingCase,openCaseApproval});
 function caseDetail(item, documents, notes) {
   const intakeDetails = Object.entries(item.details || {}).filter(([, value]) => value).map(([label, value]) => `<div><span>${h(label)}</span><strong${label === 'Password' ? ' class="pf-password-value"' : ''}>${h(value)}</strong>${label === 'Password' && (me.role === 'admin' || (me.role === 'backoffice' && item.backoffice?.id === me.id)) ? `<button type="button" class="quiet" onclick="togglePFPassword('${item.id}',this)">Show password</button>` : ''}</div>`).join('');
   const priced = item.amounts.total > 0;
   return `<div class="drawer-head"><div><p class="eyebrow">${h(item.ref)}</p><h2 data-language-preserve>${h(item.customer.name)}</h2><p>${h(item.service.name)} · ${h(item.variant.name)}</p></div><div class="intake-header-actions">${languageToggle()}<button class="quiet" onclick="closeDrawer()">Close</button></div></div>
     ${item.syntheticTest ? '<aside class="correction-notice"><strong>Synthetic acceptance test</strong><p>No real money has been received. Do not pay or submit this test case to a government portal.</p></aside>' : ''}
-    <div class="case-summary"><div><span>Status</span>${statusBadge(item.status)}</div><div><span>Payment</span>${statusBadge(item.payment_state)}</div><div><span>${priced ? 'Total' : 'Price'}</span><strong>${priced ? money(item.amounts.total) : 'To be confirmed'}</strong></div><div><span>Owner</span><strong data-language-preserve>${h(item.backoffice?.name || 'Unassigned')}</strong></div></div>
+    <div class="case-summary"><div><span>Status</span>${statusBadge(item.status)}</div><div><span>Payment</span>${statusBadge(item.payment_state)}</div><div><span>${priced ? 'Total' : 'Price'}</span><strong>${priced ? money(item.amounts.total) : 'To be confirmed'}</strong></div><div><span>${me?.role==='sales'?'Working Person':'Owner'}</span><strong data-language-preserve>${h(item.backoffice?.name || 'Unassigned')}</strong></div></div>
+    ${serviceTimeline(item.service)}
+    ${adminApprovalPanel(item)}
     ${intakeDetails ? `<section class="detail-section"><div class="panel-title"><div><h3>Application details</h3><p>Information collected for this service request.</p></div></div><div class="review">${intakeDetails}</div></section>` : ''}
-    ${item.status === 'Correction Required' ? `<section class="correction-notice"><strong>Returned to sales for correction</strong><p>${h(notes.filter(note => note.new_status === 'Correction Required').at(-1)?.note || 'Review the case timeline and update the requested documents.')}</p></section>` : ''}
-    ${item.quote?.amount ? `<section class="detail-section"><h3><span>Back-office quote</span>: ${money(item.quote.amount)}</h3>${['sales','admin'].includes(me.role) ? `<a href="/?pay=${encodeURIComponent(item.id)}">Open payment link</a>` : ''}</section>` : ''}
+    ${item.status === 'Correction Required' ? `<section class="correction-notice"><strong>Documents Pending - returned to sales for correction</strong><p>${h(notes.filter(note => note.new_status === 'Correction Required').at(-1)?.note || 'Review the case timeline and update the requested documents.')}</p></section>` : ''}
+    ${item.status === 'Rejected' ? `<section class="correction-notice"><strong>Application Rejected</strong><p>${h(notes.filter(note=>note.new_status==='Rejected').at(-1)?.note || 'Review the rejection reason in the case timeline.')}</p></section>` : ''}
+    ${item.quote?.amount ? `<section class="detail-section"><h3><span>Back-office quote</span>: ${money(item.quote.amount)}</h3>${['sales','admin'].includes(me.role) && !isPaymentSettled(item) ? `<a href="/?pay=${encodeURIComponent(item.id)}">Open payment link</a>` : ''}</section>` : ''}
     ${caseDiscountForm(item)}
     ${casePaymentCard(item)}
     ${item.quote ? backofficeRemarks(item,notes) : ''}
     <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div><div class="document-section-actions">${canRequestReupload(item)?'<button type="button" class="request-reupload-button" onclick="showCaseReuploadRequest()">Request reupload</button>':''}${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div></div>${caseReuploadForm(item)}<div class="upload-list">${documentChecklist(item, documents)}</div>${reuploadSubmissionPanel(item)}</section>
     ${receivedDocumentPanel(item, documents)}
     <section class="detail-section"><div class="panel-title"><div><h3>Timeline</h3><p>Recorded status changes and internal notes.</p></div></div><div class="timeline">${notes.length ? notes.map(note => `<div><i></i><span><strong>${h(statusLabel(note.new_status))}</strong><p>${h(note.note || 'Status updated')}</p><small>${h(note.actor)} · ${dateTime(note.created_at)}</small></span></div>`).join('') : empty('No updates yet.')}</div></section>
-    ${me.role === 'backoffice' && isActiveCase(item) && !item.backoffice && ['Ready for Assignment','Assigned','Document Review','Ready to Submit','Submitted to Official Portal','Under Government Review','Customer Action Required','Document Received','Correction Required','Approved'].includes(item.status) ? `<div class="sticky-actions"><button class="primary" onclick="claim('${item.id}')">Claim case</button></div>` : ''}
+    ${me.role === 'backoffice' && isActiveCase(item) && !item.backoffice && ['Admin Approved Payment Pending','Ready for Assignment','Assigned','Document Review','Ready to Submit','Submitted to Official Portal','Under Government Review','Customer Action Required','Document Received','Correction Required','Approved','Application Resubmitted','Rejected'].includes(item.status) ? `<div class="sticky-actions"><button class="primary" onclick="claim('${item.id}')">Accept Case</button></div>` : ''}
     ${['backoffice','admin'].includes(me.role) ? progressControls(item) : ''}`;
 }
 
@@ -1955,17 +2210,26 @@ async function togglePFPassword(caseId, button) {
 Object.assign(window, { togglePFPassword });
 
 function progressControls(item) {
-  if (!isPaymentConfirmed(item)) return '';
+  if (!canProcessCase(item)) return '';
+  if (me.role==='backoffice' && item.backoffice?.id!==me.id) return '';
   const next = {
-    'Draft':['Awaiting Documents','Awaiting Payment','Ready for Assignment','Cancelled'], 'Awaiting Documents':['Awaiting Payment','Ready for Assignment','Correction Required','Cancelled'],
-    'Awaiting Payment':['Ready for Assignment','Cancelled'], 'Ready for Assignment':['Assigned','Cancelled'], 'Assigned':['Document Review','Ready to Submit','Correction Required','Customer Action Required','Cancelled'],
-    'Document Review':['Ready to Submit','Correction Required','Customer Action Required','Cancelled'], 'Correction Required':['Awaiting Documents','Document Review','Ready to Submit','Cancelled'], 'Ready to Submit':['Submitted to Official Portal','Correction Required','Customer Action Required','Cancelled'],
-    'Submitted to Official Portal':['Under Government Review','Customer Action Required','Document Received','Rejected','Cancelled'], 'Under Government Review':['Customer Action Required','Document Received','Rejected','Cancelled'],
-    'Customer Action Required':['Document Review','Ready to Submit','Under Government Review','Correction Required','Cancelled'], 'Document Received':['Correction Required','Cancelled'], 'Approved':['Document Received','Delivered','Closed'], 'Delivered':['Closed','Customer Action Required'], 'Rejected':['Correction Required','Closed']
+    'Admin Approved Payment Pending':['Document Review','Ready to Submit','Correction Required'],
+    'Assigned':['Ready to Submit','Correction Required'],
+    'Document Review':['Ready to Submit','Correction Required'],
+    'Correction Required':['Ready to Submit','Correction Required'],
+    'Awaiting Documents':['Ready to Submit','Correction Required'],
+    'Ready to Submit':['Submitted to Official Portal','Application Resubmitted','Correction Required'],
+    'Submitted to Official Portal':['Document Received','Rejected','Correction Required'],
+    'Under Government Review':['Document Received','Rejected','Correction Required'],
+    'Application Resubmitted':['Document Received','Rejected','Correction Required'],
+    'Customer Action Required':['Ready to Submit','Correction Required'],
+    'Document Received':['Correction Required','Rejected'],
+    'Approved':['Document Received','Correction Required'],
+    'Rejected':['Application Resubmitted','Correction Required']
   }[item.status] || [];
-  const allowed = next.filter(status => (item.document_state === 'complete' || ['Awaiting Documents','Correction Required','Customer Action Required','Rejected','Cancelled'].includes(status)) && (!['Ready for Assignment','Assigned'].includes(status) || item.payment_state === 'paid'));
+  const allowed = next.filter(status => (item.document_state === 'complete' || ['Awaiting Documents','Correction Required','Customer Action Required','Rejected','Cancelled'].includes(status)) && (!['Ready for Assignment','Assigned'].includes(status) || canProcessCase(item)));
   if (!allowed.length) return '';
-  return `<section class="workflow-box"><div><p class="eyebrow">Workflow action</p><h3>Move case forward</h3>${item.document_state !== 'complete' ? '<p>Required documents are missing. Upload them to unlock progress.</p>' : ''}</div><select id="nextStatus">${allowed.map(status => `<option value="${h(status)}">${h(statusLabel(status))}</option>`).join('')}</select><textarea id="note" placeholder="Progress note or correction instructions"></textarea><div class="workflow-actions"><button class="primary" onclick="progress('${item.id}')">Update status</button>${allowed.includes('Correction Required') ? `<button class="return-to-sales" onclick="returnCaseToSales('${item.id}')">Return to sales</button>` : ''}</div></section>`;
+  return `<section class="workflow-box"><div><p class="eyebrow">Workflow action</p><h3>Move case forward</h3>${item.document_state !== 'complete' ? '<p>Required documents are missing. Upload them to unlock progress.</p>' : ''}</div><select id="nextStatus">${allowed.map(status => `<option value="${h(status)}">${h(status==='Document Received'?'Application Complete - upload document':statusLabel(status))}</option>`).join('')}</select><textarea id="note" placeholder="Reason required for Documents Pending or Application Rejected"></textarea><div class="workflow-actions"><button class="primary" onclick="progress('${item.id}')">Update status</button>${allowed.includes('Correction Required') ? `<button class="return-to-sales" onclick="returnCaseToSales('${item.id}')">Return to sales</button>` : ''}</div></section>`;
 }
 
 async function downloadCaseFiles(caseId, button) {
@@ -2040,15 +2304,28 @@ async function uploadCaseDocument(caseId, encodedType, input) {
   if (badge) { badge.textContent = 'Uploading...'; badge.className = 'badge neutral'; }
   try {
     for (const file of files) await uploadDocument(caseId, docType, { fileName:file.name, mimeType:file.type, size:file.size, ...(cloudUploads ? {file} : {content:await fileAsBase64(file)}) });
-    const result=await api(`/api/cases/${caseId}`);
-    setDrawerBusy();renderSavedCase(result);
-    if (!result.case.reupload?.pending) toast(`${docType} uploaded`);
+    let result=await api(`/api/cases/${caseId}`);
+    if (['sales','admin'].includes(me.role) && result.case.reupload?.pending && result.case.reupload.canSubmit) {
+      // Save every file in this selection before forwarding the correction cycle.
+      try {
+        result=await api(`/api/cases/${caseId}/submit-reupload`,{method:'POST',body:{}});
+      } catch(error) {
+        setDrawerBusy();renderSavedCase(result);
+        toast(`Documents saved. Automatic forwarding failed: ${error.message}. Use Retry forwarding.`);
+        return;
+      }
+      setDrawerBusy();renderSavedCase(result);
+      toast('Corrected documents forwarded to back office. No additional payment required.');
+    } else {
+      setDrawerBusy();renderSavedCase(result);
+      if (!result.case.reupload?.pending) toast(`${docType} uploaded`);
+    }
   } catch (error) { input.value = ''; if (badge) { badge.textContent = 'Upload failed'; badge.className = 'badge danger'; } toast(error.message); }
   finally { setDrawerBusy(); }
 }
 
-async function claim(caseId) { try { await api(`/api/cases/${caseId}/claim`, { method:'POST' }); closeDrawer(); await load(); openCase(caseId); toast('Case assigned to you'); } catch (error) { toast(error.message); } }
-async function submitReceivedDocument(caseId, button) { try { button.disabled = true; button.textContent = 'Submitting...'; await api(`/api/cases/${caseId}/submit-received-document`, { method:'POST' }); closeDrawer(); await load(); setView('completed'); toast('Document submitted. Request closed'); } catch (error) { button.disabled = false; button.textContent = 'Submit'; toast(error.message); } }
+async function claim(caseId) { try { await api(`/api/cases/${caseId}/claim`, { method:'POST' }); closeDrawer(); await load(); openCase(caseId); toast('Case accepted. Your name is now visible to sales.'); } catch (error) { toast(error.message); } }
+async function submitReceivedDocument(caseId, button) { try { button.disabled = true; button.textContent = 'Submitting...'; await api(`/api/cases/${caseId}/submit-received-document`, { method:'POST' }); closeDrawer(); await load(); setView('completed'); toast('Application complete. The document is available to sales.'); } catch (error) { button.disabled = false; button.textContent = 'Submit'; toast(error.message); } }
 function renderSavedCase(result) {
   if (!result.case.reupload && selectedCase?.case.id===result.case.id && !selectedCase.case.reupload?.pending && selectedCase.case.reupload) result.case={...result.case,reupload:selectedCase.case.reupload};
   cases=cases.map(item=>item.id===result.case.id?result.case:item);
@@ -2073,6 +2350,7 @@ async function returnCaseToSales(caseId) {
 async function progress(caseId) {
   if(drawerBusy) return;
   const body={status:document.querySelector('#nextStatus').value,note:document.querySelector('#note').value,visibility:'sales'};
+  if (['Correction Required','Awaiting Documents','Customer Action Required','Rejected'].includes(body.status) && !body.note.trim()) {document.querySelector('#note').focus();return toast('Enter a reason for pending documents or application rejection.');}
   setDrawerBusy('Updating status...');
   let result;
   try {result=await api(`/api/cases/${caseId}/progress`,{method:'POST',body});}
@@ -2107,7 +2385,7 @@ async function setView(next) {
   }
 }
 
-Object.assign(window, { startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, previewDraftDocument, previewDocument, closeDocumentPreview, changePreviewPage, zoomDocumentPreview, uploadCaseDocument, showReuploadRequest, submitReupload, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleSheets, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
+Object.assign(window, { prepareDocumentSelection, startCase, closeDrawer, saveStep1, saveStep2, saveStep3, pickDoc, pickDocs, removeDraftPage, removeDraftDocument, removeSavedDocument, previewDraftDocument, previewDocument, closeDocumentPreview, changePreviewPage, zoomDocumentPreview, uploadCaseDocument, showReuploadRequest, submitReupload, submitCase, openCase, pay, claim, submitReceivedDocument, progress, returnCaseToSales, connectGoogleSheets, activateGoogleSheets, setAnalyticsPeriod, logout, filterCases, setView });
 Object.assign(window, { downloadCaseFiles, wizardBack, removeNameNumbers, rememberNoticeState, rememberRecentUpdates, setIntakeLanguage });
 Object.assign(window,{previewAnnouncementPicture,clearAnnouncementPicture,publishAnnouncement,removeAnnouncement});
 Object.assign(window, { toggleEmployeeDates, applyEmployeePeriod, createEmployee });
@@ -2397,7 +2675,7 @@ function checkoutHTML(p) {
   const inactive=['EXPIRED','CANCELLED','FAILED'].includes(p.status) || receiverChanged;
   const glyph=(name)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{close:'<path d="m6 6 12 12M18 6 6 18"/>',arrow:'<path d="m9 5 7 7-7 7"/>',download:'<path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/>',check:'<path d="m5 12 4 4L19 6"/>',qr:'<path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h3v3h-3zM21 15v6h-6"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'}[name]}</svg>`;
   const primary=editable && !['PAID','REFUNDED'].includes(p.status);
-  return `<header class="checkout-header"><div class="checkout-brand"><span class="checkout-brand-mark">SO</span><div><h2>${h(p.payee_name)}</h2><p>UPI checkout</p></div></div><button class="checkout-close" onclick="closeDrawer()" aria-label="Close">${glyph('close')}</button></header>
+  return `<header class="checkout-header"><div class="checkout-brand">${brandMark()}<div><h2>${h(p.payee_name)}</h2><p>UPI checkout</p></div></div><button class="checkout-close" onclick="closeDrawer()" aria-label="Close">${glyph('close')}</button></header>
     <div class="checkout-body"><aside class="checkout-summary"><span class="checkout-kicker">TOTAL PAYABLE</span><div class="checkout-amount">${money(payableAmount)}</div>${p.matchingAdjustment ? `<dl class="checkout-price-breakdown"><div><dt>Service total</dt><dd>${money(p.amount)}</dd></div><div><dt>Payment matching amount</dt><dd>${money(p.matchingAdjustment)}</dd></div></dl>` : ''}<span class="checkout-status checkout-status-${p.status.toLowerCase()}"><i></i>${h(labels[p.status] || p.status)}</span><div class="checkout-service"><span>Services</span><strong>${h(p.service_name)}</strong></div><div class="checkout-customer"><span>Customer</span><strong>${h(p.customer_name)}</strong></div>${p.batch ? `<section class="summary-box checkout-batch-items"><strong>Included work orders</strong>${p.items.map(item=>`<p>${h(item.customer_name)} - ${h(item.service_name)} - ${h(item.ref)} <strong>${money(item.amount)}</strong></p>`).join('')}</section>` : ''}<details class="checkout-order"><summary>Order details</summary><dl><dt class="checkout-mobile-customer">Customer</dt><dd class="checkout-mobile-customer">${h(p.customer_name)}</dd><dt>Order ID</dt><dd class="selectable">${h(p.gateway_order_id)}</dd><dt>UPI ID</dt><dd class="selectable">${h(p.upi_id)}</dd><dt>Checkout expiry</dt><dd>${dateTime(p.expires_at)}</dd></dl>${active ? '<button class="checkout-text-button" onclick="copyPayment(\'link\')">Copy payment link</button>' : ''}</details></aside>
     <main class="checkout-main">${cashCheckoutOptions(p)}
       ${!p.receiverReady ? '<div class="checkout-notice" role="alert"><strong>Checkout is not enabled yet</strong><p>An administrator can enable the receiving account in Payments settings.</p></div>' : ''}

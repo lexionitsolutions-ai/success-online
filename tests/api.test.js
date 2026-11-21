@@ -353,7 +353,7 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.match(inline.headers.get('content-disposition'),/^inline;/);
     assert.deepEqual(Buffer.from(await inline.arrayBuffer()),pdf);
     assert.equal((await request(preview.data.url,{cookie:sales})).status,200);
-    assert.equal((await request(previewPath,{cookie:admin})).status,403,'Admin cannot preview unpaid cases');
+    assert.equal((await request(previewPath,{cookie:admin})).status,200,'Admin can inspect pending sales cases');
     const download = await fetch(origin + firstDoc.download_url, { headers:{cookie:sales} });
     assert.equal(download.status, 200); assert.deepEqual(Buffer.from(await download.arrayBuffer()), pdf);
     assert.equal((await request(firstDoc.download_url, { cookie:otherSales })).status, 403);
@@ -377,6 +377,11 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     assert.equal(bytes.readUInt16LE(bytes.length - 12), 5);
 
     assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 200);
+    const acceptedForSales=(await request(path,{cookie:sales})).data;
+    assert.ok(acceptedForSales.case.backoffice.name);
+    assert.equal(acceptedForSales.case.status,'Assigned');
+    assert.match(acceptedForSales.notes.at(-1).note,/Case accepted by/);
+    const paymentBeforeCorrection=acceptedForSales.case.payment.id;
     assert.equal((await request(path + '/claim', { cookie:office, method:'POST' })).status, 409);
     assert.equal((await request(path+'/progress',{cookie:office,body:{status:'Correction Required',note:'   '}})).status,400);
     const correction = await request(path+'/progress',{cookie:office,body:{status:'Correction Required',note:'Replace the blurry Ration Card photo'}});
@@ -410,6 +415,8 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const submitted=await request(path+'/submit-reupload',{cookie:sales,body:{}});
     assert.equal(submitted.status,200);
     assert.equal(submitted.data.case.status,'Document Review');
+    assert.equal(submitted.data.case.payment.id,paymentBeforeCorrection,'Reuploads reuse the existing payment');
+    assert.equal(submitted.data.case.payment_state,'paid');
     assert.equal(submitted.data.case.reupload.pending,false);
     assert.equal(submitted.data.case.reupload.submittedDocumentIds.length,2);
     const officeReview=(await request(path,{cookie:office})).data;
@@ -422,7 +429,18 @@ test('real API: access, document gates, uploads, bundle and completion', async (
     const secondSubmission=await request(path+'/submit-reupload',{cookie:sales,body:{}});
     assert.equal(secondSubmission.status,200);
     assert.equal(secondSubmission.data.case.reupload.submittedDocumentIds.length,1);
-    for (const status of ['Ready to Submit','Submitted to Official Portal','Document Received']) assert.equal((await request(path + '/progress', { cookie:office, body:{status} })).status, 200, status);
+    for (const status of ['Ready to Submit','Submitted to Official Portal']) assert.equal((await request(path + '/progress', { cookie:office, body:{status} })).status, 200, status);
+    assert.equal((await request(path+'/progress',{cookie:office,body:{status:'Rejected',note:'   '}})).status,400);
+    assert.equal((await request(path+'/progress',{cookie:office,body:{status:'Rejected',note:'Authority rejected the application due to incorrect address',visibility:'internal'}})).status,200);
+    const rejectedSales=(await request(path,{cookie:sales})).data;
+    assert.equal(rejectedSales.case.status,'Rejected');
+    assert.match(rejectedSales.notes.at(-1).note,/incorrect address/);
+    assert.equal((await request(path+'/progress',{cookie:sales,body:{status:'Application Resubmitted'}})).status,403);
+    assert.equal((await request(path+'/progress',{cookie:office,body:{status:'Closed'}})).status,400);
+    assert.equal((await request(path+'/progress',{cookie:office,body:{status:'Application Resubmitted',note:'Address corrected and application resubmitted'}})).status,200);
+    assert.equal((await request(path,{cookie:sales})).data.case.status,'Application Resubmitted');
+    assert.ok((await request('/api/notifications',{cookie:sales})).data.notifications.some(n=>n.caseId===caseId && n.status==='Application Resubmitted'));
+    assert.equal((await request(path+'/progress',{cookie:office,body:{status:'Document Received'}})).status,200);
     assert.equal((await request(path + '/submit-received-document', { cookie:office, method:'POST' })).status, 400);
     assert.equal((await request(path + '/documents', { cookie:office, body:upload('Received Document') })).status, 201);
     item = (await request(path, { cookie:office })).data;
@@ -499,7 +517,7 @@ test('Sheets reporting and private local uploads remain independent of Google au
     const countStoredCases=()=>{const db=new DatabaseSync(join(root,'test.sqlite'));try{return db.prepare('SELECT COUNT(*) n FROM cases').get().n;}finally{db.close();}};
     const pdf = Buffer.from('%PDF-1.4\nmock-storage-file\n%%EOF');
     await api(`/api/cases/${c.id}/documents`, {docType:'Aadhaar Card',fileName:'test.pdf',mimeType:'application/pdf',size:pdf.length,content:pdf.toString('base64')});
-    assert.equal((await fetch(origin + `/api/cases/${c.id}`,{headers:{cookie}})).status,403,'Admin waits for confirmed payment');
+    assert.equal((await fetch(origin + `/api/cases/${c.id}`,{headers:{cookie}})).status,200,'Admin can review pending sales cases');
     const repairedWorkbook=JSON.parse(readFileSync(join(root,'sheets.json'),'utf8'));
     assert.ok(Object.values(repairedWorkbook['All Workings']||{}).some(row=>row[0]===c.ref),'Missing operations tab heals automatically before manual activation');
     unlinkSync(join(root,'revoked'));

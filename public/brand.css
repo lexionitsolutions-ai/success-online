@@ -1,0 +1,16 @@
+/* The supplied Success Online identity, recolored to the workspace palette. */
+.brand-logo-mark{display:inline-flex;align-items:center;justify-content:center;flex:0 0 46px;width:46px;height:46px}
+.brand-logo-mark img{display:block;max-width:100%;height:auto;object-fit:contain}
+.side-brand{gap:10px}
+.side-brand>div{min-width:0}
+.side-brand>div>span{font-size:9px;letter-spacing:.015em;white-space:nowrap}
+.auth-intro .login-brand{display:flex;justify-content:flex-start}
+.login-logo-card{display:flex;align-items:center;justify-content:center;width:188px;padding:12px 16px;background:#f6fcf9;border:1px solid #ffffff75;border-radius:20px;box-shadow:0 8px 28px #0000000a}
+.login-logo-card img{display:block;width:156px;height:156px;object-fit:contain}
+.auth-intro .auth-story{margin-top:34px}
+.auth-intro .auth-art{display:none}
+.auth-intro .auth-intro-foot{margin-top:auto;padding-top:30px}
+.checkout-brand .brand-logo-mark{flex-basis:44px;width:44px;height:44px}
+@media(max-width:900px){.mobile-brand .brand-logo-mark{flex-basis:34px;width:34px;height:34px}}
+@media(max-width:700px){.login-logo-card{width:142px;padding:9px 13px;border-radius:15px}.login-logo-card img{width:114px;height:114px}.auth-intro .auth-story{margin-top:22px}}
+@media(max-width:350px){.mobile-brand .brand-logo-mark{flex-basis:28px;width:28px;height:28px}}

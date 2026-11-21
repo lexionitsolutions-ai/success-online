@@ -21,6 +21,27 @@ function client() {
   return { context, run: source => vm.runInContext(source, context) };
 }
 
+test('every service shows the business-supplied average timeline and its qualifiers',()=>{
+  const {context,run}=client();
+  context.timelineServices=serviceCatalog;
+  const expected={'caste-validity':'30–45 days','ews-certificate':'30–45 days','food-license':'Around 45 days','pf-assistance':'5–10 days','income-certificate':'10–15 days','domicile-certificate':'10–15 days','non-creamy-layer':'30–45 days',passport:'22–30 days','voting-card':'2–3 months',pan:'22–30 days','ration-card':'2–3 months','caste-certificate':'30–45 days',gazette:'15–20 days','police-clearance':'15–20 days','shop-act':'4–5 days','udyam-aadhaar':'4–5 days'};
+  assert.equal(serviceCatalog.length,Object.keys(expected).length);
+  for(const service of serviceCatalog) {
+    context.timelineService=service;
+    assert.equal(run('serviceTimelines[timelineService.slug].time'),expected[service.slug]);
+    const html=run('serviceTimeline(timelineService)');
+    assert.match(html,/class="service-timeline"/);
+    assert.match(html,/Average processing time/);
+    assert.ok(html.includes(expected[service.slug]));
+  }
+  assert.match(run("serviceTimeline({slug:'passport',name:'Passport'})"),/After the appointment/);
+  assert.match(run("serviceTimeline({slug:'food-license',name:'Food License'})"),/Depending on the business/);
+  assert.match(run("serviceTimeline({slug:'police-clearance',name:'Police Clearance'})"),/Depending on the police station/);
+  run("intakeLanguage='mr'");
+  assert.equal(run("intakeTranslate('30–45 days',intakeTranslationMap())"),'३०–४५ दिवस');
+  assert.equal(run("serviceTimeline({slug:'unknown'})"),'');
+});
+
 test('SMS payment evidence remains provisional and all dynamic reference text is escaped',()=>{
   const {run}=client();
   const pending=run("smsPaymentAlert({smsEvidence:null})");
@@ -354,7 +375,7 @@ test('pending and active cases follow verified payment, including correction and
   assert.equal(run("isPendingCase({status:'Correction Required'})"),true);
   assert.equal(run("isPendingCase({status:'Assigned',payment_state:'paid',document_state:'complete'})"),false);
   assert.equal(run("isPendingCase({status:'Ready for Assignment',payment:{status:'AWAITING_VERIFICATION'}})"),true);
-  assert.equal(run("isActiveCase({status:'Correction Required',payment_state:'paid',document_state:'complete'})"),true);
+  assert.equal(run("isActiveCase({status:'Correction Required',payment_state:'paid',document_state:'complete'})"),false);
   assert.equal(run("isActiveCase({status:'Awaiting Documents',payment_state:'paid',document_state:'missing'})"),false);
   assert.equal(run("isActiveCase({status:'Submitted to Official Portal',payment_state:'unpaid'})"),false);
   assert.equal(run("isActiveCase({status:'Ready for Assignment',payment:{status:'paid',gateway:'demo'}})"),false);
@@ -363,6 +384,60 @@ test('pending and active cases follow verified payment, including correction and
   assert.equal(run("hasSectionUpdates('cases')"),false);
   run("cases[0].status='Closed'");
   assert.equal(run("hasSectionUpdates('completed')"),true);
+});
+
+test('sales document and payment queues include corrections, quoted payments and completed unpaid balances',()=>{
+  const {run}=client();
+  run(`me={id:'sales',role:'sales'};cases=[
+    {id:'correction',status:'Correction Required',document_state:'complete',payment_state:'paid'},
+    {id:'both',status:'Awaiting Documents',document_state:'missing',payment_state:'unpaid'},
+    {id:'quoted',status:'Awaiting Quoted Payment',document_state:'complete',payment_state:'unpaid',quote:{submittedAt:'2026-11-21',amount:10000}},
+    {id:'balance',status:'Closed',document_state:'complete',cashPayment:{releaseAllowed:false,processingAllowed:true}},
+    {id:'paid',status:'Assigned',document_state:'complete',payment_state:'paid'},
+    {id:'cancelled',status:'Cancelled',payment_state:'unpaid'}
+  ];caseNotifications=[{caseId:'both'},{caseId:'correction'}];`);
+  run("view='pendingDocuments'");
+  assert.equal(run('cases.filter(pendingCaseVisible).map(item=>item.id).join(",")'),'correction,both');
+  assert.equal(run("hasSectionUpdates('pendingDocuments')"),true);
+  assert.equal(run("hasSectionUpdates('pendingPayment')"),true);
+  run("view='pendingPayment'");
+  assert.equal(run('cases.filter(pendingCaseVisible).map(item=>item.id).join(",")'),'both,quoted,balance');
+  assert.equal(run('cases.filter(isActiveCase).map(item=>item.id).join(",")'),'paid');
+  run("me.role='admin';view='pending'");
+  assert.equal(run('pendingCaseVisible(cases[2])'),true);
+  const controls=run("uploadControls('Photo')");
+  assert.match(controls,/capture="environment"/);
+  assert.match(controls,/prepareDocumentSelection/);
+});
+
+test('application statuses use the requested labels and keep rejected cases visible',()=>{
+  const {run}=client();
+  for(const [status,label] of Object.entries({'Assigned':'Case Accepted','Ready to Submit':'Documents OK','Correction Required':'Documents Pending','Submitted to Official Portal':'Application Submitted','Rejected':'Application Rejected','Application Resubmitted':'Application Resubmitted','Closed':'Application Complete'})) {
+    assert.equal(run(`statusLabel(${JSON.stringify(status)})`),label);
+  }
+  run("me={role:'sales'}");
+  assert.equal(run("isActiveCase({status:'Rejected',payment_state:'paid',document_state:'complete'})"),true);
+  run("me={id:'office',role:'backoffice'};const workflowItem={id:'case',backoffice:{id:'office'},status:'Assigned',payment_state:'paid',document_state:'complete'};");
+  assert.match(run('progressControls(workflowItem)'),/Documents OK/);
+  assert.doesNotMatch(run('progressControls(workflowItem)'),/Customer Action Required/);
+  run("workflowItem.status='Rejected'");
+  assert.match(run('progressControls(workflowItem)'),/Application Resubmitted/);
+});
+
+test('correction uploads forward automatically only when every requested replacement is ready without opening payment',async()=>{
+  for(const ready of [false,true]) {
+    const {run}=client();
+    run(`me={role:'sales'};cloudUploads=true;const uploadCalls=[];const savedResults=[];
+      uploadDocument=async()=>{uploadCalls.push('upload');};
+      api=async path=>{uploadCalls.push(path);return path.endsWith('submit-reupload')?{case:{status:'Document Review',reupload:{pending:false}}}:{case:{status:'Correction Required',reupload:{pending:true,canSubmit:${ready}}}};};
+      renderSavedCase=result=>savedResults.push(result);
+      pay=()=>{throw Error('Reuploads must never open checkout');};setDrawerBusy=message=>{drawerBusy=!!message;};
+    `);
+    await run("uploadCaseDocument('case','Photo',{files:[{name:'page.png',type:'image/png',size:2},{name:'page2.png',type:'image/png',size:2}]})");
+    assert.equal(run("uploadCalls.join(',')"),`upload,upload,/api/cases/case${ready?',/api/cases/case/submit-reupload':''}`);
+    assert.equal(run('savedResults[0].case.status'),ready?'Document Review':'Correction Required');
+    assert.equal(run('drawerBusy'),false);
+  }
 });
 
 test('opening one case acknowledges only its displayed notifications',async()=>{
@@ -987,6 +1062,39 @@ test('main branch discount controls show the reduced payable total and stay hidd
   assert.match(run('caseTable(cases)'),/<th>Owner<\/th><th>Salesperson username<\/th>/);
   assert.match(run('caseTable(cases)'),/data-language-preserve>admin01/);
   assert.match(run('caseTable(cases)'),/onclick="deleteSalesCase\('c',this\)"\s+aria-label/);
+});
+
+test('admin payment approval exposes processing without presenting an unpaid case as paid',()=>{
+  const {run}=client();
+  run("const pendingApprovalCase={id:'case',status:'Awaiting Payment',payment_state:'PENDING',document_state:'complete'};");
+  for(const role of ['sales','backoffice']) {
+    run(`me={role:'${role}'}`);
+    assert.equal(run('adminApprovalPanel(pendingApprovalCase)'),'');
+  }
+  run("me={role:'admin'}");
+  assert.match(run('adminApprovalPanel(pendingApprovalCase)'),/approvePendingCase/);
+  run("pendingApprovalCase.adminPaymentApproval={by:'admin'};pendingApprovalCase.status='Admin Approved Payment Pending'");
+  assert.equal(run('isActiveCase(pendingApprovalCase)'),true);
+  assert.equal(run('isPaymentConfirmed(pendingApprovalCase)'),false);
+  assert.match(run('adminApprovalPanel(pendingApprovalCase)'),/Admin Approved Payment Pending/);
+  assert.match(run('progressControls(pendingApprovalCase)'),/Document Review/);
+  assert.equal(run("statusClass('Admin Approved Payment Pending')"),'warning');
+  run("pendingApprovalCase.payment_state='paid'");
+  assert.equal(run('adminApprovalPanel(pendingApprovalCase)'),'');
+});
+
+test('admin pending list includes quoted payments and exposes a clear approval action',()=>{
+  const {run}=client();
+  run(`me={id:'admin',role:'admin'};view='pending';services=[];cases=[{id:'quoted-case',ref:'SO-QUOTE',customer:{name:'Quoted Customer',mobile:'9876543210'},service:{name:'Passport'},variant:{name:'Application'},sales:{id:'sales'},status:'Awaiting Quoted Payment',payment_state:'PENDING',document_state:'complete',quote:{submittedAt:'2026-11-20',amount:30000},amounts:{total:30000}}]`);
+  assert.equal(run('navLabels.quotes'),'Case Pricing');
+  assert.match(run('renderPendingCases()'),/SO-QUOTE/);
+  assert.match(run('renderPendingCases()'),/openCaseApproval\('quoted-case'\)/);
+  assert.match(run('renderPendingCases()'),/>Approve Case<\/button>/);
+  run("me.role='sales'");
+  assert.doesNotMatch(run('caseTable(cases)'),/openCaseApproval/);
+  run("me.role='admin';cases[0].adminPaymentApproval={by:'admin'};cases[0].status='Document Review'");
+  assert.match(run('renderPendingCases()'),/Admin Approved Payment Pending/);
+  assert.doesNotMatch(run('renderPendingCases()'),/openCaseApproval/);
 });
 
 

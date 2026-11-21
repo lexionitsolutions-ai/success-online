@@ -4,7 +4,7 @@ import './generate-apps-script.js';
 import './generate-supabase-schema.js';
 import './vendor-pdfjs.js';
 import './vendor-marathi.js';
-const required = ['case-deletion.js','case-discounts.js','service-checklists.js','cash-payments.js','staff-performance.js','intake-uploads.js','pf-credentials.js','server.js','announcements.js','service-catalog.js','reuploads.js','public/index.html','public/app.js','public/intake-rules.js','public/downloads/income-certificate-form.pdf','public/downloads/caste-validity-information-form.pdf','public/downloads/ration-card-abc-dakhla.pdf','public/downloads/police-clearance-form.pdf','public/downloads/talathi-report-form.pdf','public/styles.css','public/mobile.css','public/dashboard.css','public/workspace.css','.env.example','google-apps-script/Code.gs','README.md'];
+const required = ['public/brand.css','public/assets/brand/success-online-logo.png','public/assets/brand/success-online-mark.png','case-deletion.js','case-discounts.js','service-checklists.js','cash-payments.js','staff-performance.js','intake-uploads.js','pf-credentials.js','server.js','announcements.js','service-catalog.js','reuploads.js','public/index.html','public/app.js','public/intake-rules.js','public/downloads/income-certificate-form.pdf','public/downloads/caste-validity-information-form.pdf','public/downloads/ration-card-abc-dakhla.pdf','public/downloads/police-clearance-form.pdf','public/downloads/talathi-report-form.pdf','public/styles.css','public/mobile.css','public/dashboard.css','public/workspace.css','.env.example','google-apps-script/Code.gs','README.md'];
 const missing = required.filter(f => !existsSync(f));
 if (missing.length) {
   console.error('Missing files:', missing.join(', '));
