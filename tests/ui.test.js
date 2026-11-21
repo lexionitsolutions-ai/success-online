@@ -1065,7 +1065,7 @@ test('main branch discount controls show the reduced payable total and stay hidd
   assert.match(run('wizardBody(service,variant)'),/500.00/);
   run('me.discountsAllowed=false');assert.doesNotMatch(run('wizardBody(service,variant)'),/id="reviewDiscount"/);
   run(`me={id:'admin',role:'admin'};cases=[{id:'c',ref:'SO',customer:{name:'Test',mobile:'9876543210'},service:{name:'PAN'},variant:{name:'Application'},sales:{id:'admin',username:'admin01'},payment_state:'unpaid',status:'Draft',amounts:{total:100},deletionAllowed:true}];`);
-  assert.match(run('caseTable(cases)'),/<th>Owner<\/th><th>Salesperson username<\/th>/);
+  assert.match(run('caseTable(cases)'),/<th>Working Person<\/th><th>Salesperson username<\/th>/);
   assert.match(run('caseTable(cases)'),/data-language-preserve>admin01/);
   assert.match(run('caseTable(cases)'),/onclick="deleteSalesCase\('c',this\)"\s+aria-label/);
 });
