@@ -1063,7 +1063,16 @@ test('main branch discount controls show the reduced payable total and stay hidd
   run(`me={id:'branch',role:'sales',discountsAllowed:true};draft={step:4,details:{},customer:{name:'Test',mobile:'9876543210'},docs:{},discount:'100'};const service={name:'PAN',slug:'pan'},variant={amounts:{serviceCharge:60000,officialFee:0,tax:0,total:60000}};`);
   assert.match(run('wizardBody(service,variant)'),/id="reviewDiscount"/);
   assert.match(run('wizardBody(service,variant)'),/500.00/);
-  run('me.discountsAllowed=false');assert.doesNotMatch(run('wizardBody(service,variant)'),/id="reviewDiscount"/);
+  assert.match(run('wizardBody(service,variant)'),/id="reviewDiscount"[\s\S]*id="reviewAdditionalPayment"/);
+  run("draft.additionalPayment='75'");
+  assert.match(run('wizardBody(service,variant)'),/575.00/);
+  run('me.discountsAllowed=false');assert.doesNotMatch(run('wizardBody(service,variant)'),/id="reviewDiscount"|id="reviewAdditionalPayment"/);
+  for(const role of ['admin','backoffice','sales']) {
+    run(`me={id:'other',role:'${role}',discountsAllowed:false}`);
+    assert.equal(run("caseAdditionalPaymentForm({id:'case',sales:{id:'branch'},amounts:{total:60000}})"),'');
+  }
+  run("me={id:'branch',role:'sales',discountsAllowed:true}");
+  assert.match(run("caseAdditionalPaymentForm({id:'case',status:'Closed',sales:{id:'branch'},amounts:{total:60000}})"),/name="additionalPayment"/);
   run(`me={id:'admin',role:'admin'};cases=[{id:'c',ref:'SO',customer:{name:'Test',mobile:'9876543210'},service:{name:'PAN'},variant:{name:'Application'},sales:{id:'admin',username:'admin01'},payment_state:'unpaid',status:'Draft',amounts:{total:100},deletionAllowed:true}];`);
   assert.match(run('caseTable(cases)'),/<th>Working Person<\/th><th>Salesperson username<\/th>/);
   assert.match(run('caseTable(cases)'),/data-language-preserve>admin01/);

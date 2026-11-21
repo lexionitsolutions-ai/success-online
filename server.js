@@ -1,5 +1,5 @@
 import {CHECKLIST_KEY,caseChecklist,checklistOverrides,withChecklist,createChecklistAdmin} from './service-checklists.js';
-import {DISCOUNT_KEY,validateDiscount,discountedAmounts} from './case-discounts.js';
+import {DISCOUNT_KEY,ADDITIONAL_PAYMENT_KEY,validateAdditionalPayment,validateDiscount,discountedAmounts} from './case-discounts.js';
 import {ACCEPTANCE_KEY,validAcceptanceToken,isAcceptanceCase} from './acceptance-tests.js';
 import {createStaffAccounts} from './staff-accounts.js';
 import {QUOTE_KEY,caseQuote,quoteVisible,quoteAmounts,quotedServices} from './case-quotes.js';
@@ -440,7 +440,7 @@ async function caseRows(rows) {
     const cashPlan=cashAccounts.find(a=>a.case_id===c.id);
     const cashPayment=cashSummary(cashPlan,payments.filter(p=>p.case_id===c.id));
     const pendingUploads=(rawDetails[INTAKE_UPLOADS]?.finalized===false ? rawDetails[INTAKE_UPLOADS].files.filter(file=>!file.documentId || !documents.some(doc=>doc.id===file.documentId)) : []).map(({key,docType,fileName})=>({key,docType,fileName}));
-    return {...c,adminPaymentApproval:rawDetails[ADMIN_APPROVAL_KEY] || null,discount:JSON.parse(c.details_json || '{}')[DISCOUNT_KEY]?.amount || 0,syntheticTest:isAcceptanceCase(c,SESSION_SECRET),pendingUploads,quote:quotedServices.includes(serviceMap.get(c.service_id)?.slug) ? caseQuote(c) : null,deletionAllowed:c.status!=='Deleted' && !paymentBlocksDeletion(c,paymentHistory.filter(p=>p.case_id===c.id)),uploads,cashPayment,cashReceipts:cashPayment?payments.filter(p=>p.case_id===c.id && ['cash','balance_upi'].includes(p.gateway)).map(p=>({id:p.id,amount:p.amount,method:p.gateway==='cash'?'Cash':'UPI',status:p.status,created_at:p.created_at,verified_at:p.verified_at,utr:p.transaction_id})):[],details_json:JSON.stringify(details),payment_state:cashPayment ? cashPayment.releaseAllowed?'paid':cashPayment.processingAllowed?'partially_paid':'unpaid' : payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received && (!cashPayment || cashPayment.releaseAllowed) ? publicDocument(received) : null,amounts:cashPlan?{serviceCharge:cashPlan.service_charge,officialFee:cashPlan.official_fee,tax:cashPlan.tax,total:cashPlan.total}:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : discountedAmounts(caseQuote(c) ? quoteAmounts(caseQuote(c)) : amounts(variant,details,customPriceMap.get(c.sales_user_id + ':' + c.variant_id)),JSON.parse(c.details_json || '{}')),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
+    return {...c,additionalPayment:rawDetails[ADDITIONAL_PAYMENT_KEY]?.amount || 0,adminPaymentApproval:rawDetails[ADMIN_APPROVAL_KEY] || null,discount:JSON.parse(c.details_json || '{}')[DISCOUNT_KEY]?.amount || 0,syntheticTest:isAcceptanceCase(c,SESSION_SECRET),pendingUploads,quote:quotedServices.includes(serviceMap.get(c.service_id)?.slug) ? caseQuote(c) : null,deletionAllowed:c.status!=='Deleted' && !paymentBlocksDeletion(c,paymentHistory.filter(p=>p.case_id===c.id)),uploads,cashPayment,cashReceipts:cashPayment?payments.filter(p=>p.case_id===c.id && (['cash','balance_upi'].includes(p.gateway) || p.gateway==='direct_upi' && ['PAID','verified','offline_approved','REFUNDED'].includes(p.status))).map(p=>({id:p.id,amount:p.amount,method:p.gateway==='cash'?'Cash':'UPI',status:p.status,created_at:p.created_at,verified_at:p.verified_at,utr:p.transaction_id})):[],details_json:JSON.stringify(details),payment_state:cashPayment ? cashPayment.releaseAllowed?'paid':cashPayment.processingAllowed?'partially_paid':'unpaid' : payment ? ['PAID','verified','offline_approved'].includes(payment.status) ? 'paid' : payment.status : 'unpaid',document_state:missing?'missing':'complete',customer:customerMap.get(c.customer_id),service:serviceMap.get(c.service_id),variant:{...variant,fields:json(variant,'fields_json',[]),documents:requirements},details,payment,received_document:['Closed','Delivered'].includes(c.status) && received && (!cashPayment || cashPayment.releaseAllowed) ? publicDocument(received) : null,amounts:cashPlan?{serviceCharge:cashPlan.service_charge,officialFee:cashPlan.official_fee,tax:cashPlan.tax,total:cashPlan.total}:payment ? {serviceCharge:payment.service_charge,officialFee:payment.official_fee,tax:payment.tax,total:payment.amount} : discountedAmounts(caseQuote(c) ? quoteAmounts(caseQuote(c)) : amounts(variant,details,customPriceMap.get(c.sales_user_id + ':' + c.variant_id)),JSON.parse(c.details_json || '{}')),sales:publicUser(userMap.get(c.sales_user_id)),backoffice:publicUser(userMap.get(c.backoffice_user_id))};
   });
 }
 function amounts(v, details = {}, override) { const p=servicePrices.get(v.id);const base=priceAmounts(v,p?.price,p?.original,override);return json(v,'fields_json',[]).some(f=>[IntakeRules.available,IntakeRules.addressProof].includes(f.label)) ? IntakeRules.withSurcharge(base,details) : base; }
@@ -789,6 +789,10 @@ async function routeApi(req, res, url) {
     if (batch) details[INTAKE_UPLOADS] = batch;
     if(b.acceptanceTestToken) details[ACCEPTANCE_KEY]=b.acceptanceTestToken;
     if(requiresQuote) details[QUOTE_KEY]={state:'draft'};
+    if(b.additionalPayment !== undefined) {
+      if(requiresQuote) return send(res,400,{error:'Add an additional payment after back office has set the price.'});
+      details[ADDITIONAL_PAYMENT_KEY]={amount:validateAdditionalPayment(user,b.additionalPayment),by:user.id,at:now()};
+    }
     if(b.discount !== undefined) {
       if(requiresQuote) return send(res,400,{error:'Apply a discount after back office has set the price.'});
       const custom=await one('SELECT price FROM salesperson_prices WHERE sales_user_id=$sales AND variant_id=$variant',{$sales:user.id,$variant:variant.id});
@@ -818,6 +822,35 @@ async function routeApi(req, res, url) {
     if(c?.status==='Deleted') return send(res,404,{error:'Case not found'});
     if (!c || c.status==='Deleted' || !canSee(user, c)) return send(res, c && c.status!=='Deleted' ? 403 : 404, { error: c && c.status!=='Deleted' ? 'Not allowed' : 'Not found' });
     if(req.method==='POST' && caseMatch[2]==='payment-exception' && user.role!=='admin') return send(res,403,{error:'Admin access required'});
+    if(req.method==='POST' && caseMatch[2]==='additional-payment') {
+      const b=await body(req);
+      if(!cashAccount(user) || c.sales_user_id!==user.id) return send(res,403,{error:'Only Success Online Main Branch sales can add an additional payment to their own cases.'});
+      if(['Deleted','Cancelled'].includes(c.status)) return send(res,409,{error:'Additional payment cannot be changed for a cancelled or deleted case.'});
+      const value=validateAdditionalPayment(user,b.additionalPayment),details=JSON.parse(c.details_json || '{}');
+      const previous=details[ADDITIONAL_PAYMENT_KEY]?.amount || 0;
+      if(value===previous) return send(res,200,{case:await caseRow(c)});
+      const row=await caseRow(c);
+      if(row.quote && !row.quote.amount) return send(res,409,{error:'Wait for the back-office quote before adding an additional payment.'});
+      const history=await all("SELECT * FROM payments WHERE case_id=$id AND gateway!='demo'",{$id:c.id});
+      if(history.some(p=>['AWAITING_VERIFICATION','REFUNDED'].includes(p.status))) return send(res,409,{error:'Resolve payments awaiting verification or refunds before changing the additional payment.'});
+      const grouped=await one("SELECT i.batch_id FROM payment_batch_items i JOIN payments p ON p.id=i.payment_id WHERE p.case_id=$id AND p.status IN ('PENDING','INITIATED','AWAITING_VERIFICATION')",{$id:c.id});
+      if(grouped) return send(res,409,{error:'Cancel the open combined checkout before changing the additional payment.'});
+      const recorded=history.some(p=>['PAID','verified','offline_approved'].includes(p.status));
+      if(recorded && value<previous) return send(res,409,{error:'Additional payment cannot be reduced after a payment is confirmed.'});
+      const delta=value-previous,total=row.amounts.total+delta,service=row.amounts.serviceCharge+delta;
+      if(!Number.isSafeInteger(total) || total<1 || total>100000000 || service<0) return send(res,400,{error:'The total payable must be positive and no greater than 1,000,000 rupees.'});
+      const account=await paymentSystem.cash.account(c.id),stamp=now();
+      if(account) await run('UPDATE cash_accounts SET total=$total,service_charge=$service WHERE case_id=$id',{$id:c.id,$total:total,$service:service});
+      else if(recorded) await run('INSERT INTO cash_accounts VALUES ($case,$total,$service,$fee,$tax,$at)',{$case:c.id,$total:total,$service:service,$fee:row.amounts.officialFee,$tax:row.amounts.tax,$at:stamp});
+      details[ADDITIONAL_PAYMENT_KEY]={amount:value,by:user.id,at:stamp};
+      await run('UPDATE cases SET details_json=$details,updated_at=$at WHERE id=$id',{$id:c.id,$details:JSON.stringify(details),$at:stamp});
+      await run("UPDATE payments SET status='CANCELLED' WHERE case_id=$id AND status IN ('PENDING','INITIATED','EXPIRED')",{$id:c.id});
+      await run('INSERT INTO audit_logs VALUES ($id,$actor,$action,$type,$entity,$reason,$at)',{$id:id('aud'),$actor:user.id,$action:'case.additional_payment',$type:'case',$entity:c.id,$reason:`Additional payment changed from ${previous} to ${value} paise; total ${total} paise`,$at:stamp});
+      const updated=await one('SELECT * FROM cases WHERE id=$id',{$id:c.id});
+      if(!account && !recorded) await paymentSystem.createOrder(updated,user);
+      await recomputeCase(c.id);
+      return send(res,200,{case:await caseRow(await one('SELECT * FROM cases WHERE id=$id',{$id:c.id}))});
+    }
     if(req.method==='POST' && caseMatch[2]==='discount') {
       const b=await body(req);
       if(!cashAccount(user) || c.sales_user_id!==user.id) return send(res,403,{error:'Only Success Online Main Branch sales can discount their own cases.'});
@@ -1358,7 +1391,7 @@ export async function handler(req, res) {
     const sheetsJobs = new Set(),caseMirrorJobs=new Set();
     const documentRequest = req.method==='POST' && (url.pathname==='/api/cases' || /\/api\/cases\/[^/]+\/(documents|finish-uploads)$/.test(url.pathname));
     const workflowRequest = req.method==='POST' && /\/api\/cases\/[^/]+\/(progress|claim|payment-exception|submit-received-document|request-reupload|submit-reupload|submit-review|set-quote|remark|resume-upload)$/.test(url.pathname);
-    const paymentRequest = url.pathname==='/api/sms-observer/events' || /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/(payment-order|cash-payment|discount)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname);
+    const paymentRequest = url.pathname==='/api/sms-observer/events' || /^\/api\/payments(?:\/|$)/.test(url.pathname) || /\/(payment-order|cash-payment|discount|additional-payment)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname);
     const readOnly = (req.method === 'GET' && (
       ['/api/admin/services','/api/workspace/documents','/api/health','/api/me','/api/services','/api/cases','/api/notifications','/api/customers','/api/users','/api/admin/dashboard','/api/admin/employees','/api/payments','/api/payments/cash-pending'].includes(url.pathname) ||
       /^\/api\/cases\/[^/]+(?:\/messages)?$/.test(url.pathname) || /^\/api\/documents\/[^/]+\/(download|preview|view)$/.test(url.pathname) || /^\/api\/announcements(?:\/[^/]+\/image)?$/.test(url.pathname)
@@ -1374,7 +1407,7 @@ export async function handler(req, res) {
         for (const setting of settings) if(!setting.name.startsWith('SERVICE_CHECKLIST_')) process.env[setting.name] = setting.value;
         servicePrices=new Map(prices.map(p=>[p.variant_id,{price:p.price,original:JSON.parse(p.original_config)}]));
       }
-      if (db.cloud && url.pathname!=='/api/payments/cash-pending' && (url.pathname==='/api/sms-observer/events' || /^\/api\/payments\//.test(url.pathname) || /\/(payment-order|discount)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname))) await one('SELECT pg_advisory_xact_lock(73194204)');
+      if (db.cloud && url.pathname!=='/api/payments/cash-pending' && (url.pathname==='/api/sms-observer/events' || /^\/api\/payments\//.test(url.pathname) || /\/(payment-order|discount|additional-payment)$/.test(url.pathname) || req.method==='DELETE' && /^\/api\/cases\/[^/]+$/.test(url.pathname))) await one('SELECT pg_advisory_xact_lock(73194204)');
       await routeApi(req, buffered, url);
     };
     await deferredCaseMirrors.run(caseMirrorJobs,()=>deferredSheets.run(sheetsJobs, () => readOnly && db.cloud ? route() : db.transaction(route)));

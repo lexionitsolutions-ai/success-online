@@ -148,5 +148,62 @@ test('Mahalaxmi cash instalments forward partial cases but only admin-confirmed 
     assert.equal((await request(`/api/payments/${lastCash.id}/verify`,{cookie:admin,body:{}})).status,200);
     assert.ok(!(await pending()).data.cases.some(row=>row.case_id===later.id));
     assert.equal((await request(laterDoc.download_url,{cookie:sales})).status,200);
+    // Extra charges belong only to the stable Main Branch sales account.
+    for(const cookie of [other,admin,office]) assert.equal((await request('/api/cases',{cookie,body:{...payload,additionalPayment:2500}})).status,403);
+    for(const additionalPayment of [-1,1.5,'2500',100000001]) assert.equal((await request('/api/cases',{cookie:sales,body:{...payload,additionalPayment}})).status,400);
+    const extraCreated=await request('/api/cases',{cookie:sales,body:{...payload,discount:10000,additionalPayment:2500}});
+    assert.equal(extraCreated.status,201,JSON.stringify(extraCreated.data));
+    const extra=extraCreated.data.case,extraPath=`/api/cases/${extra.id}/additional-payment`;
+    assert.equal(extra.amounts.total,52500);assert.equal(extra.payment.amount,52500);assert.equal(extra.additionalPayment,2500);
+    assert.equal(extra.details._intakeAdditionalPayment,undefined);
+    for(const cookie of [other,admin,office]) assert.equal((await request(extraPath,{cookie,body:{additionalPayment:4500}})).status,403);
+    const changed=await request(extraPath,{cookie:sales,body:{additionalPayment:4500}});
+    assert.equal(changed.status,200,JSON.stringify(changed.data));assert.equal(changed.data.case.amounts.total,54500);
+    const changedOrder=(await request(`/api/cases/${extra.id}/payment-order`,{cookie:sales,body:{}})).data;
+    assert.equal(new URL(changedOrder.upiIntent).searchParams.get('am'),'545.00');
+    assert.equal((await request(`/api/payments/${extra.payment.id}/submit`,{cookie:sales,body:{utr:'888888888881'}})).status,409,'Old checkout cannot collect an outdated amount');
+    assert.equal((await request(extraPath,{cookie:sales,body:{additionalPayment:4500}})).data.case.amounts.total,54500,'Retrying sets the same extra amount without duplicating it');
+    assert.equal((await request(extraPath,{cookie:sales,body:{additionalPayment:0}})).data.case.amounts.total,50000);
+    // Cash deposits retain their existing receipt; the extra charge only increases the balance.
+    const extraCash=await create(10000),extraCashPath=`/api/cases/${extraCash.id}/additional-payment`;
+    assert.equal((await request(extraCashPath,{cookie:sales,body:{additionalPayment:2500}})).status,409,'Review the recorded deposit before adjusting the bill');
+    await request(`/api/payments/${extraCash.cashReceipts[0].id}/verify`,{cookie:admin,body:{}});
+    const cashRaised=await request(extraCashPath,{cookie:sales,body:{additionalPayment:2500}});
+    assert.equal(cashRaised.status,200,JSON.stringify(cashRaised.data));
+    assert.equal(cashRaised.data.case.cashPayment.total,62500);assert.equal(cashRaised.data.case.cashPayment.confirmedPaid,10000);assert.equal(cashRaised.data.case.cashPayment.amountToPay,52500);
+    // A fully paid online case can receive a last-minute charge after completion.
+    const paidLate=(await request('/api/cases',{cookie:sales,body:payload})).data.case;
+    const paidOrder=(await request(`/api/cases/${paidLate.id}/payment-order`,{cookie:sales,body:{}})).data;
+    assert.equal((await request(`/api/payments/${paidOrder.id}/submit`,{cookie:sales,body:{utr:'888888888882'}})).status,200);
+    assert.equal((await request(`/api/payments/${paidOrder.id}/verify`,{cookie:admin,body:{}})).status,200);
+    for(const doc of variant.documents.filter(d=>d.required)) await upload(paidLate.id,doc.label);
+    const lateDocument=await complete(paidLate);
+    const lateExtraPath=`/api/cases/${paidLate.id}/additional-payment`;
+    const lateExtra=await request(lateExtraPath,{cookie:sales,body:{additionalPayment:7500}});
+    assert.equal(lateExtra.status,200,JSON.stringify(lateExtra.data));
+    assert.equal(lateExtra.data.case.amounts.total,67500);assert.equal(lateExtra.data.case.cashPayment.confirmedPaid,60000);assert.equal(lateExtra.data.case.cashPayment.amountToPay,7500);
+    assert.ok(lateExtra.data.case.cashReceipts.some(p=>p.id===paidOrder.id),'The original UPI payment remains in history');
+    await locked(paidLate,lateDocument);
+    const extraBalance=(await request(`/api/cases/${paidLate.id}/payment-order`,{cookie:sales,body:{}})).data;
+    assert.equal(extraBalance.amount,7500);assert.equal(extraBalance.gateway,'balance_upi');assert.equal(new URL(extraBalance.upiIntent).searchParams.get('am'),'75.00');
+    assert.equal((await request(`/api/payments/${extraBalance.id}/submit`,{cookie:sales,body:{utr:'888888888883'}})).status,200);
+    assert.equal((await request(lateExtraPath,{cookie:sales,body:{additionalPayment:8000}})).status,409);
+    assert.equal((await request(`/api/payments/${extraBalance.id}/verify`,{cookie:admin,body:{}})).status,200);
+    const settled=(await request(`/api/cases/${paidLate.id}`,{cookie:sales})).data.case;
+    assert.equal(settled.cashPayment.confirmedPaid,67500);assert.equal(settled.cashPayment.releaseAllowed,true);
+    assert.equal((await request(lateDocument.download_url,{cookie:sales})).status,200);
+    assert.equal((await request(lateExtraPath,{cookie:sales,body:{additionalPayment:5000}})).status,409,'Confirmed charges cannot silently be reduced');
+    // Quoted services keep the original back-office quote and add the extra separately.
+    const pfVariant=(await request('/api/services',{cookie:sales})).data.services.find(s=>s.slug==='pf-assistance').variants[0];
+    const quotedPayload={...payload,variantId:pfVariant.id};
+    assert.equal((await request('/api/cases',{cookie:sales,body:{...quotedPayload,additionalPayment:5000}})).status,400);
+    const quoted=(await request('/api/cases',{cookie:sales,body:quotedPayload})).data.case,quotedPath=`/api/cases/${quoted.id}`;
+    for(const doc of pfVariant.documents.filter(d=>d.required)) await upload(quoted.id,doc.label);
+    assert.equal((await request(quotedPath+'/submit-review',{cookie:sales,body:{}})).status,200);
+    assert.equal((await request(quotedPath+'/set-quote',{cookie:office,body:{amount:90000,reason:'Synthetic PF quote fixture'}})).status,200);
+    const quotedExtra=await request(quotedPath+'/additional-payment',{cookie:sales,body:{additionalPayment:5000}});
+    assert.equal(quotedExtra.status,200,JSON.stringify(quotedExtra.data));
+    assert.equal(quotedExtra.data.case.quote.amount,90000);assert.equal(quotedExtra.data.case.amounts.total,95000);
+    assert.equal((await request(quotedPath+'/payment-order',{cookie:sales,body:{}})).data.amount,95000);
   } finally {child.kill();}
 });

@@ -1,6 +1,6 @@
 ﻿import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {readFileSync} from 'node:fs';
+import {readFileSync,mkdirSync} from 'node:fs';
 import {chromium} from 'playwright';
 
 // Use a real ES module: VM tests do not reproduce inline-handler scope errors.
@@ -24,6 +24,11 @@ window.prepareDetailDiscount = () => {
   openCase=async()=>{};
   document.body.insertAdjacentHTML('beforeend','<div id="drawer">'+caseDiscountForm({id:'detail-case',sales:{id:'branch'},deletionAllowed:true,amounts:{serviceCharge:30000,total:30000}})+'</div>');
 };
+window.prepareDetailAdditional = () => {
+  closeDrawer();window.savedRequest=null;
+  me={id:'branch',role:'sales',discountsAllowed:true};openCase=async()=>{};
+  document.body.insertAdjacentHTML('beforeend','<div id="drawer"><div class="drawer-head"></div>'+caseAdditionalPaymentForm({id:'detail-case',status:'Closed',sales:{id:'branch'},additionalPayment:0,amounts:{serviceCharge:30000,total:30000}})+'</div>');
+};
 window.prepareAdminApproval = () => {
   closeDrawer();me={id:'admin',role:'admin'};view='pending';openCase=fixtureOpenCase;
   const item={id:'pending-case',ref:'SO-PENDING',customer:{name:'Pending Customer',mobile:'9876543210'},service:{name:'PAN Card',slug:'pan'},variant:{name:'Application',documents:[]},sales:{id:'sales'},details:{},status:'Awaiting Payment',payment_state:'PENDING',document_state:'complete',amounts:{total:30000}};
@@ -46,6 +51,7 @@ try {
   browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL || 'chrome'});
   const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
+  for(const file of ['styles.css','mobile.css','payments.css','dashboard.css','workspace.css','brand.css']) await page.addStyleTag({content:readFileSync('public/'+file,'utf8')});
   await page.waitForFunction(()=>typeof window.prepareDiscount==='function');
   await page.evaluate(()=>window.prepareDiscount());
   await page.locator('#consent').check();
@@ -53,15 +59,43 @@ try {
   assert.match(await page.locator('.intake-review-total').innerText(),/250\.00/);
   assert.equal(await page.locator('#reviewDiscount').inputValue(),'50');
   assert.equal(await page.locator('#consent').isChecked(),true);
+  await page.locator('#reviewAdditionalPayment').fill('75');
+  assert.match(await page.locator('.intake-review-total').innerText(),/325\.00/);
+  assert.equal(await page.locator('#consent').isChecked(),true);
+  await page.evaluate(()=>window.setIntakeLanguage('mr'));
+  assert.match(await page.locator('#reviewAdditionalPayment').locator('..').innerText(),/अतिरिक्त देयक/);
+  mkdirSync('deliverables/additional-payment',{recursive:true});
+  await page.screenshot({path:'deliverables/additional-payment/review-marathi.png',fullPage:true});
+  await page.evaluate(()=>window.setIntakeLanguage('en'));
+  await page.getByLabel('Choose payment method').selectOption('cash');
+  await page.locator('#reviewCashAmount').fill('100');
+  await page.locator('#reviewAdditionalPayment').fill('80');
+  assert.match(await page.locator('#reviewCashTotal').innerText(),/330\.00/);
+  assert.match(await page.locator('#reviewCashPending').innerText(),/230\.00/);
+  assert.equal(await page.locator('#reviewCashAmount').getAttribute('max'),'330.00');
+  await page.locator('#reviewAdditionalPayment').fill('75');
+  await page.screenshot({path:'deliverables/additional-payment/review-cash.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.querySelector('.panel').scrollWidth<=document.querySelector('.panel').clientWidth),true);
+  await page.screenshot({path:'deliverables/additional-payment/review-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1280,height:720});
+  await page.getByLabel('Choose payment method').selectOption('online');
+  await page.locator('#consent').check();
   await page.getByRole('button',{name:'Create & pay',exact:true}).click();
   await page.waitForFunction(()=>window.savedRequest);
   assert.equal(await page.evaluate(()=>window.savedRequest.body.discount),5000);
+  assert.equal(await page.evaluate(()=>window.savedRequest.body.additionalPayment),7500);
   assert.equal(await page.evaluate(()=>typeof window.saveCaseDiscount),'function');
   await page.evaluate(()=>window.prepareDetailDiscount());
   await page.locator('input[name="discount"]').fill('50');
   await page.getByRole('button',{name:'Apply discount',exact:true}).click();
   await page.waitForFunction(()=>window.savedRequest?.path==='/api/cases/detail-case/discount');
   assert.equal(await page.evaluate(()=>window.savedRequest.body.discount),5000);
+  await page.evaluate(()=>window.prepareDetailAdditional());
+  await page.locator('input[name="additionalPayment"]').fill('125');
+  await page.getByRole('button',{name:'Apply additional payment',exact:true}).click();
+  await page.waitForFunction(()=>window.savedRequest?.path==='/api/cases/detail-case/additional-payment');
+  assert.equal(await page.evaluate(()=>window.savedRequest.body.additionalPayment),12500);
   await page.evaluate(()=>window.prepareLanguage());
   await page.evaluate(()=>window.setIntakeLanguage('mr'));
   const marathi=await page.locator('#languageFixture').innerText();
@@ -81,6 +115,6 @@ try {
   assert.match(await page.locator('#drawer .case-summary').innerText(),/PENDING/);
   assert.match(await page.locator('#drawer .workflow-box').innerText(),/Move case forward/);
   assert.deepEqual(errors,[]);
-  console.log('Passed: real module discount entry, consent preservation, submitted amount, exported detail handler, Marathi labels and English restoration.');
+  console.log('Passed: discount and additional-payment entry, live totals and cash balance, submitted amounts, existing-case additional payment, Marathi labels and English restoration.');
 } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
 

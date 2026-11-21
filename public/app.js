@@ -250,6 +250,13 @@ Object.assign(intakeWords,{'Pending Documents':'प्रलंबित का�
 
 Object.assign(intakeWords,{'Case Accepted':'अर्ज स्वीकारला','Documents Under Review':'कागदपत्रांची तपासणी सुरू','Documents OK':'कागदपत्रे योग्य आहेत','Documents Pending':'कागदपत्रे प्रलंबित','Application Submitted':'अर्ज सादर केला','Application Rejected':'अर्ज नाकारला','Application Resubmitted':'अर्ज पुन्हा सादर केला','Application Complete':'अर्ज पूर्ण झाला','Completion Document Pending':'पूर्ण झालेल्या अर्जाचे कागदपत्र बाकी'});
 Object.assign(intakeWords,{
+  'Additional payment':'अतिरिक्त देयक',
+  'Additional payment (Rs.)':'अतिरिक्त देयक (रु.)',
+  'Apply additional payment':'अतिरिक्त देयक लागू करा',
+  'Enter extra amount to collect (optional)':'वसूल करायची अतिरिक्त रक्कम लिहा (ऐच्छिक)',
+  'Enter the total extra amount to collect. Earlier payments remain unchanged.':'वसूल करायची एकूण अतिरिक्त रक्कम लिहा. आधीची देयके बदलणार नाहीत.',
+  'Additional payment applied. Total and balance updated.':'अतिरिक्त देयक लागू केले आहे. एकूण आणि शिल्लक रक्कम अद्ययावत केली आहे.',
+  'Updating additional payment...':'अतिरिक्त देयक अद्ययावत करत आहे...',
   'Crop document':'कागदपत्र क्रॉप करा',
   'Document to crop':'क्रॉप करण्यासाठी कागदपत्र',
   'Drag across the image to select the area to keep, or adjust the edges below.':'ठेवायचा भाग निवडण्यासाठी चित्रावर बोट किंवा माऊस ओढा, किंवा खालील कडा समायोजित करा.',
@@ -1211,23 +1218,24 @@ function drawWizard() {
 }
 
 function updateReviewDiscount(input) {
-  draft.discount=input.value;
+  if(input.id==='reviewAdditionalPayment') draft.additionalPayment=input.value;
+  else draft.discount=input.value;
   if (!input.validity.valid) return;
-  const discount=Math.round(Number(input.value || 0)*100);
-  const total=Number(input.dataset.total)-discount;
-  document.querySelector('#reviewServiceCharge').textContent=money(Number(input.dataset.serviceCharge)-discount);
+  const discount=Math.round(Number(draft.discount || 0)*100),additionalPayment=Math.round(Number(draft.additionalPayment || 0)*100);
+  const total=Number(input.dataset.total)-discount+additionalPayment;
+  document.querySelector('#reviewServiceCharge').textContent=money(Number(input.dataset.serviceCharge)-discount+additionalPayment);
   document.querySelector('#reviewTotalPayable').textContent=money(total);
   const breakdown=document.querySelector('#reviewDiscountBreakdown');
-  breakdown.hidden=!discount;
-  breakdown.innerHTML=discount ? `<div><span>Main amount</span><strong>${money(Number(input.dataset.total))}</strong></div><div><span>Discount</span><strong>-${money(discount)}</strong></div>` : '';
+  breakdown.hidden=!discount && !additionalPayment;
+  breakdown.innerHTML=discount || additionalPayment ? `<div><span>Main amount</span><strong>${money(Number(input.dataset.total))}</strong></div><div><span>Discount</span><strong>-${money(discount)}</strong></div><div><span>Additional payment</span><strong>+${money(additionalPayment)}</strong></div>` : '';
   const cashInput=document.querySelector('#reviewCashAmount');
   if(cashInput) {cashInput.max=(total/100).toFixed(2);updateReviewCash(cashInput.value,total);}
 }
-Object.assign(window,{updateReviewDiscount,saveCaseDiscount});
+Object.assign(window,{updateReviewDiscount,saveCaseDiscount,saveCaseAdditionalPayment});
 function cashReviewOptions(amount) {
     if(!me?.cashPaymentsAllowed) return '';
   const cash=draft.paymentMethod==='cash',paid=Math.round(Number(draft.cashAmount || 0)*100);
-  return `<section class="cash-review-panel"><h3>Payment method</h3><p>Success Online Main Branch can pay online or record cash payments.</p><label>Choose payment method<select onchange="setCashReviewMethod(this.value)"><option value="online" ${cash?'':'selected'}>Pay online</option><option value="cash" ${cash?'selected':''}>Pay in cash</option></select></label>${cash?`<label>Cash amount paid (₹)<input id="reviewCashAmount" type="number" min="0.01" step="0.01" max="${(amount.total/100).toFixed(2)}" value="${h(draft.cashAmount || '')}" oninput="updateReviewCash(this.value,Math.round(Number(this.max)*100))" placeholder="Enter cash received"></label><dl class="cash-payment-totals"><div><dt>Amount paid in cash</dt><dd id="reviewCashPaid">${money(paid)}</dd></div><div><dt>Pending amount</dt><dd id="reviewCashPending">${money(Math.max(0,amount.total-paid))}</dd></div><div><dt>Total</dt><dd>${money(amount.total)}</dd></div></dl><p>A positive cash payment allows processing after documents finish uploading. Admin must confirm the full payment before the completed document can be received.</p>`:''}</section>`;
+  return `<section class="cash-review-panel"><h3>Payment method</h3><p>Success Online Main Branch can pay online or record cash payments.</p><label>Choose payment method<select onchange="setCashReviewMethod(this.value)"><option value="online" ${cash?'':'selected'}>Pay online</option><option value="cash" ${cash?'selected':''}>Pay in cash</option></select></label>${cash?`<label>Cash amount paid (₹)<input id="reviewCashAmount" type="number" min="0.01" step="0.01" max="${(amount.total/100).toFixed(2)}" value="${h(draft.cashAmount || '')}" oninput="updateReviewCash(this.value,Math.round(Number(this.max)*100))" placeholder="Enter cash received"></label><dl class="cash-payment-totals"><div><dt>Amount paid in cash</dt><dd id="reviewCashPaid">${money(paid)}</dd></div><div><dt>Pending amount</dt><dd id="reviewCashPending">${money(Math.max(0,amount.total-paid))}</dd></div><div><dt>Total</dt><dd id="reviewCashTotal">${money(amount.total)}</dd></div></dl><p>A positive cash payment allows processing after documents finish uploading. Admin must confirm the full payment before the completed document can be received.</p>`:''}</section>`;
 }
 function setCashReviewMethod(method) {draft.paymentMethod=method;rerenderWizard();}
 function updateReviewCash(value,total) {
@@ -1235,6 +1243,7 @@ function updateReviewCash(value,total) {
   const paid=Math.round(Number(value || 0)*100);
   document.querySelector('#reviewCashPaid').textContent=money(paid);
   document.querySelector('#reviewCashPending').textContent=money(Math.max(0,total-paid));
+  const totalLabel=document.querySelector('#reviewCashTotal');if(totalLabel) totalLabel.textContent=money(total);
 }
 function wizardBody(service, variant) {
   if (draft.step === 1) return `<div class="formgrid"><label>Full name<input id="name" oninput="removeNameNumbers(this)" autocomplete="name" value="${h(draft.customer.name || '')}"></label><label>Mobile number<input id="mobile" type="tel" inputmode="numeric" maxlength="10" pattern="[0-9]{10}" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" autocomplete="tel-national" placeholder="10-digit mobile number" value="${h(draft.customer.mobile || '')}"></label><label>Address<input id="address" autocomplete="street-address" value="${h(draft.customer.address || '')}"></label></div><div class="form-actions"><button class="primary" onclick="saveStep1()">Continue</button></div>`;
@@ -1248,9 +1257,10 @@ function wizardBody(service, variant) {
   const baseAmount = variant?.amounts || { serviceCharge:0, officialFee:0, tax:0, total:0 };
   const mainAmount = needsQuote ? {serviceCharge:0,officialFee:0,tax:0,total:0} : ['income-certificate','domicile-certificate'].includes(service?.slug) ? IntakeRules.withSurcharge(baseAmount, draft.details) : baseAmount;
   const discount=me?.discountsAllowed && !needsQuote ? Math.round(Number(draft.discount || 0)*100) : 0;
-  const amount={...mainAmount,serviceCharge:mainAmount.serviceCharge-discount,total:mainAmount.total-discount};
+  const additionalPayment=me?.discountsAllowed && !needsQuote ? Math.round(Number(draft.additionalPayment || 0)*100) : 0;
+  const amount={...mainAmount,serviceCharge:mainAmount.serviceCharge-discount+additionalPayment,total:mainAmount.total-discount+additionalPayment};
   const pages = Object.values(draft.docs).reduce((count,doc) => count + (doc.pages?.length || 1), 0);
-  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your request.</p></div></header>${serviceTimeline(service)}<div class="intake-review-card"><div class="intake-review-service"><span>Selected services</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(variant?.fields?.find(field => field.label === label)?.sensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge${amount.surcharge ? ` (includes \u20B9200 ${service.slug === 'domicile-certificate' ? 'affidavit fee' : 'Talathi surcharge'})` : ''}</span><strong id="reviewServiceCharge">${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div>${me?.discountsAllowed && !needsQuote ? `<label>Discount (Rs.)<input id="reviewDiscount" data-service-charge="${mainAmount.serviceCharge}" data-total="${mainAmount.total}" type="number" min="0" max="${(Math.min(mainAmount.serviceCharge,mainAmount.total-1)/100).toFixed(2)}" step="0.01" value="${h(draft.discount || '')}" oninput="updateReviewDiscount(this)"></label><div id="reviewDiscountBreakdown" ${discount?'':'hidden'}>${discount?`<div><span>Main amount</span><strong>${money(mainAmount.total)}</strong></div><div><span>Discount</span><strong>-${money(discount)}</strong></div>`:''}</div>` : ''}<div class="intake-review-total"><span>Total payable</span><strong id="reviewTotalPayable">${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div>${needsQuote ? '<p>Back office will review your documents and send a payment request with the final case price.</p>' : cashReviewOptions(amount)}<label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button>${needsQuote ? `<button class="primary" onclick="submitCase('review')">Submit to back office</button>` : `<button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button>`}</div>`;
+  return `<section class="intake-review"><header class="intake-review-heading"><span class="intake-review-icon">${icon('completed')}</span><div><p class="eyebrow">Ready to submit</p><h3>Review your application</h3><p>Check the details below before saving your request.</p></div></header>${serviceTimeline(service)}<div class="intake-review-card"><div class="intake-review-service"><span>Selected services</span><h3>${h(service.name)}</h3><span class="intake-document-count">${pages} ${pages === 1 ? 'file' : 'files'} ready</span></div><dl class="intake-review-details"><div><dt>Full name</dt><dd>${h(draft.customer.name)}</dd></div><div><dt>Mobile number</dt><dd>${h(draft.customer.mobile)}</dd></div>${Object.entries(draft.details).filter(([,value]) => value).map(([label,value]) => `<div><dt>${h(label)}</dt><dd>${h(variant?.fields?.find(field => field.label === label)?.sensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : value)}</dd></div>`).join('')}</dl><div class="intake-review-price"><div><span>Service charge${amount.surcharge ? ` (includes \u20B9200 ${service.slug === 'domicile-certificate' ? 'affidavit fee' : 'Talathi surcharge'})` : ''}</span><strong id="reviewServiceCharge">${amount.total ? money(amount.serviceCharge) : 'To be confirmed'}</strong></div>${me?.discountsAllowed && !needsQuote ? `<label>Discount (Rs.)<input id="reviewDiscount" data-service-charge="${mainAmount.serviceCharge}" data-total="${mainAmount.total}" type="number" min="0" max="${(Math.min(mainAmount.serviceCharge,mainAmount.total-1)/100).toFixed(2)}" step="0.01" value="${h(draft.discount || '')}" oninput="updateReviewDiscount(this)"></label><label>Additional payment (Rs.)<input id="reviewAdditionalPayment" data-service-charge="${mainAmount.serviceCharge}" data-total="${mainAmount.total}" type="number" min="0" max="1000000" step="0.01" value="${h(draft.additionalPayment || '')}" oninput="updateReviewDiscount(this)" placeholder="Enter extra amount to collect (optional)"></label><div id="reviewDiscountBreakdown" ${discount || additionalPayment?'':'hidden'}>${discount || additionalPayment?`<div><span>Main amount</span><strong>${money(mainAmount.total)}</strong></div><div><span>Discount</span><strong>-${money(discount)}</strong></div><div><span>Additional payment</span><strong>+${money(additionalPayment)}</strong></div>`:''}</div>` : ''}<div class="intake-review-total"><span>Total payable</span><strong id="reviewTotalPayable">${amount.total ? money(amount.total) : 'To be confirmed'}</strong></div></div></div>${needsQuote ? '<p>Back office will review your documents and send a payment request with the final case price.</p>' : cashReviewOptions(amount)}<label class="check intake-review-consent"><input type="checkbox" id="consent"><span>Customer consent accepted for this private assistance service</span></label></section><div class="form-actions intake-review-actions"><button class="quiet" onclick="wizardBack(3)">Back</button>${needsQuote ? `<button class="primary" onclick="submitCase('review')">Submit to back office</button>` : `<button onclick="submitCase('another')">Save & create another</button><button onclick="submitCase('later')">Save & pay later</button><button class="primary" onclick="submitCase()">Create & pay</button>`}</div>`;
 }
 
 function documentTemplateLink(item) {
@@ -1773,6 +1783,8 @@ async function submitCase(nextAction='pay') {
   if(!['passport','pf-assistance','ration-card'].includes(services.find(s=>s.id===draft.serviceId)?.slug) && me.cashPaymentsAllowed && draft.paymentMethod==='cash' && (!Number.isFinite(Number(draft.cashAmount)) || Number(draft.cashAmount)<=0)) return toast('Enter the cash amount received to continue.');
   const discountInput=document.querySelector('#reviewDiscount');
   if(discountInput) {if(!discountInput.reportValidity()) return;draft.discount=discountInput.value;}
+  const additionalInput=document.querySelector('#reviewAdditionalPayment');
+  if(additionalInput) {if(!additionalInput.reportValidity()) return;draft.additionalPayment=additionalInput.value;}
   const intake = draft;
   const needsQuote=['passport','pf-assistance','ration-card'].includes(services.find(s=>s.id===intake.serviceId)?.slug);
   if(needsQuote) {intake.paymentMethod='online';nextAction='review';}
@@ -1785,7 +1797,7 @@ async function submitCase(nextAction='pay') {
     const uploadManifest = files.map(({key,docType,document})=>({key,docType,fileName:document.fileName,mimeType:document.mimeType,size:document.size}));
     // Confirm durable browser storage before creating a case or closing its form.
     await openUploadQueueDB();
-    const created = intake.createdCase || (await api('/api/cases',{method:'POST',body:{...(me.discountsAllowed && !['passport','pf-assistance','ration-card'].includes(services.find(s=>s.id===intake.serviceId)?.slug)?{discount:Math.round(Number(intake.discount || 0)*100)}:{}),customer:intake.customer,variantId:intake.variantId,details:intake.details,consent:true,clientRequestId:intake.clientRequestId,uploadManifest,...(me.cashPaymentsAllowed && intake.paymentMethod==='cash'?{cashPayment:{amount:Math.round(Number(intake.cashAmount)*100)}}:{})}})).case;
+    const created = intake.createdCase || (await api('/api/cases',{method:'POST',body:{...(me.discountsAllowed && !['passport','pf-assistance','ration-card'].includes(services.find(s=>s.id===intake.serviceId)?.slug)?{discount:Math.round(Number(intake.discount || 0)*100),additionalPayment:Math.round(Number(intake.additionalPayment || 0)*100)}:{}),customer:intake.customer,variantId:intake.variantId,details:intake.details,consent:true,clientRequestId:intake.clientRequestId,uploadManifest,...(me.cashPaymentsAllowed && intake.paymentMethod==='cash'?{cashPayment:{amount:Math.round(Number(intake.cashAmount)*100)}}:{})}})).case;
     intake.createdCase = created;
     const job = {id:created.id,ref:created.ref,ownerId:me.id,files,submitReview:needsQuote,cloud:cloudUploads,state:'queued'};
     await saveUploadJob(job);
@@ -2190,6 +2202,18 @@ async function requestCaseReupload(event,caseId) {
   try {const result=await api(`/api/cases/${caseId}/request-reupload`,{method:'POST',body:{documentTypes:[documentType],reason}});setDrawerBusy();renderSavedCase(result);toast('Reupload request sent to sales.');}
   catch(error) {toast(error.message);} finally {setDrawerBusy();}
 }
+function caseAdditionalPaymentForm(item) {
+  if(me?.role!=='sales' || !me.discountsAllowed || item.sales?.id!==me.id || !item.amounts.total || ['Deleted','Cancelled'].includes(item.status) || item.quote && !item.quote.amount) return '';
+  return `<form class="detail-section additional-payment-form" onsubmit="saveCaseAdditionalPayment(event,'${item.id}')"><label>Additional payment (Rs.)<input name="additionalPayment" type="number" min="0" max="1000000" step="0.01" value="${((item.additionalPayment || 0)/100).toFixed(2)}" required></label><p>Enter the total extra amount to collect. Earlier payments remain unchanged.</p><p>Total payable: <strong>${money(item.amounts.total)}</strong></p><button class="primary">Apply additional payment</button></form>`;
+}
+async function saveCaseAdditionalPayment(event,caseId) {
+  event.preventDefault();if(drawerBusy) return;const form=event.target;if(!form.reportValidity()) return;
+  setDrawerBusy('Updating additional payment...');
+  try {
+    await api(`/api/cases/${caseId}/additional-payment`,{method:'POST',body:{additionalPayment:Math.round(Number(form.elements.additionalPayment.value)*100)}});
+    setDrawerBusy();closeDrawer();await openCase(caseId);void refreshCaseUpdates();toast('Additional payment applied. Total and balance updated.');
+  } catch(error) {toast(error.message);} finally {setDrawerBusy();}
+}
 function caseDiscountForm(item) {
   if(!me?.discountsAllowed || item.sales?.id!==me.id || !item.deletionAllowed || item.cashPayment || !item.amounts.total || item.quote && !item.quote.amount) return '';
   const original=item.amounts.total+(item.discount || 0),service=item.amounts.serviceCharge+(item.discount || 0);
@@ -2233,6 +2257,7 @@ function caseDetail(item, documents, notes) {
     ${item.status === 'Rejected' ? `<section class="correction-notice"><strong>Application Rejected</strong><p>${h(notes.filter(note=>note.new_status==='Rejected').at(-1)?.note || 'Review the rejection reason in the case timeline.')}</p></section>` : ''}
     ${item.quote?.amount ? `<section class="detail-section"><h3><span>Back-office quote</span>: ${money(item.quote.amount)}</h3>${['sales','admin'].includes(me.role) && !isPaymentSettled(item) ? `<a href="/?pay=${encodeURIComponent(item.id)}">Open payment link</a>` : ''}</section>` : ''}
     ${caseDiscountForm(item)}
+    ${caseAdditionalPaymentForm(item)}
     ${casePaymentCard(item)}
     ${item.quote ? backofficeRemarks(item,notes) : ''}
     <section class="detail-section"><div class="panel-title"><div><h3>Documents</h3><p>Upload every required document before moving the case forward.</p></div><div class="document-section-actions">${canRequestReupload(item)?'<button type="button" class="request-reupload-button" onclick="showCaseReuploadRequest()">Request reupload</button>':''}${['backoffice','admin'].includes(me.role) ? `<button onclick="downloadCaseFiles('${item.id}',this)">Download all files</button>` : ''}</div></div>${caseReuploadForm(item)}<div class="upload-list">${documentChecklist(item, documents)}</div>${reuploadSubmissionPanel(item)}</section>

@@ -134,7 +134,7 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
       await recomputeCase(p.case_id);
     }
     const ready = await receiverReady();
-    const otherPaid=await one("SELECT id FROM payments WHERE case_id=$case AND id!=$id AND status='PAID' AND gateway='direct_upi'",{$case:p.case_id,$id:p.id});
+    const otherPaid=p.gateway==='balance_upi'?null:await one("SELECT id FROM payments WHERE case_id=$case AND id!=$id AND status='PAID' AND gateway='direct_upi'",{$case:p.case_id,$id:p.id});
     const otherClaim=await one("SELECT id FROM payments WHERE case_id=$case AND id!=$id AND status='AWAITING_VERIFICATION' AND gateway='direct_upi'",{$case:p.case_id,$id:p.id});
     const config=paymentConfig(),receiverChanged=p.upi_id!==config.upiId || p.payee_name!==config.payeeName;
     const balance=p.gateway==='balance_upi'?await cash.summary(p.case_id):null;
@@ -269,6 +269,10 @@ export function createPayments({db, recomputeCase, scheduleCaseSync, send, body}
       await run('UPDATE upi_orders SET payment_method=$method,initiated_at=$at,updated_at=$at WHERE payment_id=$id',{$id:p.id,$method:b.method,$at:at()});
     } else if(action==='submit') {
       if(p.gateway==='cash') fail(409,'Cash receipts are confirmed by admin without a UPI reference.');
+      if(p.status==='CANCELLED') {
+        const currentCase=await one('SELECT details_json FROM cases WHERE id=$id',{$id:p.case_id});
+        if(JSON.parse(currentCase.details_json || '{}')._intakeAdditionalPayment) fail(409,'This checkout was cancelled. Reopen the current case payment to pay the updated amount.');
+      }
       if(['PAID','REFUNDED'].includes(p.status)) fail(409,'This payment is already verified');
       if(p.otherClaimPending || p.otherPaymentVerified) fail(409,'This case is already paid or awaiting payment verification');
       b.utr=normalizeUTR(b.utr);
