@@ -253,6 +253,8 @@ Object.assign(intakeWords,{
   'Crop document':'कागदपत्र क्रॉप करा',
   'Document to crop':'क्रॉप करण्यासाठी कागदपत्र',
   'Drag across the image to select the area to keep, or adjust the edges below.':'ठेवायचा भाग निवडण्यासाठी चित्रावर बोट किंवा माऊस ओढा, किंवा खालील कडा समायोजित करा.',
+  'Drag the four corners to fit your document. The saved image will be straightened. You can also draw a rectangle or adjust the edges below.':'कागदपत्राच्या आकारानुसार चारही कोपरे बोटाने किंवा माऊसने ओढा. जतन करताना चित्र सरळ केले जाईल. तुम्ही आयत निवडू शकता किंवा खालील कडा समायोजित करू शकता.',
+  'Top left corner':'वरचा डावा कोपरा','Top right corner':'वरचा उजवा कोपरा','Bottom right corner':'खालचा उजवा कोपरा','Bottom left corner':'खालचा डावा कोपरा',
   'Left':'डावी बाजू','Top':'वरची बाजू','Right':'उजवी बाजू','Bottom':'खालची बाजू',
   'Cancel':'रद्द करा','Reset':'पुन्हा सेट करा','Use original':'मूळ चित्र वापरा','Use crop':'क्रॉप केलेले चित्र वापरा',
   'Select an area of the document to keep.':'कागदपत्राचा ठेवायचा भाग निवडा.',
@@ -1512,36 +1514,47 @@ function cropDocumentImage(file) {
     const url = URL.createObjectURL(file);
     const dialog = document.createElement('dialog');
     dialog.className = 'document-crop-dialog';
-    dialog.innerHTML = `<h2>Crop document</h2><p>Drag across the image to select the area to keep, or adjust the edges below.</p><div class="document-crop-stage"><img alt="Document to crop"><div class="document-crop-selection"></div></div><div class="document-crop-edges">${['Left','Top','Right','Bottom'].map((label,i)=>`<label>${label}<input type="range" min="0" max="1000" value="${i<2?0:1000}" data-crop-edge="${i}"></label>`).join('')}</div><p class="document-crop-error" role="alert"></p><div class="document-crop-actions"><button type="button" data-crop="cancel">Cancel</button><button type="button" data-crop="reset">Reset</button><button type="button" data-crop="original">Use original</button><button type="button" class="primary" data-crop="save">Use crop</button></div>`;
+    dialog.innerHTML = `<h2>Crop document</h2><p>Drag the four corners to fit your document. The saved image will be straightened. You can also draw a rectangle or adjust the edges below.</p><div class="document-crop-stage"><img alt="Document to crop"><svg class="document-crop-selection" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"><path fill="rgba(0,0,0,.45)" fill-rule="evenodd"></path><polygon fill="none" stroke="#00a887" stroke-width="3" vector-effect="non-scaling-stroke"></polygon></svg>${['Top left corner','Top right corner','Bottom right corner','Bottom left corner'].map((label,i)=>`<button type="button" class="document-crop-corner" data-crop-corner="${i}" aria-label="${label}"></button>`).join('')}</div><div class="document-crop-edges">${['Left','Top','Right','Bottom'].map((label,i)=>`<label>${label}<input type="range" min="0" max="1000" value="${i<2?0:1000}" data-crop-edge="${i}"></label>`).join('')}</div><p class="document-crop-error" role="alert"></p><div class="document-crop-actions"><button type="button" data-crop="cancel">Cancel</button><button type="button" data-crop="reset">Reset</button><button type="button" data-crop="original">Use original</button><button type="button" class="primary" data-crop="save">Use crop</button></div>`;
     const image = dialog.querySelector('img'), stage = dialog.querySelector('.document-crop-stage'), selection = dialog.querySelector('.document-crop-selection');
     const inputs = [...dialog.querySelectorAll('[data-crop-edge]')];
-    let box = [0,0,1000,1000], start, done = false;
+    const corners = [...dialog.querySelectorAll('[data-crop-corner]')];
+    let box = [0,0,1000,1000], points=[[0,0],[1000,0],[1000,1000],[0,1000]], start, cornerIndex=null, done = false;
     const finish = result => { if(done) return;done=true;dialog.close();dialog.remove();URL.revokeObjectURL(url);resolve(result); };
     const draw = () => {
-      selection.style.cssText = `left:${box[0]/10}%;top:${box[1]/10}%;width:${(box[2]-box[0])/10}%;height:${(box[3]-box[1])/10}%`;
+      const polygon=points.map(point=>point.join(',')).join(' ');
+      selection.querySelector('polygon').setAttribute('points',polygon);
+      selection.querySelector('path').setAttribute('d',`M0 0H1000V1000H0Z M${points.map(point=>point.join(' ')).join('L')}Z`);
+      corners.forEach((corner,i)=>{corner.style.left=`${points[i][0]/10}%`;corner.style.top=`${points[i][1]/10}%`;});
+      box=[Math.min(...points.map(p=>p[0])),Math.min(...points.map(p=>p[1])),Math.max(...points.map(p=>p[0])),Math.max(...points.map(p=>p[1]))];
       inputs.forEach((input,i)=>input.value=box[i]);
     };
+    const rectangle=()=>{points=[[box[0],box[1]],[box[2],box[1]],[box[2],box[3]],[box[0],box[3]]];draw();};
+    const moveCorner=(index,point)=>{const candidate=points.map((p,i)=>i===index?point:p);if(validDocumentCorners(candidate)){points=candidate;draw();}};
     inputs.forEach((input,i)=>input.oninput=()=>{
       const value=Number(input.value);
       box[i]=i<2?Math.min(value,box[i+2]-1):Math.max(value,box[i-2]+1);
-      draw();
+      rectangle();
+    });
+    corners.forEach((corner,index)=>corner.onkeydown=event=>{
+      const direction={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[event.key];
+      if(!direction) return;event.preventDefault();
+      moveCorner(index,points[index].map((value,i)=>Math.max(0,Math.min(1000,value+direction[i]*(event.shiftKey?20:5)))));
     });
     const point = event => {const rect=stage.getBoundingClientRect();return [Math.max(0,Math.min(1000,(event.clientX-rect.left)/rect.width*1000)),Math.max(0,Math.min(1000,(event.clientY-rect.top)/rect.height*1000))];};
-    stage.onpointerdown = event => {event.preventDefault();start=point(event);stage.setPointerCapture(event.pointerId);};
-    stage.onpointermove = event => {if(!start) return;const end=point(event);box=[Math.min(start[0],end[0]),Math.min(start[1],end[1]),Math.max(start[0],end[0]),Math.max(start[1],end[1])];draw();};
-    stage.onpointerup = stage.onpointercancel = () => {start=null;};
+    stage.onpointerdown = event => {if(event.button!==0) return;event.preventDefault();const handle=event.target.closest('[data-crop-corner]');cornerIndex=handle?Number(handle.dataset.cropCorner):null;start=point(event);stage.setPointerCapture(event.pointerId);};
+    stage.onpointermove = event => {if(!start) return;const end=point(event);if(cornerIndex!==null) moveCorner(cornerIndex,end);else {box=[Math.min(start[0],end[0]),Math.min(start[1],end[1]),Math.max(start[0],end[0]),Math.max(start[1],end[1])];rectangle();}};
+    stage.onpointerup = stage.onpointercancel = () => {start=null;cornerIndex=null;};
     dialog.addEventListener('cancel',event=>{event.preventDefault();finish(null);});
     dialog.querySelector('[data-crop="cancel"]').onclick=()=>finish(null);
     dialog.querySelector('[data-crop="original"]').onclick=()=>finish(file);
-    dialog.querySelector('[data-crop="reset"]').onclick=()=>{box=[0,0,1000,1000];draw();};
+    dialog.querySelector('[data-crop="reset"]').onclick=()=>{box=[0,0,1000,1000];rectangle();};
     dialog.querySelector('[data-crop="save"]').onclick=async event=>{
       const button=event.currentTarget;button.disabled=true;
       try {
-        const x=Math.round(box[0]*image.naturalWidth/1000), y=Math.round(box[1]*image.naturalHeight/1000);
-        const width=Math.round(box[2]*image.naturalWidth/1000)-x, height=Math.round(box[3]*image.naturalHeight/1000)-y;
-        if(width<1 || height<1) throw Error('Select an area of the document to keep.');
-        const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
-        canvas.getContext('2d').drawImage(image,x,y,width,height,0,0,width,height);
+        if(!validDocumentCorners(points)) throw Error('Select an area of the document to keep.');
+        // Allow the button to repaint before processing a large camera image.
+        await new Promise(resolve=>requestAnimationFrame(resolve));
+        const canvas=straightenDocumentImage(image,points);
         const blob=await new Promise(resolve=>canvas.toBlob(resolve,file.type,0.95));
         if(!blob) throw Error('Could not crop this image. Try again.');
         const result=new File([blob],file.name,{type:file.type,lastModified:Date.now()});validateFile(result);finish(result);
@@ -1551,6 +1564,45 @@ function cropDocumentImage(file) {
     image.onerror=()=>{URL.revokeObjectURL(url);dialog.remove();reject(Error('Could not open this image. Choose another JPG or PNG.'));};
     image.src=url;
   });
+}
+function validDocumentCorners(points) {
+  return points.every((p,i)=>{
+    const next=points[(i+1)%4],after=points[(i+2)%4];
+    return (next[0]-p[0])*(after[1]-next[1])-(next[1]-p[1])*(after[0]-next[0])>0.01;
+  });
+}
+function straightenDocumentImage(image,normalizedPoints) {
+  const points=normalizedPoints.map(([x,y])=>[x*image.naturalWidth/1000,y*image.naturalHeight/1000]);
+  const distance=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+  let width=Math.round(Math.max(distance(points[0],points[1]),distance(points[3],points[2])));
+  let height=Math.round(Math.max(distance(points[0],points[3]),distance(points[1],points[2])));
+  if(width<1 || height<1) throw Error('Select an area of the document to keep.');
+  const scale=Math.min(1,Math.sqrt(12000000/(width*height)));
+  width=Math.max(1,Math.round(width*scale));height=Math.max(1,Math.round(height*scale));
+  const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+  const context=canvas.getContext('2d');
+  const [tl,tr,br,bl]=points;
+  if(tl[1]===tr[1] && bl[1]===br[1] && tl[0]===bl[0] && tr[0]===br[0]) {
+    context.drawImage(image,tl[0],tl[1],tr[0]-tl[0],bl[1]-tl[1],0,0,width,height);return canvas;
+  }
+  // Map each output pixel through the projective transform into the original.
+  const dx1=tr[0]-br[0],dx2=bl[0]-br[0],dx3=tl[0]-tr[0]+br[0]-bl[0];
+  const dy1=tr[1]-br[1],dy2=bl[1]-br[1],dy3=tl[1]-tr[1]+br[1]-bl[1];
+  const determinant=dx1*dy2-dx2*dy1;
+  if(Math.abs(determinant)<1e-8) throw Error('Select an area of the document to keep.');
+  const g=(dx3*dy2-dx2*dy3)/determinant,h=(dx1*dy3-dx3*dy1)/determinant;
+  const a=tr[0]-tl[0]+g*tr[0],b=bl[0]-tl[0]+h*bl[0],d=tr[1]-tl[1]+g*tr[1],e=bl[1]-tl[1]+h*bl[1];
+  const source=document.createElement('canvas');source.width=image.naturalWidth;source.height=image.naturalHeight;
+  const sourceContext=source.getContext('2d',{willReadFrequently:true});sourceContext.drawImage(image,0,0);
+  const pixels=sourceContext.getImageData(0,0,source.width,source.height).data,output=context.createImageData(width,height);
+  for(let y=0;y<height;y++) for(let x=0;x<width;x++) {
+    const u=(x+.5)/width,v=(y+.5)/height,divisor=g*u+h*v+1;
+    const sx=Math.max(0,Math.min(source.width-1,(a*u+b*v+tl[0])/divisor-.5)),sy=Math.max(0,Math.min(source.height-1,(d*u+e*v+tl[1])/divisor-.5));
+    const left=Math.floor(sx),top=Math.floor(sy),right=Math.min(left+1,source.width-1),bottom=Math.min(top+1,source.height-1),fx=sx-left,fy=sy-top;
+    const i=(y*width+x)*4,p00=(top*source.width+left)*4,p10=(top*source.width+right)*4,p01=(bottom*source.width+left)*4,p11=(bottom*source.width+right)*4;
+    for(let channel=0;channel<4;channel++) output.data[i+channel]=(pixels[p00+channel]*(1-fx)+pixels[p10+channel]*fx)*(1-fy)+(pixels[p01+channel]*(1-fx)+pixels[p11+channel]*fx)*fy;
+  }
+  context.putImageData(output,0,0);return canvas;
 }
 async function pickDoc(encodedType, file) {
   if (!file || drawerBusy) return;

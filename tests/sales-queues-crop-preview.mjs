@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 const executablePath=['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{})});
 try {
-  const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const page=await browser.newPage({hasTouch:true});const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setContent('<main id="app"></main>');
   for(const file of ['styles.css','mobile.css','dashboard.css','workspace.css']) await page.addStyleTag({content:readFileSync('public/'+file,'utf8')});
   await page.addScriptTag({content:readFileSync('public/intake-rules.js','utf8')});
@@ -45,6 +45,30 @@ try {
   assert.deepEqual(size,[240,300]);
   await upload();await page.getByRole('button',{name:'Cancel',exact:true}).click();
   assert.deepEqual(await page.evaluate(()=>[cropSaved().fileName,cropSaved().mimeType]),['scan.png','image/png']);
+  const tilted=await page.evaluate(()=>{
+    const canvas=document.createElement('canvas');canvas.width=400;canvas.height=300;const ctx=canvas.getContext('2d');ctx.fillStyle='#ddd';ctx.fillRect(0,0,400,300);
+    const corners=[[80,30],[340,60],[300,260],[40,240]];ctx.fillStyle='white';ctx.beginPath();corners.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();ctx.fill();
+    corners.forEach(([x,y],i)=>{ctx.fillStyle=['#ff0000','#00ff00','#0000ff','#ffff00'][i];ctx.beginPath();ctx.arc(x,y,22,0,2*Math.PI);ctx.fill();});
+    return canvas.toDataURL('image/png').split(',')[1];
+  });
+  await page.locator('input[type=file]').first().setInputFiles({name:'tilted.png',mimeType:'image/png',buffer:Buffer.from(tilted,'base64')});
+  await page.locator('.document-crop-dialog').waitFor();
+  const stage=await page.locator('.document-crop-stage').boundingBox();
+  for(const [i,[x,y]] of [[0,[.2,.1]],[1,[.85,.2]],[2,[.75,260/300]],[3,[.1,.8]]]) {
+    const handle=await page.locator(`[data-crop-corner="${i}"]`).boundingBox();
+    await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();
+    await page.mouse.move(stage.x+x*stage.width,stage.y+y*stage.height,{steps:8});await page.mouse.up();
+  }
+  await page.screenshot({path:'deliverables/sales-queues/freeform-crop.png'});
+  await page.locator('[data-crop="save"]').click();
+  await page.waitForFunction(()=>cropSaved()?.fileName==='tilted.png');
+  const corrected=await page.evaluate(async()=>{
+    const doc=cropSaved(),bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(doc.content),c=>c.charCodeAt(0))],{type:doc.mimeType}));
+    const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;const ctx=canvas.getContext('2d');ctx.drawImage(bitmap,0,0);
+    return {size:[canvas.width,canvas.height],colors:[[.03,.03],[.97,.03],[.97,.97],[.03,.97]].map(([x,y])=>[...ctx.getImageData(Math.floor(x*canvas.width),Math.floor(y*canvas.height),1,1).data].slice(0,3))};
+  });
+  assert.deepEqual(corrected.size,[262,214]);
+  assert.deepEqual(corrected.colors,[[255,0,0],[0,255,0],[0,0,255],[255,255,0]],'All four tilted corners map to the four corners of the straightened image');
   await page.setViewportSize({width:390,height:844});await page.evaluate(()=>testView('pendingDocuments'));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:'deliverables/sales-queues/pending-documents-mobile.png',fullPage:true});
@@ -71,9 +95,19 @@ try {
   assert.equal(await page.locator('[data-crop="save"]').innerText(),'क्रॉप केलेले चित्र वापरा');
   assert.equal(await page.locator('[data-crop="original"]').innerText(),'मूळ चित्र वापरा');
   assert.equal(await page.locator('[data-crop="cancel"]').innerText(),'रद्द करा');
+  assert.equal(await page.locator('[data-crop-corner="0"]').getAttribute('aria-label'),'वरचा डावा कोपरा');
+  const mobileStage=await page.locator('.document-crop-stage').boundingBox();
+  const mobileCorner=await page.locator('[data-crop-corner="0"]').boundingBox();
+  const touch=await page.context().newCDPSession(page);
+  await touch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:mobileCorner.x+22,y:mobileCorner.y+22}]});
+  await touch.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:mobileStage.x+mobileStage.width*.12,y:mobileStage.y+mobileStage.height*.15}]});
+  await touch.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  const moved=(await page.locator('.document-crop-selection polygon').getAttribute('points')).split(' ')[0].split(',').map(Number);
+  assert.ok(Math.abs(moved[0]-120)<2 && Math.abs(moved[1]-150)<2,'Touch dragging moves the selected corner freely');
+  await touch.detach();
   await page.screenshot({path:'deliverables/sales-queues/document-crop-marathi.png',fullPage:true});
   await page.locator('[data-crop="cancel"]').click();
   assert.deepEqual(errors,[]);
-  console.log('Sales queues, column visibility, crop output dimensions, cancel, mobile layout, and Marathi queues/workflow/crop controls passed.');
+  console.log('Sales queues, column visibility, rectangle crop, freeform corner dragging, perspective correction, cancel, mobile layout, and Marathi controls passed.');
 } finally {await browser.close();}
 
