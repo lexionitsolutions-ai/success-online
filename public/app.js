@@ -1485,7 +1485,7 @@ function wizardBack(step) {
 }
 function uploadControls(encodedType, caseId = '', multiple = false) {
   const handler = `prepareDocumentSelection('${encodedType}','${caseId}',${multiple},this)`;
-  return `<span class="upload-options"><label class="file-action">${multiple ? 'Add files' : 'Upload document'}<input type="file" ${multiple ? 'multiple' : ''} accept="image/jpeg,image/png,application/pdf" onchange="${handler}"></label><label class="file-action">Scan document<input type="file" accept="image/jpeg,image/png" capture="environment" onchange="${handler}"></label></span>`;
+  return `<span class="upload-options"><label class="file-action">Upload document<input type="file" ${multiple ? 'multiple' : ''} accept="image/jpeg,image/png,application/pdf" onchange="${handler}"></label></span>`;
 }
 function validateFile(file) {
   if (!['image/jpeg','image/png','application/pdf'].includes(file.type) || !file.size || file.size > 10_000_000) throw new Error('Choose JPG, PNG, or PDF up to 10 MB');

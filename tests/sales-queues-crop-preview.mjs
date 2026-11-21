@@ -31,6 +31,9 @@ try {
   await page.evaluate(()=>testView('cases'));
   assert.equal(await page.locator('.case-table tbody tr').count(),1);
   await page.evaluate(()=>testCrop());
+  assert.equal(await page.locator('.upload-options input[type=file]').count(),1);
+  assert.equal(await page.locator('.upload-options label').innerText(),'Upload document');
+  assert.equal(await page.locator('.upload-options input[type=file]').getAttribute('capture'),null);
   const png=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=400;canvas.height=300;const ctx=canvas.getContext('2d');ctx.fillStyle='#f5e6c8';ctx.fillRect(0,0,400,300);ctx.fillStyle='#223c35';ctx.fillRect(80,60,240,180);return canvas.toDataURL('image/png').split(',')[1];});
   const upload=()=>page.locator('input[type=file]').first().setInputFiles({name:'scan.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
   await upload();

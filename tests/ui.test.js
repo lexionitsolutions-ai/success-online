@@ -406,8 +406,14 @@ test('sales document and payment queues include corrections, quoted payments and
   run("me.role='admin';view='pending'");
   assert.equal(run('pendingCaseVisible(cases[2])'),true);
   const controls=run("uploadControls('Photo')");
-  assert.match(controls,/capture="environment"/);
+  assert.equal((controls.match(/type="file"/g) || []).length,1);
+  assert.match(controls,/>Upload document</);
+  assert.doesNotMatch(controls,/Scan document|capture=/);
   assert.match(controls,/prepareDocumentSelection/);
+  const multipleControls=run("uploadControls('Photo','case',true)");
+  assert.match(multipleControls,/>Upload document</);
+  assert.match(multipleControls,/multiple/);
+  assert.equal((multipleControls.match(/type="file"/g) || []).length,1);
 });
 
 test('application statuses use the requested labels and keep rejected cases visible',()=>{
